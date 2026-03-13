@@ -27,7 +27,7 @@
 - Avoid a separate `Tag` entity in v1
 
 ### V1 navigation choice
-- Build around a simple five-screen flow: Library, Capture, Edit, Detail, Settings
+- Build around a simple three-tab shell: Library, Capture, Settings
 
 ### Build order choice
 - Build local-first, but design with CloudKit sync in mind from the start
@@ -36,3 +36,11 @@
 ### Project bootstrap choice
 - Start with a plain SwiftUI app shell and add persistence deliberately
 - Avoid over-relying on Xcode-generated Core Data scaffolding
+
+### Product direction shift
+- PaperTrail is not just a receipt vault
+- It should evolve toward a device registry + warranty/support tool
+- Device records are the primary object; receipts and warranty documents are supporting evidence
+
+### Support lookup policy
+- If a service/support number is inferred or looked up from external sources rather than extracted from proof, it must be clearly labeled as a best guess / unverified
