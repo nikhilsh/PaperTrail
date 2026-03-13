@@ -8,6 +8,13 @@ struct RecordDetailView: View {
         store.records.first(where: { $0.id == record.id }) ?? record
     }
 
+    private var warrantyStatusText: String {
+        guard let warrantyExpiryDate = currentRecord.warrantyExpiryDate else {
+            return "Unknown"
+        }
+        return warrantyExpiryDate >= .now ? "Likely active" : "Likely expired"
+    }
+
     var body: some View {
         List {
             Section {
@@ -23,16 +30,34 @@ struct RecordDetailView: View {
                 .padding(.vertical, 4)
             }
 
-            Section("Purchase") {
-                if let purchaseDate = currentRecord.purchaseDate {
-                    LabeledContent("Purchased") {
-                        Text(purchaseDate, format: .dateTime.day().month().year())
-                    }
-                }
+            Section("Warranty & Support") {
+                LabeledContent("Warranty status", value: warrantyStatusText)
 
                 if let warrantyExpiryDate = currentRecord.warrantyExpiryDate {
                     LabeledContent("Warranty until") {
                         Text(warrantyExpiryDate, format: .dateTime.day().month().year())
+                    }
+                }
+
+                if let supportInfo = currentRecord.supportInfo {
+                    LabeledContent("Service contact", value: supportInfo.phoneNumber)
+                    LabeledContent("Source", value: supportInfo.confidence == .verified ? "Verified" : "Best guess")
+
+                    if let note = supportInfo.note {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("No support contact saved yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Purchase") {
+                if let purchaseDate = currentRecord.purchaseDate {
+                    LabeledContent("Purchased") {
+                        Text(purchaseDate, format: .dateTime.day().month().year())
                     }
                 }
             }

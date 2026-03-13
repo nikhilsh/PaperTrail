@@ -18,4 +18,10 @@ final class PurchaseRecordStore {
         guard let index = records.firstIndex(where: { $0.id == record.id }) else { return }
         records[index] = record
     }
+
+    func refresh() {
+        records = records.sorted {
+            $0.updatedAt > $1.updatedAt
+        }
+    }
 }

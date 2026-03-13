@@ -7,6 +7,7 @@ struct PurchaseRecord: Identifiable, Hashable {
     var purchaseDate: Date?
     var warrantyExpiryDate: Date?
     var notes: String?
+    var supportInfo: SupportInfo?
     var attachments: [Attachment]
     var createdAt: Date
     var updatedAt: Date
@@ -18,6 +19,7 @@ struct PurchaseRecord: Identifiable, Hashable {
         purchaseDate: Date? = nil,
         warrantyExpiryDate: Date? = nil,
         notes: String? = nil,
+        supportInfo: SupportInfo? = nil,
         attachments: [Attachment] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -28,6 +30,7 @@ struct PurchaseRecord: Identifiable, Hashable {
         self.purchaseDate = purchaseDate
         self.warrantyExpiryDate = warrantyExpiryDate
         self.notes = notes
+        self.supportInfo = supportInfo
         self.attachments = attachments
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -41,6 +44,12 @@ extension PurchaseRecord {
         purchaseDate: Calendar.current.date(byAdding: .month, value: -2, to: .now),
         warrantyExpiryDate: Calendar.current.date(byAdding: .year, value: 2, to: .now),
         notes: "Receipt captured in-store after purchase.",
+        supportInfo: SupportInfo(
+            providerName: "Dyson Support",
+            phoneNumber: "+65 7000 435754",
+            confidence: .estimated,
+            note: "Estimated from manufacturer support lookup, not verified from receipt."
+        ),
         attachments: [.preview]
     )
 }

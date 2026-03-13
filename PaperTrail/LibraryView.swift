@@ -52,6 +52,9 @@ struct LibraryView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Library")
         .searchable(text: $searchText, prompt: "Search products, stores, notes")
+        .refreshable {
+            store.refresh()
+        }
     }
 }
 
