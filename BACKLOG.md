@@ -6,7 +6,11 @@
 - [x] Define domain model draft
 - [x] Define screen flow draft
 - [x] Define implementation plan draft
-- [ ] Add initial Swift package / Xcode project structure notes
+- [x] Add Xcode setup notes
+- [x] Add project structure notes
+- [x] Add Milestone 1 checklist
+- [ ] Create local Xcode project
+- [ ] Add initial Swift code skeleton
 - [ ] Decide attachment storage strategy in more detail
 - [ ] Decide Core Data entity layout in more detail
 - [ ] Decide search indexing approach

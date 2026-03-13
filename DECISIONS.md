@@ -32,3 +32,7 @@
 ### Build order choice
 - Build local-first, but design with CloudKit sync in mind from the start
 - Implement sync after local model, persistence, and retrieval flow are stable
+
+### Project bootstrap choice
+- Start with a plain SwiftUI app shell and add persistence deliberately
+- Avoid over-relying on Xcode-generated Core Data scaffolding
