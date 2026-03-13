@@ -5,13 +5,20 @@ struct RecordDetailView: View {
 
     var body: some View {
         List {
-            Section("Purchase") {
-                LabeledContent("Product", value: record.productName)
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(record.productName)
+                        .font(.title3.bold())
 
-                if let merchantName = record.merchantName {
-                    LabeledContent("Store", value: merchantName)
+                    if let merchantName = record.merchantName {
+                        Label(merchantName, systemImage: "storefront")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.vertical, 4)
+            }
 
+            Section("Purchase") {
                 if let purchaseDate = record.purchaseDate {
                     LabeledContent("Purchased") {
                         Text(purchaseDate, format: .dateTime.day().month().year())
@@ -33,7 +40,7 @@ struct RecordDetailView: View {
 
             Section("Attachments") {
                 ForEach(record.attachments) { attachment in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(attachment.type.rawValue.capitalized)
                             .font(.headline)
                         Text(attachment.localFilename)
@@ -49,7 +56,7 @@ struct RecordDetailView: View {
                 }
             }
         }
-        .navigationTitle(record.productName)
+        .navigationTitle("Record")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

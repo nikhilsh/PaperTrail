@@ -14,6 +14,14 @@ struct AppShellView: View {
             .tag(AppTab.library)
 
             NavigationStack {
+                CaptureView()
+            }
+            .tabItem {
+                Label("Capture", systemImage: "plus.viewfinder")
+            }
+            .tag(AppTab.capture)
+
+            NavigationStack {
                 SettingsView()
             }
             .tabItem {
@@ -21,11 +29,13 @@ struct AppShellView: View {
             }
             .tag(AppTab.settings)
         }
+        .tint(.blue)
     }
 }
 
 private enum AppTab {
     case library
+    case capture
     case settings
 }
 
