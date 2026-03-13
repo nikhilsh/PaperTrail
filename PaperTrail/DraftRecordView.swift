@@ -5,16 +5,35 @@ struct DraftRecordView: View {
     @Environment(\.dismiss) private var dismiss
 
     let seedType: AttachmentType
+    let seededAttachment: Attachment?
+    let seededOCR: OCRExtractionResult?
 
-    @State private var productName = ""
-    @State private var merchantName = ""
-    @State private var notes = ""
+    @State private var productName: String
+    @State private var merchantName: String
+    @State private var notes: String
     @State private var purchaseDate = Date()
     @State private var includeWarranty = false
     @State private var warrantyExpiryDate = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
 
+    init(seedType: AttachmentType, seededAttachment: Attachment? = nil, seededOCR: OCRExtractionResult? = nil) {
+        self.seedType = seedType
+        self.seededAttachment = seededAttachment
+        self.seededOCR = seededOCR
+        _productName = State(initialValue: seededOCR?.suggestedProductName ?? "")
+        _merchantName = State(initialValue: seededOCR?.suggestedMerchantName ?? "")
+        _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
+    }
+
     var body: some View {
         Form {
+            if let seededOCR, seededOCR.recognizedText.isEmpty == false {
+                Section("OCR draft") {
+                    Text(seededOCR.recognizedText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Details") {
                 TextField("Product name", text: $productName)
                 TextField("Store", text: $merchantName)
@@ -45,7 +64,7 @@ struct DraftRecordView: View {
     }
 
     private func saveRecord() {
-        let attachment = Attachment(type: seedType, localFilename: "placeholder-\(seedType.rawValue).jpg")
+        let attachment = seededAttachment ?? Attachment(type: seedType, localFilename: "placeholder-\(seedType.rawValue).jpg")
         let record = PurchaseRecord(
             productName: productName,
             merchantName: merchantName.isEmpty ? nil : merchantName,
@@ -62,7 +81,7 @@ struct DraftRecordView: View {
 
 #Preview {
     NavigationStack {
-        DraftRecordView(seedType: .receipt)
+        DraftRecordView(seedType: .receipt, seededAttachment: .preview, seededOCR: .empty)
             .environment(PurchaseRecordStore())
     }
 }

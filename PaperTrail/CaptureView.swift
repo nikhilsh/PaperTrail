@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct CaptureView: View {
+    @State private var draftTarget: DraftTarget?
+    private let scanningService = PlaceholderScanningService()
+    private let ocrService = VisionOCRService()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -11,8 +15,8 @@ struct CaptureView: View {
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 12) {
-                    NavigationLink {
-                        DraftRecordView(seedType: .receipt)
+                    Button {
+                        Task { await startDraft(for: .receipt) }
                     } label: {
                         CaptureActionRow(
                             title: "Scan receipt",
@@ -22,8 +26,8 @@ struct CaptureView: View {
                     }
                     .buttonStyle(.plain)
 
-                    NavigationLink {
-                        DraftRecordView(seedType: .warranty)
+                    Button {
+                        Task { await startDraft(for: .warranty) }
                     } label: {
                         CaptureActionRow(
                             title: "Add warranty card",
@@ -33,8 +37,8 @@ struct CaptureView: View {
                     }
                     .buttonStyle(.plain)
 
-                    NavigationLink {
-                        DraftRecordView(seedType: .other)
+                    Button {
+                        Task { await startDraft(for: .other) }
                     } label: {
                         CaptureActionRow(
                             title: "Import photo",
@@ -54,7 +58,31 @@ struct CaptureView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Capture")
+        .navigationDestination(item: $draftTarget) { target in
+            DraftRecordView(
+                seedType: target.type,
+                seededAttachment: target.attachment,
+                seededOCR: target.ocr
+            )
+        }
     }
+
+    private func startDraft(for type: AttachmentType) async {
+        do {
+            let attachment = try await scanningService.beginCapture(for: type)
+            let ocr = try await ocrService.extract(from: attachment)
+            draftTarget = DraftTarget(type: type, attachment: attachment, ocr: ocr)
+        } catch {
+            draftTarget = DraftTarget(type: type, attachment: nil, ocr: nil)
+        }
+    }
+}
+
+private struct DraftTarget: Identifiable, Hashable {
+    let id = UUID()
+    let type: AttachmentType
+    let attachment: Attachment?
+    let ocr: OCRExtractionResult?
 }
 
 private struct CaptureActionRow: View {
