@@ -11,23 +11,38 @@ struct CaptureView: View {
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 12) {
-                    CaptureActionRow(
-                        title: "Scan receipt",
-                        subtitle: "For printed receipts and in-store purchases.",
-                        systemImage: "doc.viewfinder"
-                    )
+                    NavigationLink {
+                        DraftRecordView(seedType: .receipt)
+                    } label: {
+                        CaptureActionRow(
+                            title: "Scan receipt",
+                            subtitle: "For printed receipts and in-store purchases.",
+                            systemImage: "doc.viewfinder"
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                    CaptureActionRow(
-                        title: "Add warranty card",
-                        subtitle: "Attach warranty proof to the product record.",
-                        systemImage: "shield.lefthalf.filled"
-                    )
+                    NavigationLink {
+                        DraftRecordView(seedType: .warranty)
+                    } label: {
+                        CaptureActionRow(
+                            title: "Add warranty card",
+                            subtitle: "Attach warranty proof to the product record.",
+                            systemImage: "shield.lefthalf.filled"
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                    CaptureActionRow(
-                        title: "Import photo",
-                        subtitle: "Use an existing image from your library.",
-                        systemImage: "photo.on.rectangle"
-                    )
+                    NavigationLink {
+                        DraftRecordView(seedType: .other)
+                    } label: {
+                        CaptureActionRow(
+                            title: "Import photo",
+                            subtitle: "Use an existing image from your library.",
+                            systemImage: "photo.on.rectangle"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Text("PaperTrail will extract text, let you confirm the key fields, and save everything as a searchable record.")
@@ -77,5 +92,6 @@ private struct CaptureActionRow: View {
 #Preview {
     NavigationStack {
         CaptureView()
+            .environmentObject(PurchaseRecordStore())
     }
 }

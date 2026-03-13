@@ -1,12 +1,12 @@
 import SwiftUI
 
 struct LibraryView: View {
+    @EnvironmentObject private var store: PurchaseRecordStore
     @State private var searchText = ""
-    @State private var records: [PurchaseRecord] = [.preview]
 
     private var filteredRecords: [PurchaseRecord] {
-        guard searchText.isEmpty == false else { return records }
-        return records.filter {
+        guard searchText.isEmpty == false else { return store.records }
+        return store.records.filter {
             $0.productName.localizedCaseInsensitiveContains(searchText)
             || ($0.merchantName?.localizedCaseInsensitiveContains(searchText) ?? false)
             || ($0.notes?.localizedCaseInsensitiveContains(searchText) ?? false)
@@ -15,7 +15,7 @@ struct LibraryView: View {
 
     private var expiringSoonCount: Int {
         let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
-        return records.filter {
+        return store.records.filter {
             guard let warrantyExpiryDate = $0.warrantyExpiryDate else { return false }
             return warrantyExpiryDate <= cutoff
         }.count
@@ -24,7 +24,7 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                LibrarySummaryRow(totalCount: records.count, expiringSoonCount: expiringSoonCount)
+                LibrarySummaryRow(totalCount: store.records.count, expiringSoonCount: expiringSoonCount)
 
                 if filteredRecords.isEmpty {
                     ContentUnavailableView(
@@ -166,5 +166,6 @@ private struct AttachmentBadge: View {
 #Preview {
     NavigationStack {
         LibraryView()
+            .environmentObject(PurchaseRecordStore())
     }
 }

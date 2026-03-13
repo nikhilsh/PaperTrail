@@ -1,16 +1,21 @@
 import SwiftUI
 
 struct RecordDetailView: View {
+    @EnvironmentObject private var store: PurchaseRecordStore
     let record: PurchaseRecord
+
+    private var currentRecord: PurchaseRecord {
+        store.records.first(where: { $0.id == record.id }) ?? record
+    }
 
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(record.productName)
+                    Text(currentRecord.productName)
                         .font(.title3.bold())
 
-                    if let merchantName = record.merchantName {
+                    if let merchantName = currentRecord.merchantName {
                         Label(merchantName, systemImage: "storefront")
                             .foregroundStyle(.secondary)
                     }
@@ -19,27 +24,27 @@ struct RecordDetailView: View {
             }
 
             Section("Purchase") {
-                if let purchaseDate = record.purchaseDate {
+                if let purchaseDate = currentRecord.purchaseDate {
                     LabeledContent("Purchased") {
                         Text(purchaseDate, format: .dateTime.day().month().year())
                     }
                 }
 
-                if let warrantyExpiryDate = record.warrantyExpiryDate {
+                if let warrantyExpiryDate = currentRecord.warrantyExpiryDate {
                     LabeledContent("Warranty until") {
                         Text(warrantyExpiryDate, format: .dateTime.day().month().year())
                     }
                 }
             }
 
-            if let notes = record.notes {
+            if let notes = currentRecord.notes {
                 Section("Notes") {
                     Text(notes)
                 }
             }
 
             Section("Attachments") {
-                ForEach(record.attachments) { attachment in
+                ForEach(currentRecord.attachments) { attachment in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(attachment.type.rawValue.capitalized)
                             .font(.headline)
@@ -61,7 +66,7 @@ struct RecordDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    EditRecordView(record: record)
+                    EditRecordView(record: currentRecord)
                 } label: {
                     Text("Edit")
                 }
@@ -73,5 +78,6 @@ struct RecordDetailView: View {
 #Preview {
     NavigationStack {
         RecordDetailView(record: .preview)
+            .environmentObject(PurchaseRecordStore())
     }
 }
