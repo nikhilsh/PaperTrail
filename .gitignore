@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# Build products / local IDE state
+DerivedData/
+build/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+
+# SwiftPM
+.build/
+Package.resolved
+
+# Fastlane / screenshots / test output
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Linux/editor noise
+*~
+*.swp
+*.swo
+.tmp/
