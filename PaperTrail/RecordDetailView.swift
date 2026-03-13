@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RecordDetailView: View {
-    @EnvironmentObject private var store: PurchaseRecordStore
+    @Environment(PurchaseRecordStore.self) private var store
     let record: PurchaseRecord
 
     private var currentRecord: PurchaseRecord {
@@ -78,6 +78,6 @@ struct RecordDetailView: View {
 #Preview {
     NavigationStack {
         RecordDetailView(record: .preview)
-            .environmentObject(PurchaseRecordStore())
+            .environment(PurchaseRecordStore())
     }
 }

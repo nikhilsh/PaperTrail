@@ -92,6 +92,6 @@ private struct CaptureActionRow: View {
 #Preview {
     NavigationStack {
         CaptureView()
-            .environmentObject(PurchaseRecordStore())
+            .environment(PurchaseRecordStore())
     }
 }

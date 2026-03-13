@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DraftRecordView: View {
-    @EnvironmentObject private var store: PurchaseRecordStore
+    @Environment(PurchaseRecordStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     let seedType: AttachmentType
@@ -63,6 +63,6 @@ struct DraftRecordView: View {
 #Preview {
     NavigationStack {
         DraftRecordView(seedType: .receipt)
-            .environmentObject(PurchaseRecordStore())
+            .environment(PurchaseRecordStore())
     }
 }

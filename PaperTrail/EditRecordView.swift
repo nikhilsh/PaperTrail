@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct EditRecordView: View {
-    @EnvironmentObject private var store: PurchaseRecordStore
+    @Environment(PurchaseRecordStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     let recordID: UUID
@@ -56,6 +56,6 @@ struct EditRecordView: View {
 #Preview {
     NavigationStack {
         EditRecordView(record: .preview)
-            .environmentObject(PurchaseRecordStore())
+            .environment(PurchaseRecordStore())
     }
 }

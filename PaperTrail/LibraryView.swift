@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
-    @EnvironmentObject private var store: PurchaseRecordStore
+    @Environment(PurchaseRecordStore.self) private var store
     @State private var searchText = ""
 
     private var filteredRecords: [PurchaseRecord] {
@@ -166,6 +166,6 @@ private struct AttachmentBadge: View {
 #Preview {
     NavigationStack {
         LibraryView()
-            .environmentObject(PurchaseRecordStore())
+            .environment(PurchaseRecordStore())
     }
 }

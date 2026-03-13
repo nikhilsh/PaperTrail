@@ -1,12 +1,13 @@
 import Foundation
-import SwiftUI
+import Observation
 
+@Observable
 @MainActor
-final class PurchaseRecordStore: ObservableObject {
-    @Published private(set) var records: [PurchaseRecord]
+final class PurchaseRecordStore {
+    private(set) var records: [PurchaseRecord]
 
-    init(records: [PurchaseRecord] = [.preview]) {
-        self.records = records
+    init(records: [PurchaseRecord]? = nil) {
+        self.records = records ?? [.preview]
     }
 
     func add(_ record: PurchaseRecord) {
