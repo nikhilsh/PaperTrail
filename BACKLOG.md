@@ -1,18 +1,22 @@
 # Backlog
 
 ## Now
-- [ ] Create real project repo
+- [x] Create real project repo
+- [x] Add initial project docs
+- [x] Define domain model draft
+- [x] Define screen flow draft
+- [x] Define implementation plan draft
 - [ ] Add initial Swift package / Xcode project structure notes
-- [ ] Define domain model in more detail
-- [ ] Decide attachment storage strategy
-- [ ] Decide Core Data entity layout
+- [ ] Decide attachment storage strategy in more detail
+- [ ] Decide Core Data entity layout in more detail
 - [ ] Decide search indexing approach
 
 ## Soon
-- [ ] Sketch screen flows
+- [ ] Sketch screen flows visually
 - [ ] Define OCR extraction heuristics
 - [ ] Define manual correction UX
 - [ ] Plan CloudKit sync/error handling
+- [ ] Decide app bootstrap/navigation composition
 
 ## Later
 - [ ] Warranty expiry reminders
