@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   build-adhoc:
@@ -128,7 +128,7 @@ jobs:
             ota/index.html
 
       - name: Publish rolling release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: adhoc-latest
