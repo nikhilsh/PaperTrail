@@ -30,3 +30,4 @@ Build a disciplined v1 that proves the core loop:
 - `BACKLOG.md` — near-term tasks
 - `DECISIONS.md` — important decisions and rationale
 - `OCR_NOTES.md` — OCR direction and constraints
+- `OTA_DISTRIBUTION.md` — GitHub Actions + Ad Hoc OTA setup notes

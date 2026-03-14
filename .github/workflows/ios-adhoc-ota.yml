@@ -1,0 +1,140 @@
+name: Build Ad Hoc IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-adhoc:
+    runs-on: macos-15
+    env:
+      APP_NAME: PaperTrail
+      SCHEME: PaperTrail
+      PROJECT_PATH: PaperTrail.xcodeproj
+      CONFIGURATION: Release
+      EXPORT_METHOD: ad-hoc
+      BUNDLE_ID: nikhilsh.PaperTrail
+      TEAM_ID: 635A559UST
+      ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+      KEYCHAIN_PATH: ${{ runner.temp }}/build.keychain-db
+      PROVISIONING_PROFILE_PATH: ${{ runner.temp }}/PaperTrail.mobileprovision
+      CERT_PATH: ${{ runner.temp }}/distribution.p12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Decode signing assets
+        env:
+          IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          echo "$IOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          echo "$IOS_PROFILE_BASE64" | base64 --decode > "$PROVISIONING_PROFILE_PATH"
+
+      - name: Install provisioning profile
+        run: |
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROVISIONING_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/PaperTrail.mobileprovision"
+
+      - name: Create temporary keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+        run: |
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Generate export options
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>destination</key>
+            <string>export</string>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>nikhilsh.PaperTrail</key>
+              <string>PaperTrail</string>
+            </dict>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string>635A559UST</string>
+            <key>thinning</key>
+            <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Show build settings
+        run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings
+
+      - name: Archive app
+        run: |
+          mkdir -p build
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -archivePath "$ARCHIVE_PATH" \
+            -destination 'generic/platform=iOS' \
+            clean archive
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Prepare OTA site assets
+        env:
+          RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/adhoc-latest
+        run: |
+          mkdir -p ota
+          cp "$EXPORT_PATH/PaperTrail.ipa" ota/PaperTrail.ipa
+          export IPA_URL="$RELEASE_BASE_URL/PaperTrail.ipa"
+          envsubst < .github/ota/manifest.plist.template > ota/manifest.plist
+          envsubst < .github/ota/index.html.template > ota/index.html
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: papertrail-adhoc-build
+          path: |
+            build/export/PaperTrail.ipa
+            ota/manifest.plist
+            ota/index.html
+
+      - name: Publish rolling release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: adhoc-latest
+          name: PaperTrail Ad Hoc Latest
+          prerelease: true
+          files: |
+            build/export/PaperTrail.ipa
+            ota/manifest.plist
+            ota/index.html
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
