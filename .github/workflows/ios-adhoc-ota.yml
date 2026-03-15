@@ -41,7 +41,12 @@ jobs:
         run: |
           PROVISIONING_PROFILE_PATH="$RUNNER_TEMP/PaperTrail.mobileprovision"
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$PROVISIONING_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/PaperTrail.mobileprovision"
+          security cms -D -i "$PROVISIONING_PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print Name' "$RUNNER_TEMP/profile.plist")
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          cp "$PROVISIONING_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
       - name: Create temporary keychain
         env:
@@ -59,7 +64,7 @@ jobs:
 
       - name: Generate export options
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -71,7 +76,7 @@ jobs:
             <key>provisioningProfiles</key>
             <dict>
               <key>nikhilsh.PaperTrail</key>
-              <string>PaperTrail</string>
+              <string>${PROFILE_NAME}</string>
             </dict>
             <key>signingCertificate</key>
             <string>Apple Distribution</string>
@@ -99,6 +104,12 @@ jobs:
             -configuration "$CONFIGURATION" \
             -archivePath "$ARCHIVE_PATH" \
             -destination 'generic/platform=iOS' \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            IPHONEOS_DEPLOYMENT_TARGET=18.0 \
             clean archive
 
       - name: Export IPA
