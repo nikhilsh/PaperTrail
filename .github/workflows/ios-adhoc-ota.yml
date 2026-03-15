@@ -92,6 +92,11 @@ jobs:
           </plist>
           PLIST
 
+      - name: Show signing identities
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
       - name: Show build settings
         run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings
 
