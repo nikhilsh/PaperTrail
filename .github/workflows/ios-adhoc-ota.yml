@@ -85,7 +85,7 @@ jobs:
             <key>stripSwiftSymbols</key>
             <true/>
             <key>teamID</key>
-            <string>635A559UST</string>
+            <string>${TEAM_ID}</string>
             <key>thinning</key>
             <string>&lt;none&gt;</string>
           </dict>
