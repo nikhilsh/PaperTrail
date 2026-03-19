@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 
 /// Manages on-disk image storage in the app's documents directory.
+/// Acts as a local cache — the source of truth for sync is imageData on Attachment.
 struct ImageStorageManager {
     private static var imagesDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -10,18 +11,24 @@ struct ImageStorageManager {
         return dir
     }
 
-    /// Save an image to disk and return the filename.
+    /// Save an image to disk with an auto-generated filename. Returns the filename.
     @discardableResult
     static func save(_ image: UIImage, quality: CGFloat = 0.85) -> String? {
-        guard let data = image.jpegData(compressionQuality: quality) else { return nil }
         let filename = UUID().uuidString + ".jpg"
+        return save(image, withFilename: filename, quality: quality) ? filename : nil
+    }
+
+    /// Save an image to disk with a specific filename. Returns success.
+    @discardableResult
+    static func save(_ image: UIImage, withFilename filename: String, quality: CGFloat = 0.85) -> Bool {
+        guard let data = image.jpegData(compressionQuality: quality) else { return false }
         let url = imagesDirectory.appendingPathComponent(filename)
         do {
             try data.write(to: url, options: .atomic)
-            return filename
+            return true
         } catch {
             print("ImageStorageManager: failed to write \(filename): \(error)")
-            return nil
+            return false
         }
     }
 
@@ -41,5 +48,10 @@ struct ImageStorageManager {
     /// Full file URL for a filename.
     static func url(for filename: String) -> URL {
         imagesDirectory.appendingPathComponent(filename)
+    }
+
+    /// Get JPEG data for an image at the given quality.
+    static func jpegData(for image: UIImage, quality: CGFloat = 0.85) -> Data? {
+        image.jpegData(compressionQuality: quality)
     }
 }

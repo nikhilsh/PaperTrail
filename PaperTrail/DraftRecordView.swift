@@ -53,7 +53,7 @@ struct DraftRecordView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(seededAttachments) { attachment in
-                                if let image = ImageStorageManager.load(attachment.localFilename) {
+                                if let image = attachment.image {
                                     Image(uiImage: image)
                                         .resizable()
                                         .scaledToFill()

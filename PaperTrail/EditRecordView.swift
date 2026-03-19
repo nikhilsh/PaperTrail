@@ -83,7 +83,7 @@ struct EditRecordView: View {
                 } else {
                     ForEach(record.attachments) { attachment in
                         HStack {
-                            if let image = ImageStorageManager.load(attachment.localFilename) {
+                            if let image = attachment.image {
                                 Image(uiImage: image)
                                     .resizable()
                                     .scaledToFill()

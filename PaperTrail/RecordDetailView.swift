@@ -202,7 +202,7 @@ private struct AttachmentThumbnail: View {
 
     var body: some View {
         Group {
-            if let image = ImageStorageManager.load(attachment.localFilename) {
+            if let image = attachment.image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()

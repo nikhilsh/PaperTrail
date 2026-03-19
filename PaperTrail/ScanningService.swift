@@ -16,9 +16,14 @@ struct ScanningService {
         var bestProduct: String?
         var bestMerchant: String?
         var bestDate: Date?
+        var bestAmount: Double?
+        var bestCurrency: String?
 
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
+
+            // Store image data for CloudKit sync
+            let imageData = ImageStorageManager.jpegData(for: image, quality: 0.85)
 
             var ocrResult = OCRExtractionResult.empty
             do {
@@ -30,7 +35,8 @@ struct ScanningService {
             let attachment = Attachment(
                 type: type,
                 localFilename: filename,
-                ocrText: ocrResult.recognizedText.isEmpty ? nil : ocrResult.recognizedText
+                ocrText: ocrResult.recognizedText.isEmpty ? nil : ocrResult.recognizedText,
+                imageData: imageData
             )
             attachments.append(attachment)
 
@@ -40,6 +46,8 @@ struct ScanningService {
             if bestProduct == nil { bestProduct = ocrResult.suggestedProductName }
             if bestMerchant == nil { bestMerchant = ocrResult.suggestedMerchantName }
             if bestDate == nil { bestDate = ocrResult.suggestedPurchaseDate }
+            if bestAmount == nil { bestAmount = ocrResult.suggestedAmount }
+            if bestCurrency == nil { bestCurrency = ocrResult.suggestedCurrency }
         }
 
         let combined = OCRExtractionResult(
@@ -47,6 +55,8 @@ struct ScanningService {
             suggestedProductName: bestProduct,
             suggestedMerchantName: bestMerchant,
             suggestedPurchaseDate: bestDate,
+            suggestedAmount: bestAmount,
+            suggestedCurrency: bestCurrency,
             suggestedNotes: allText.isEmpty ? nil : "OCR draft extracted from scanned document."
         )
 
