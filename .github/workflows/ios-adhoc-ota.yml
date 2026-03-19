@@ -16,7 +16,7 @@ jobs:
       CONFIGURATION: Release
       EXPORT_METHOD: ad-hoc
       BUNDLE_ID: nikhilsh.PaperTrail
-      TEAM_ID: 635A559UST
+      TEAM_ID: EHW7L3679R
       ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
     steps:

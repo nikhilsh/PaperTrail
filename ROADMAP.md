@@ -80,6 +80,20 @@ The research concluded that CloudKit sharing via `NSPersistentCloudKitContainer`
 **Risk:** Two persistence systems add maintenance overhead
 **Prerequisite:** Sign in with Apple (done), iCloud entitlements (done)
 
+### iCloud Sync Status UI
+- Add a `CloudSyncMonitor` for PaperTrail so users can see when records are uploading/downloading with iCloud
+- SwiftData does not expose sync progress directly, but `NSPersistentCloudKitContainer.eventChangedNotification` can be observed from the underlying Core Data / CloudKit stack
+- Planned states:
+  - idle
+  - syncing("Uploading to iCloud")
+  - syncing("Downloading from iCloud")
+  - success
+  - failed(error)
+- Surface this as a small status pill/banner in Settings and optionally after save/import actions
+- Nice follow-up: keep last sync timestamp + last error for debugging user reports
+- Reference: AzamSharp article on SwiftData iCloud sync status (2026-03-16)
+- Complexity: 1-2 days
+
 ### Spotlight Search Integration
 - Index records via CSSearchableItem
 - Search PaperTrail records from iOS home screen
