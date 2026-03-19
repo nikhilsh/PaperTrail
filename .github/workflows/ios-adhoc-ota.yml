@@ -142,6 +142,8 @@ jobs:
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           export IPA_URL="$RELEASE_BASE_URL/PaperTrail.ipa"
           export MANIFEST_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/manifest.plist"
+          export BUILD_UPLOAD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          export BUILD_COMMIT_SHA="${GITHUB_SHA}"
           envsubst < .github/ota/manifest.plist.template > ota/manifest.plist
           envsubst < .github/ota/index.html.template > ota/index.html
 
