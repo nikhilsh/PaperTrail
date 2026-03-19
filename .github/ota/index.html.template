@@ -15,7 +15,7 @@
     <div class="card">
       <h1>Install PaperTrail</h1>
       <p>This build is signed for Ad Hoc distribution. The iPhone or iPad must already be registered in the provisioning profile.</p>
-      <p><a class="button" href="itms-services://?action=download-manifest&amp;url=https://github.com/${{ github.repository }}/releases/download/adhoc-latest/manifest.plist">Install on iPhone or iPad</a></p>
+      <p><a class="button" href="itms-services://?action=download-manifest&amp;url=${MANIFEST_URL}">Install on iPhone or iPad</a></p>
       <p>If install fails, check that:</p>
       <ul>
         <li>the device UDID is in the Ad Hoc profile</li>

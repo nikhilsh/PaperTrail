@@ -1,5 +1,10 @@
 name: Build Ad Hoc IPA
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 on:
   workflow_dispatch:
   push:
@@ -130,7 +135,9 @@ jobs:
         run: |
           mkdir -p ota
           cp "$EXPORT_PATH/PaperTrail.ipa" ota/PaperTrail.ipa
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
           export IPA_URL="$RELEASE_BASE_URL/PaperTrail.ipa"
+          export MANIFEST_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/manifest.plist"
           envsubst < .github/ota/manifest.plist.template > ota/manifest.plist
           envsubst < .github/ota/index.html.template > ota/index.html
 
@@ -151,15 +158,21 @@ jobs:
           if gh release view adhoc-latest >/dev/null 2>&1; then
             gh release upload adhoc-latest \
               build/export/PaperTrail.ipa \
-              ota/manifest.plist \
-              ota/index.html \
               --clobber
           else
             gh release create adhoc-latest \
               build/export/PaperTrail.ipa \
-              ota/manifest.plist \
-              ota/index.html \
               --title "PaperTrail Ad Hoc Latest" \
               --notes "Latest Ad Hoc build for PaperTrail." \
               --prerelease
           fi
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ota
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/master'
+        uses: actions/deploy-pages@v4
