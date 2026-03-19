@@ -24,7 +24,7 @@
       </ul>
       <p>Direct IPA URL: <code>${IPA_URL}</code></p>
       <p>Build uploaded: <strong>${BUILD_UPLOAD_TIME}</strong></p>
-      <p>Commit: <code>${BUILD_COMMIT_SHA}</code></p>
+      <p>What changed in this build: <strong>${BUILD_CHANGELOG}</strong></p>
     </div>
   </body>
 </html>
