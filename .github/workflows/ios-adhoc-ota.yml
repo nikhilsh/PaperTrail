@@ -145,14 +145,21 @@ jobs:
 
       - name: Publish rolling release
         if: github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: adhoc-latest
-          name: PaperTrail Ad Hoc Latest
-          prerelease: true
-          files: |
-            build/export/PaperTrail.ipa
-            ota/manifest.plist
-            ota/index.html
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+        run: |
+          if gh release view adhoc-latest >/dev/null 2>&1; then
+            gh release upload adhoc-latest \
+              build/export/PaperTrail.ipa \
+              ota/manifest.plist \
+              ota/index.html \
+              --clobber
+          else
+            gh release create adhoc-latest \
+              build/export/PaperTrail.ipa \
+              ota/manifest.plist \
+              ota/index.html \
+              --title "PaperTrail Ad Hoc Latest" \
+              --notes "Latest Ad Hoc build for PaperTrail." \
+              --prerelease
+          fi
