@@ -155,4 +155,4 @@ jobs:
             ota/manifest.plist
             ota/index.html
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
