@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
     @Environment(AuthenticationManager.self) private var authManager
+    @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -72,7 +73,14 @@ struct SettingsView: View {
             // Sync
             Section("Sync") {
                 LabeledContent("iCloud", value: "Automatic")
+                LabeledContent("Backend", value: activeSyncBackend)
                 LabeledContent("Status", value: authManager.isSignedIn ? "Active" : "Sign in required")
+
+                if activeSyncBackend == "Local fallback" {
+                    Text("CloudKit failed during startup, so PaperTrail is currently using local-only storage on this device.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             // Storage

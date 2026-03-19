@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+private enum SyncBackendState {
+    static let defaultsKey = "activeSyncBackend"
+    static let cloudKit = "CloudKit"
+    static let localFallback = "Local fallback"
+}
+
 @main
 struct PaperTrailApp: App {
     @State private var authManager = AuthenticationManager()
@@ -16,8 +22,10 @@ struct PaperTrailApp: App {
 
         do {
             modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
+            UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
         } catch {
             print("⚠️ CloudKit ModelContainer failed: \(error). Falling back to local-only storage.")
+            UserDefaults.standard.set(SyncBackendState.localFallback, forKey: SyncBackendState.defaultsKey)
 
             let localConfig = ModelConfiguration(
                 "PaperTrail",
