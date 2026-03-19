@@ -41,10 +41,14 @@ struct SettingsView: View {
                                 .font(.title2)
                                 .foregroundStyle(.blue)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(authManager.userName ?? "Apple User")
+                                Text(authManager.displayName)
                                     .font(.headline)
-                                if let email = authManager.userEmail {
+                                if let email = authManager.userEmail, !email.isEmpty {
                                     Text(email)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if let userID = authManager.userID {
+                                    Text("Apple ID linked · \(userID.prefix(8))…")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

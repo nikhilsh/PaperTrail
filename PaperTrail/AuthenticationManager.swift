@@ -1,6 +1,13 @@
 import Foundation
 import AuthenticationServices
 
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 /// Manages Sign in with Apple authentication state.
 @Observable
 @MainActor
@@ -9,6 +16,17 @@ final class AuthenticationManager {
     var userID: String?
     var userName: String?
     var userEmail: String?
+
+    var displayName: String {
+        if let userName = userName?.nilIfBlank {
+            return userName
+        }
+        if let userEmail = userEmail?.nilIfBlank {
+            let prefix = userEmail.split(separator: "@").first.map(String.init) ?? userEmail
+            return prefix.replacingOccurrences(of: ".", with: " ").capitalized
+        }
+        return "Apple User"
+    }
 
     private let userIDKey = "appleUserID"
     private let userNameKey = "appleUserName"
@@ -30,19 +48,22 @@ final class AuthenticationManager {
             userID = credential.user
             UserDefaults.standard.set(credential.user, forKey: userIDKey)
 
-            // Name and email are only provided on first sign-in
-            if let fullName = credential.fullName {
-                let name = [fullName.givenName, fullName.familyName]
-                    .compactMap { $0 }
-                    .joined(separator: " ")
-                if !name.isEmpty {
-                    userName = name
-                    UserDefaults.standard.set(name, forKey: userNameKey)
-                }
+            let resolvedName = [credential.fullName?.givenName, credential.fullName?.familyName]
+                .compactMap { $0?.nilIfBlank }
+                .joined(separator: " ")
+                .nilIfBlank
+                ?? userName?.nilIfBlank
+                ?? userEmail?.nilIfBlank?.split(separator: "@").first.map(String.init)?.replacingOccurrences(of: ".", with: " ").capitalized
+
+            if let resolvedName {
+                userName = resolvedName
+                UserDefaults.standard.set(resolvedName, forKey: userNameKey)
             }
-            if let email = credential.email {
-                userEmail = email
-                UserDefaults.standard.set(email, forKey: userEmailKey)
+
+            let resolvedEmail = credential.email?.nilIfBlank ?? userEmail?.nilIfBlank
+            if let resolvedEmail {
+                userEmail = resolvedEmail
+                UserDefaults.standard.set(resolvedEmail, forKey: userEmailKey)
             }
 
             isSignedIn = true
