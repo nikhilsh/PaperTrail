@@ -8,15 +8,28 @@ struct PaperTrailApp: App {
 
     init() {
         let schema = Schema([PurchaseRecord.self, Attachment.self])
-        let config = ModelConfiguration(
+        let cloudConfig = ModelConfiguration(
             "PaperTrail",
             schema: schema,
             cloudKitDatabase: .automatic
         )
+
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [config])
+            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
         } catch {
-            fatalError("Failed to create ModelContainer: \(error)")
+            print("⚠️ CloudKit ModelContainer failed: \(error). Falling back to local-only storage.")
+
+            let localConfig = ModelConfiguration(
+                "PaperTrail",
+                schema: schema,
+                cloudKitDatabase: .none
+            )
+
+            do {
+                modelContainer = try ModelContainer(for: schema, configurations: [localConfig])
+            } catch {
+                fatalError("Failed to create local ModelContainer: \(error)")
+            }
         }
     }
 
