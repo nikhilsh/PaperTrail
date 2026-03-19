@@ -7,6 +7,9 @@ struct RecordDetailView: View {
     @Bindable var record: PurchaseRecord
     @State private var showDeleteConfirmation = false
     @State private var selectedImageFilename: SelectedFilename?
+    @State private var showShareSheet = false
+    @State private var shareURL: URL?
+    @State private var isExporting = false
 
     private var warrantyColor: Color {
         switch record.warrantyStatus {
@@ -159,11 +162,29 @@ struct RecordDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    EditRecordView(record: record)
-                } label: {
-                    Text("Edit")
+                HStack(spacing: 16) {
+                    Button {
+                        Task { await exportRecord() }
+                    } label: {
+                        if isExporting {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isExporting)
+
+                    NavigationLink {
+                        EditRecordView(record: record)
+                    } label: {
+                        Text("Edit")
+                    }
                 }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let shareURL {
+                ShareSheetView(activityItems: [shareURL])
             }
         }
         .confirmationDialog("Delete this record?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
@@ -175,6 +196,18 @@ struct RecordDetailView: View {
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
             ImageViewerView(filename: selected.value)
+        }
+    }
+
+    private func exportRecord() async {
+        isExporting = true
+        defer { isExporting = false }
+        do {
+            let url = try await RecordSharingManager.exportRecord(record)
+            shareURL = url
+            showShareSheet = true
+        } catch {
+            print("Export failed: \(error)")
         }
     }
 
