@@ -15,6 +15,10 @@ struct DraftRecordView: View {
     @State private var purchaseDate: Date
     @State private var includeWarranty = false
     @State private var warrantyExpiryDate = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
+    @State private var amountText: String
+    @State private var currency: String
+    @State private var category: String = ""
+    @State private var tagsText: String = ""
 
     init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
@@ -24,6 +28,13 @@ struct DraftRecordView: View {
         _merchantName = State(initialValue: seededOCR?.suggestedMerchantName ?? "")
         _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
         _purchaseDate = State(initialValue: seededOCR?.suggestedPurchaseDate ?? .now)
+
+        if let amount = seededOCR?.suggestedAmount {
+            _amountText = State(initialValue: String(format: "%.2f", amount))
+        } else {
+            _amountText = State(initialValue: "")
+        }
+        _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
     }
 
     var body: some View {
@@ -61,11 +72,32 @@ struct DraftRecordView: View {
                 DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
             }
 
+            Section("Amount") {
+                HStack {
+                    TextField("Amount", text: $amountText)
+                        .keyboardType(.decimalPad)
+                    Picker("Currency", selection: $currency) {
+                        Text("SGD").tag("SGD")
+                        Text("USD").tag("USD")
+                        Text("MYR").tag("MYR")
+                        Text("EUR").tag("EUR")
+                        Text("GBP").tag("GBP")
+                        Text("JPY").tag("JPY")
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
             Section("Warranty") {
                 Toggle("Add warranty expiry", isOn: $includeWarranty)
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
+            }
+
+            Section("Organization") {
+                TextField("Category (e.g. Electronics, Kitchen)", text: $category)
+                TextField("Tags (comma separated)", text: $tagsText)
             }
 
             Section("Notes") {
@@ -86,21 +118,34 @@ struct DraftRecordView: View {
     }
 
     private func saveRecord() {
+        let parsedAmount = Double(amountText.replacingOccurrences(of: ",", with: ""))
+        let parsedTags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
         let record = PurchaseRecord(
             productName: productName,
             merchantName: merchantName.isEmpty ? nil : merchantName,
             purchaseDate: purchaseDate,
             warrantyExpiryDate: includeWarranty ? warrantyExpiryDate : nil,
-            notes: notes.isEmpty ? nil : notes
+            notes: notes.isEmpty ? nil : notes,
+            amount: parsedAmount,
+            currency: currency,
+            category: category.isEmpty ? nil : category,
+            tags: parsedTags
         )
 
-        // Link attachments to the record
         for attachment in seededAttachments {
             attachment.record = record
             record.attachments.append(attachment)
         }
 
         modelContext.insert(record)
+
+        // Schedule warranty notifications if applicable
+        if includeWarranty {
+            record.warrantyNotificationScheduled = true
+            NotificationManager.shared.scheduleWarrantyReminders(for: record)
+        }
+
         dismiss()
     }
 }

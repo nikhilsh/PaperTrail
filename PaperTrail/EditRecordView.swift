@@ -11,6 +11,10 @@ struct EditRecordView: View {
     @State private var purchaseDate: Date
     @State private var includeWarranty: Bool
     @State private var warrantyExpiryDate: Date
+    @State private var amountText: String
+    @State private var currency: String
+    @State private var category: String
+    @State private var tagsText: String
 
     init(record: PurchaseRecord) {
         self.record = record
@@ -20,6 +24,15 @@ struct EditRecordView: View {
         _purchaseDate = State(initialValue: record.purchaseDate ?? .now)
         _includeWarranty = State(initialValue: record.warrantyExpiryDate != nil)
         _warrantyExpiryDate = State(initialValue: record.warrantyExpiryDate ?? Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now)
+
+        if let amount = record.amount {
+            _amountText = State(initialValue: String(format: "%.2f", amount))
+        } else {
+            _amountText = State(initialValue: "")
+        }
+        _currency = State(initialValue: record.currency ?? "SGD")
+        _category = State(initialValue: record.category ?? "")
+        _tagsText = State(initialValue: record.tags.joined(separator: ", "))
     }
 
     var body: some View {
@@ -30,11 +43,32 @@ struct EditRecordView: View {
                 DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
             }
 
+            Section("Amount") {
+                HStack {
+                    TextField("Amount", text: $amountText)
+                        .keyboardType(.decimalPad)
+                    Picker("Currency", selection: $currency) {
+                        Text("SGD").tag("SGD")
+                        Text("USD").tag("USD")
+                        Text("MYR").tag("MYR")
+                        Text("EUR").tag("EUR")
+                        Text("GBP").tag("GBP")
+                        Text("JPY").tag("JPY")
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
             Section("Warranty") {
                 Toggle("Warranty expiry", isOn: $includeWarranty)
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
+            }
+
+            Section("Organization") {
+                TextField("Category (e.g. Electronics, Kitchen)", text: $category)
+                TextField("Tags (comma separated)", text: $tagsText)
             }
 
             Section("Notes") {
@@ -85,9 +119,28 @@ struct EditRecordView: View {
         record.productName = productName
         record.merchantName = merchantName.isEmpty ? nil : merchantName
         record.purchaseDate = purchaseDate
-        record.warrantyExpiryDate = includeWarranty ? warrantyExpiryDate : nil
         record.notes = notes.isEmpty ? nil : notes
+        record.amount = Double(amountText.replacingOccurrences(of: ",", with: ""))
+        record.currency = currency
+        record.category = category.isEmpty ? nil : category
+        record.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         record.updatedAt = .now
+
+        // Update warranty & notifications
+        let oldWarranty = record.warrantyExpiryDate
+        record.warrantyExpiryDate = includeWarranty ? warrantyExpiryDate : nil
+
+        if includeWarranty {
+            // Reschedule if warranty date changed
+            if oldWarranty != warrantyExpiryDate || !record.warrantyNotificationScheduled {
+                record.warrantyNotificationScheduled = true
+                NotificationManager.shared.scheduleWarrantyReminders(for: record)
+            }
+        } else {
+            record.warrantyNotificationScheduled = false
+            NotificationManager.shared.removeWarrantyReminders(for: record)
+        }
+
         dismiss()
     }
 }

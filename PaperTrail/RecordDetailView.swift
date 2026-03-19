@@ -8,20 +8,18 @@ struct RecordDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var selectedImageFilename: SelectedFilename?
 
-    private var warrantyStatusText: String {
-        guard let exp = record.warrantyExpiryDate else { return "Unknown" }
-        return exp >= .now ? "Likely active" : "Likely expired"
-    }
-
-    private var warrantyStatusColor: Color {
-        guard let exp = record.warrantyExpiryDate else { return .secondary }
-        if exp < .now { return .red }
-        let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
-        return exp <= cutoff ? .orange : .green
+    private var warrantyColor: Color {
+        switch record.warrantyStatus {
+        case .active: .green
+        case .expiringSoon: .orange
+        case .expired: .red
+        case .unknown: .secondary
+        }
     }
 
     var body: some View {
         List {
+            // Header
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(record.productName)
@@ -31,16 +29,23 @@ struct RecordDetailView: View {
                         Label(merchantName, systemImage: "storefront")
                             .foregroundStyle(.secondary)
                     }
+
+                    if let amount = record.formattedAmount {
+                        Text(amount)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
                 }
                 .padding(.vertical, 4)
             }
 
+            // Warranty & Support
             Section("Warranty & Support") {
                 HStack {
                     Text("Warranty status")
                     Spacer()
-                    Text(warrantyStatusText)
-                        .foregroundStyle(warrantyStatusColor)
+                    Text(record.warrantyStatus.label)
+                        .foregroundStyle(warrantyColor)
                         .fontWeight(.medium)
                 }
 
@@ -65,20 +70,51 @@ struct RecordDetailView: View {
                 }
             }
 
+            // Purchase details
             Section("Purchase") {
                 if let purchaseDate = record.purchaseDate {
                     LabeledContent("Purchased") {
                         Text(purchaseDate, format: .dateTime.day().month().year())
                     }
                 }
+
+                if let amount = record.formattedAmount {
+                    LabeledContent("Amount", value: amount)
+                }
             }
 
+            // Organization
+            if record.category != nil || !record.tags.isEmpty {
+                Section("Organization") {
+                    if let category = record.category {
+                        LabeledContent("Category", value: category)
+                    }
+
+                    if !record.tags.isEmpty {
+                        HStack {
+                            Text("Tags")
+                            Spacer()
+                            ForEach(record.tags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.blue.opacity(0.1), in: Capsule())
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Notes
             if let notes = record.notes, !notes.isEmpty {
                 Section("Notes") {
                     Text(notes)
                 }
             }
 
+            // Attachments
             Section("Attachments") {
                 if record.attachments.isEmpty {
                     Text("No attachments")
@@ -112,6 +148,7 @@ struct RecordDetailView: View {
                 }
             }
 
+            // Delete
             Section {
                 Button("Delete Record", role: .destructive) {
                     showDeleteConfirmation = true
@@ -142,10 +179,10 @@ struct RecordDetailView: View {
     }
 
     private func deleteRecord() {
-        // Clean up stored images
         for attachment in record.attachments {
             ImageStorageManager.delete(attachment.localFilename)
         }
+        NotificationManager.shared.removeWarrantyReminders(for: record)
         modelContext.delete(record)
         dismiss()
     }

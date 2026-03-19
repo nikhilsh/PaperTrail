@@ -14,6 +14,15 @@ struct SettingsView: View {
         return ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
     }
 
+    private var activeWarrantyCount: Int {
+        records.filter { $0.warrantyStatus == .active || $0.warrantyStatus == .expiringSoon }.count
+    }
+
+    private var categorySummary: String {
+        let categories = Set(records.compactMap(\.category))
+        return categories.isEmpty ? "None" : categories.sorted().joined(separator: ", ")
+    }
+
     var body: some View {
         List {
             Section("Storage") {
@@ -23,14 +32,24 @@ struct SettingsView: View {
                 LabeledContent("Persistence", value: "SwiftData (local)")
             }
 
+            Section("Warranties") {
+                LabeledContent("Active warranties", value: "\(activeWarrantyCount)")
+                LabeledContent("Notifications", value: records.filter(\.warrantyNotificationScheduled).count > 0 ? "Scheduled" : "None")
+            }
+
+            Section("Categories") {
+                Text(categorySummary)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
             }
 
             Section("Milestone") {
-                LabeledContent("Current", value: "Milestone 2")
-                LabeledContent("Focus", value: "SwiftData + VisionKit + OCR")
+                LabeledContent("Current", value: "Milestone 2.5")
+                LabeledContent("Focus", value: "Notifications, tags, amount tracking")
             }
         }
         .navigationTitle("Settings")
