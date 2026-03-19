@@ -5,6 +5,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: papertrail-ota-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
