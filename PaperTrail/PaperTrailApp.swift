@@ -3,6 +3,7 @@ import SwiftData
 
 private enum SyncBackendState {
     static let defaultsKey = "activeSyncBackend"
+    static let errorKey = "cloudKitInitError"
     static let cloudKit = "CloudKit"
     static let localFallback = "Local fallback"
 }
@@ -23,9 +24,12 @@ struct PaperTrailApp: App {
         do {
             modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
             UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
+            UserDefaults.standard.removeObject(forKey: SyncBackendState.errorKey)
         } catch {
-            print("⚠️ CloudKit ModelContainer failed: \(error). Falling back to local-only storage.")
+            let errorText = String(describing: error)
+            print("⚠️ CloudKit ModelContainer failed: \(errorText). Falling back to local-only storage.")
             UserDefaults.standard.set(SyncBackendState.localFallback, forKey: SyncBackendState.defaultsKey)
+            UserDefaults.standard.set(errorText, forKey: SyncBackendState.errorKey)
 
             let localConfig = ModelConfiguration(
                 "PaperTrail",

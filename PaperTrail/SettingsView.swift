@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Query private var attachments: [Attachment]
     @Environment(AuthenticationManager.self) private var authManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
+    @AppStorage("cloudKitInitError") private var cloudKitInitError = ""
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -80,6 +81,18 @@ struct SettingsView: View {
                     Text("CloudKit failed during startup, so PaperTrail is currently using local-only storage on this device.")
                         .font(.caption)
                         .foregroundStyle(.orange)
+
+                    if !cloudKitInitError.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Startup error")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(cloudKitInitError)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
             }
 
