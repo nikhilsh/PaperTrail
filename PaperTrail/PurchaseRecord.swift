@@ -11,7 +11,7 @@ final class PurchaseRecord {
     var amount: Double?
     var currency: String?
     var category: String?
-    var tags: [String]
+    var tagsRaw: String
 
     // Support info (embedded, not a separate model)
     var supportProviderName: String?
@@ -55,7 +55,7 @@ final class PurchaseRecord {
         self.amount = amount
         self.currency = currency
         self.category = category
-        self.tags = tags
+        self.tagsRaw = tags.joined(separator: ",")
         self.supportProviderName = supportProviderName
         self.supportPhoneNumber = supportPhoneNumber
         self.supportConfidence = supportConfidence
@@ -68,6 +68,21 @@ final class PurchaseRecord {
 }
 
 extension PurchaseRecord {
+
+    var tags: [String] {
+        get {
+            tagsRaw
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        set {
+            tagsRaw = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ",")
+        }
+    }
     var supportInfo: SupportInfo? {
         guard let name = supportProviderName, let phone = supportPhoneNumber, let conf = supportConfidence else {
             return nil
