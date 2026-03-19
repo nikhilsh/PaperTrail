@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Legacy placeholder retained only so the default Xcode file stops being the app's center of gravity.
+/// Legacy placeholder — retained for Xcode file consistency.
+/// The actual root view is AppShellView, launched from PaperTrailApp.
 struct ContentView: View {
     var body: some View {
         AppShellView()
@@ -9,4 +10,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

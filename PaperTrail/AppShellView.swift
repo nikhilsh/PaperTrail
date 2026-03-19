@@ -41,4 +41,5 @@ private enum AppTab {
 
 #Preview {
     AppShellView()
+        .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

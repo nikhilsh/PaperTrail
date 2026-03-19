@@ -1,28 +1,55 @@
 import Foundation
+import UIKit
 
-protocol ScanningService {
-    func beginCapture(for type: AttachmentType) async throws -> Attachment
-}
+/// Saves scanned images to disk and creates Attachment records.
+struct ScanningService {
+    private let ocrService: any OCRService
 
-struct PlaceholderScanningService: ScanningService {
-    func beginCapture(for type: AttachmentType) async throws -> Attachment {
-        Attachment(
-            type: type,
-            localFilename: "placeholder-\(type.rawValue).jpg",
-            ocrText: previewOCRText(for: type)
-        )
+    init(ocrService: any OCRService = VisionOCRService()) {
+        self.ocrService = ocrService
     }
 
-    private func previewOCRText(for type: AttachmentType) -> String {
-        switch type {
-        case .receipt:
-            return "Best Denki Dyson V15 Detect 2026-03-13"
-        case .warranty:
-            return "LG Refrigerator Warranty 2 years"
-        case .invoice:
-            return "Invoice placeholder"
-        case .other:
-            return "Imported proof image"
+    /// Process scanned images: save to disk, run OCR, return attachments and combined OCR result.
+    func process(images: [UIImage], type: AttachmentType) async -> (attachments: [Attachment], ocr: OCRExtractionResult) {
+        var attachments: [Attachment] = []
+        var allText: [String] = []
+        var bestProduct: String?
+        var bestMerchant: String?
+        var bestDate: Date?
+
+        for image in images {
+            guard let filename = ImageStorageManager.save(image) else { continue }
+
+            var ocrResult = OCRExtractionResult.empty
+            do {
+                ocrResult = try await ocrService.extract(from: image)
+            } catch {
+                print("OCR failed for \(filename): \(error)")
+            }
+
+            let attachment = Attachment(
+                type: type,
+                localFilename: filename,
+                ocrText: ocrResult.recognizedText.isEmpty ? nil : ocrResult.recognizedText
+            )
+            attachments.append(attachment)
+
+            if !ocrResult.recognizedText.isEmpty {
+                allText.append(ocrResult.recognizedText)
+            }
+            if bestProduct == nil { bestProduct = ocrResult.suggestedProductName }
+            if bestMerchant == nil { bestMerchant = ocrResult.suggestedMerchantName }
+            if bestDate == nil { bestDate = ocrResult.suggestedPurchaseDate }
         }
+
+        let combined = OCRExtractionResult(
+            recognizedText: allText.joined(separator: "\n---\n"),
+            suggestedProductName: bestProduct,
+            suggestedMerchantName: bestMerchant,
+            suggestedPurchaseDate: bestDate,
+            suggestedNotes: allText.isEmpty ? nil : "OCR draft extracted from scanned document."
+        )
+
+        return (attachments, combined)
     }
 }

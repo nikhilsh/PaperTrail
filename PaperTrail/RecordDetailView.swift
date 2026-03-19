@@ -1,28 +1,33 @@
 import SwiftUI
+import SwiftData
 
 struct RecordDetailView: View {
-    @Environment(PurchaseRecordStore.self) private var store
-    let record: PurchaseRecord
-
-    private var currentRecord: PurchaseRecord {
-        store.records.first(where: { $0.id == record.id }) ?? record
-    }
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var record: PurchaseRecord
+    @State private var showDeleteConfirmation = false
+    @State private var selectedImageFilename: SelectedFilename?
 
     private var warrantyStatusText: String {
-        guard let warrantyExpiryDate = currentRecord.warrantyExpiryDate else {
-            return "Unknown"
-        }
-        return warrantyExpiryDate >= .now ? "Likely active" : "Likely expired"
+        guard let exp = record.warrantyExpiryDate else { return "Unknown" }
+        return exp >= .now ? "Likely active" : "Likely expired"
+    }
+
+    private var warrantyStatusColor: Color {
+        guard let exp = record.warrantyExpiryDate else { return .secondary }
+        if exp < .now { return .red }
+        let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
+        return exp <= cutoff ? .orange : .green
     }
 
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(currentRecord.productName)
+                    Text(record.productName)
                         .font(.title3.bold())
 
-                    if let merchantName = currentRecord.merchantName {
+                    if let merchantName = record.merchantName {
                         Label(merchantName, systemImage: "storefront")
                             .foregroundStyle(.secondary)
                     }
@@ -31,19 +36,25 @@ struct RecordDetailView: View {
             }
 
             Section("Warranty & Support") {
-                LabeledContent("Warranty status", value: warrantyStatusText)
+                HStack {
+                    Text("Warranty status")
+                    Spacer()
+                    Text(warrantyStatusText)
+                        .foregroundStyle(warrantyStatusColor)
+                        .fontWeight(.medium)
+                }
 
-                if let warrantyExpiryDate = currentRecord.warrantyExpiryDate {
+                if let exp = record.warrantyExpiryDate {
                     LabeledContent("Warranty until") {
-                        Text(warrantyExpiryDate, format: .dateTime.day().month().year())
+                        Text(exp, format: .dateTime.day().month().year())
                     }
                 }
 
-                if let supportInfo = currentRecord.supportInfo {
-                    LabeledContent("Service contact", value: supportInfo.phoneNumber)
-                    LabeledContent("Source", value: supportInfo.confidence == .verified ? "Verified" : "Best guess")
+                if let info = record.supportInfo {
+                    LabeledContent("Service contact", value: info.phoneNumber)
+                    LabeledContent("Source", value: info.confidence == .verified ? "Verified" : "Best guess")
 
-                    if let note = supportInfo.note {
+                    if let note = info.note {
                         Text(note)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -55,34 +66,55 @@ struct RecordDetailView: View {
             }
 
             Section("Purchase") {
-                if let purchaseDate = currentRecord.purchaseDate {
+                if let purchaseDate = record.purchaseDate {
                     LabeledContent("Purchased") {
                         Text(purchaseDate, format: .dateTime.day().month().year())
                     }
                 }
             }
 
-            if let notes = currentRecord.notes {
+            if let notes = record.notes, !notes.isEmpty {
                 Section("Notes") {
                     Text(notes)
                 }
             }
 
             Section("Attachments") {
-                ForEach(currentRecord.attachments) { attachment in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(attachment.type.rawValue.capitalized)
-                            .font(.headline)
-                        Text(attachment.localFilename)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if let ocrText = attachment.ocrText {
-                            Text(ocrText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                if record.attachments.isEmpty {
+                    Text("No attachments")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(record.attachments) { attachment in
+                                Button {
+                                    selectedImageFilename = SelectedFilename(attachment.localFilename)
+                                } label: {
+                                    AttachmentThumbnail(attachment: attachment)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
-                    .padding(.vertical, 4)
+
+                    ForEach(record.attachments) { attachment in
+                        if let ocrText = attachment.ocrText, !ocrText.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(attachment.type.rawValue.capitalized)
+                                    .font(.caption.weight(.semibold))
+                                Text(ocrText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(4)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Button("Delete Record", role: .destructive) {
+                    showDeleteConfirmation = true
                 }
             }
         }
@@ -91,18 +123,69 @@ struct RecordDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    EditRecordView(record: currentRecord)
+                    EditRecordView(record: record)
                 } label: {
                     Text("Edit")
                 }
             }
         }
+        .confirmationDialog("Delete this record?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                deleteRecord()
+            }
+        } message: {
+            Text("This will permanently remove the record and its attachments.")
+        }
+        .fullScreenCover(item: $selectedImageFilename) { selected in
+            ImageViewerView(filename: selected.value)
+        }
+    }
+
+    private func deleteRecord() {
+        // Clean up stored images
+        for attachment in record.attachments {
+            ImageStorageManager.delete(attachment.localFilename)
+        }
+        modelContext.delete(record)
+        dismiss()
+    }
+}
+
+/// Wrapper to make a filename Identifiable for sheet presentation.
+struct SelectedFilename: Identifiable {
+    let id = UUID()
+    let value: String
+    init(_ value: String) { self.value = value }
+}
+
+// MARK: - Subviews
+
+private struct AttachmentThumbnail: View {
+    let attachment: Attachment
+
+    var body: some View {
+        Group {
+            if let image = ImageStorageManager.load(attachment.localFilename) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "doc.questionmark")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 70, height: 90)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
     }
 }
 
 #Preview {
     NavigationStack {
-        RecordDetailView(record: .preview)
-            .environment(PurchaseRecordStore())
+        Text("Preview requires SwiftData context")
     }
 }

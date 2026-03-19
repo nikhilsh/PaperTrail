@@ -1,38 +1,36 @@
 import Foundation
+import SwiftData
 
-enum AttachmentType: String, Codable, Hashable {
+enum AttachmentType: String, Codable, Hashable, CaseIterable {
     case receipt
     case warranty
     case invoice
     case other
 }
 
-struct Attachment: Identifiable, Hashable {
-    let id: UUID
-    var type: AttachmentType
+@Model
+final class Attachment {
+    var typeRaw: String
     var localFilename: String
     var ocrText: String?
     var createdAt: Date
 
+    var record: PurchaseRecord?
+
+    var type: AttachmentType {
+        get { AttachmentType(rawValue: typeRaw) ?? .other }
+        set { typeRaw = newValue.rawValue }
+    }
+
     init(
-        id: UUID = UUID(),
         type: AttachmentType,
         localFilename: String,
         ocrText: String? = nil,
         createdAt: Date = .now
     ) {
-        self.id = id
-        self.type = type
+        self.typeRaw = type.rawValue
         self.localFilename = localFilename
         self.ocrText = ocrText
         self.createdAt = createdAt
     }
-}
-
-extension Attachment {
-    static let preview = Attachment(
-        type: .receipt,
-        localFilename: "dyson-receipt.jpg",
-        ocrText: "Best Denki Dyson V15 Detect"
-    )
 }

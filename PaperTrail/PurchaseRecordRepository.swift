@@ -1,16 +1,3 @@
-import Foundation
-
-protocol PurchaseRecordRepository {
-    func fetchAll() async throws -> [PurchaseRecord]
-    func save(_ record: PurchaseRecord) async throws
-}
-
-struct InMemoryPurchaseRecordRepository: PurchaseRecordRepository {
-    func fetchAll() async throws -> [PurchaseRecord] {
-        [.preview]
-    }
-
-    func save(_ record: PurchaseRecord) async throws {
-        _ = record
-    }
-}
+// This file is intentionally left minimal.
+// PurchaseRecordRepository has been replaced by SwiftData ModelContext.
+// Keeping the file to avoid Xcode sync issues; it compiles to nothing.

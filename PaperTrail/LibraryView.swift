@@ -1,12 +1,14 @@
 import SwiftUI
+import SwiftData
 
 struct LibraryView: View {
-    @Environment(PurchaseRecordStore.self) private var store
+    @Query(sort: \PurchaseRecord.updatedAt, order: .reverse) private var records: [PurchaseRecord]
+    @Environment(\.modelContext) private var modelContext
     @State private var searchText = ""
 
     private var filteredRecords: [PurchaseRecord] {
-        guard searchText.isEmpty == false else { return store.records }
-        return store.records.filter {
+        guard !searchText.isEmpty else { return records }
+        return records.filter {
             $0.productName.localizedCaseInsensitiveContains(searchText)
             || ($0.merchantName?.localizedCaseInsensitiveContains(searchText) ?? false)
             || ($0.notes?.localizedCaseInsensitiveContains(searchText) ?? false)
@@ -15,16 +17,16 @@ struct LibraryView: View {
 
     private var expiringSoonCount: Int {
         let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
-        return store.records.filter {
-            guard let warrantyExpiryDate = $0.warrantyExpiryDate else { return false }
-            return warrantyExpiryDate <= cutoff
+        return records.filter {
+            guard let exp = $0.warrantyExpiryDate else { return false }
+            return exp > .now && exp <= cutoff
         }.count
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                LibrarySummaryRow(totalCount: store.records.count, expiringSoonCount: expiringSoonCount)
+                LibrarySummaryRow(totalCount: records.count, expiringSoonCount: expiringSoonCount)
 
                 if filteredRecords.isEmpty {
                     ContentUnavailableView(
@@ -52,11 +54,10 @@ struct LibraryView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Library")
         .searchable(text: $searchText, prompt: "Search products, stores, notes")
-        .refreshable {
-            store.refresh()
-        }
     }
 }
+
+// MARK: - Subviews
 
 private struct LibrarySummaryRow: View {
     let totalCount: Int
@@ -135,7 +136,7 @@ private struct PurchaseRecordCard: View {
                 }
             }
 
-            if let notes = record.notes, notes.isEmpty == false {
+            if let notes = record.notes, !notes.isEmpty {
                 Text(notes)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -169,6 +170,6 @@ private struct AttachmentBadge: View {
 #Preview {
     NavigationStack {
         LibraryView()
-            .environment(PurchaseRecordStore())
     }
+    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

@@ -1,9 +1,15 @@
 import SwiftUI
+import PhotosUI
 
 struct CaptureView: View {
-    @State private var draftTarget: DraftTarget?
-    private let scanningService = PlaceholderScanningService()
-    private let ocrService = VisionOCRService()
+    @State private var showScanner = false
+    @State private var showPhotoPicker = false
+    @State private var scanType: AttachmentType = .receipt
+    @State private var draftPayload: DraftPayload?
+    @State private var isProcessing = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+
+    private let scanningService = ScanningService()
 
     var body: some View {
         ScrollView {
@@ -16,40 +22,54 @@ struct CaptureView: View {
 
                 VStack(spacing: 12) {
                     Button {
-                        Task { await startDraft(for: .receipt) }
+                        scanType = .receipt
+                        showScanner = true
                     } label: {
                         CaptureActionRow(
                             title: "Scan receipt",
-                            subtitle: "For printed receipts and in-store purchases.",
+                            subtitle: "Use the camera to scan a printed receipt.",
                             systemImage: "doc.viewfinder"
                         )
                     }
                     .buttonStyle(.plain)
 
                     Button {
-                        Task { await startDraft(for: .warranty) }
+                        scanType = .warranty
+                        showScanner = true
                     } label: {
                         CaptureActionRow(
                             title: "Add warranty card",
-                            subtitle: "Attach warranty proof to the product record.",
+                            subtitle: "Scan a warranty card or proof document.",
                             systemImage: "shield.lefthalf.filled"
                         )
                     }
                     .buttonStyle(.plain)
 
                     Button {
-                        Task { await startDraft(for: .other) }
+                        scanType = .other
+                        showPhotoPicker = true
                     } label: {
                         CaptureActionRow(
                             title: "Import photo",
-                            subtitle: "Use an existing image from your library.",
+                            subtitle: "Pick an existing image from your library.",
                             systemImage: "photo.on.rectangle"
                         )
                     }
                     .buttonStyle(.plain)
                 }
 
-                Text("PaperTrail will extract text, let you confirm the key fields, and save everything as a searchable record.")
+                if isProcessing {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Running OCR…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
+                }
+
+                Text("PaperTrail scans your document, extracts text with OCR, and lets you confirm key fields before saving.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
@@ -58,31 +78,60 @@ struct CaptureView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Capture")
-        .navigationDestination(item: $draftTarget) { target in
+        .fullScreenCover(isPresented: $showScanner) {
+            DocumentScannerView(
+                onScanComplete: { images in
+                    showScanner = false
+                    Task { await processScan(images: images, type: scanType) }
+                },
+                onCancel: { showScanner = false }
+            )
+            .ignoresSafeArea()
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task { await processPhotoPick(item: newItem) }
+            selectedPhotoItem = nil
+        }
+        .navigationDestination(item: $draftPayload) { payload in
             DraftRecordView(
-                seedType: target.type,
-                seededAttachment: target.attachment,
-                seededOCR: target.ocr
+                seedType: payload.type,
+                seededAttachments: payload.attachments,
+                seededOCR: payload.ocr
             )
         }
     }
 
-    private func startDraft(for type: AttachmentType) async {
-        do {
-            let attachment = try await scanningService.beginCapture(for: type)
-            let ocr = try await ocrService.extract(from: attachment)
-            draftTarget = DraftTarget(type: type, attachment: attachment, ocr: ocr)
-        } catch {
-            draftTarget = DraftTarget(type: type, attachment: nil, ocr: nil)
-        }
+    private func processScan(images: [UIImage], type: AttachmentType) async {
+        isProcessing = true
+        let result = await scanningService.process(images: images, type: type)
+        isProcessing = false
+        draftPayload = DraftPayload(type: type, attachments: result.attachments, ocr: result.ocr)
+    }
+
+    private func processPhotoPick(item: PhotosPickerItem) async {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else { return }
+
+        let result = await scanningService.process(images: [image], type: scanType)
+        draftPayload = DraftPayload(type: scanType, attachments: result.attachments, ocr: result.ocr)
     }
 }
 
-private struct DraftTarget: Identifiable, Hashable {
+// MARK: - Supporting types
+
+private struct DraftPayload: Identifiable, Hashable {
     let id = UUID()
     let type: AttachmentType
-    let attachment: Attachment?
-    let ocr: OCRExtractionResult?
+    let attachments: [Attachment]
+    let ocr: OCRExtractionResult
+
+    static func == (lhs: DraftPayload, rhs: DraftPayload) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 private struct CaptureActionRow: View {
@@ -120,6 +169,6 @@ private struct CaptureActionRow: View {
 #Preview {
     NavigationStack {
         CaptureView()
-            .environment(PurchaseRecordStore())
     }
+    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

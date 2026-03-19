@@ -1,36 +1,57 @@
 import SwiftUI
+import SwiftData
 
 struct DraftRecordView: View {
-    @Environment(PurchaseRecordStore.self) private var store
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     let seedType: AttachmentType
-    let seededAttachment: Attachment?
+    let seededAttachments: [Attachment]
     let seededOCR: OCRExtractionResult?
 
     @State private var productName: String
     @State private var merchantName: String
     @State private var notes: String
-    @State private var purchaseDate = Date()
+    @State private var purchaseDate: Date
     @State private var includeWarranty = false
     @State private var warrantyExpiryDate = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
 
-    init(seedType: AttachmentType, seededAttachment: Attachment? = nil, seededOCR: OCRExtractionResult? = nil) {
+    init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
-        self.seededAttachment = seededAttachment
+        self.seededAttachments = seededAttachments
         self.seededOCR = seededOCR
         _productName = State(initialValue: seededOCR?.suggestedProductName ?? "")
         _merchantName = State(initialValue: seededOCR?.suggestedMerchantName ?? "")
         _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
+        _purchaseDate = State(initialValue: seededOCR?.suggestedPurchaseDate ?? .now)
     }
 
     var body: some View {
         Form {
-            if let seededOCR, seededOCR.recognizedText.isEmpty == false {
-                Section("OCR draft") {
+            if let seededOCR, !seededOCR.recognizedText.isEmpty {
+                Section("Extracted text") {
                     Text(seededOCR.recognizedText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(8)
+                }
+            }
+
+            if !seededAttachments.isEmpty {
+                Section("Scanned pages") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(seededAttachments) { attachment in
+                                if let image = ImageStorageManager.load(attachment.localFilename) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 80, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -52,36 +73,41 @@ struct DraftRecordView: View {
                     .lineLimit(4, reservesSpace: true)
             }
         }
-        .navigationTitle("Draft Record")
+        .navigationTitle("New Record")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save") {
                     saveRecord()
                 }
+                .fontWeight(.semibold)
                 .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
 
     private func saveRecord() {
-        let attachment = seededAttachment ?? Attachment(type: seedType, localFilename: "placeholder-\(seedType.rawValue).jpg")
         let record = PurchaseRecord(
             productName: productName,
             merchantName: merchantName.isEmpty ? nil : merchantName,
             purchaseDate: purchaseDate,
             warrantyExpiryDate: includeWarranty ? warrantyExpiryDate : nil,
-            notes: notes.isEmpty ? nil : notes,
-            attachments: [attachment]
+            notes: notes.isEmpty ? nil : notes
         )
 
-        store.add(record)
+        // Link attachments to the record
+        for attachment in seededAttachments {
+            attachment.record = record
+            record.attachments.append(attachment)
+        }
+
+        modelContext.insert(record)
         dismiss()
     }
 }
 
 #Preview {
     NavigationStack {
-        DraftRecordView(seedType: .receipt, seededAttachment: .preview, seededOCR: .empty)
-            .environment(PurchaseRecordStore())
+        DraftRecordView(seedType: .receipt)
     }
+    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-struct OCRExtractionResult: Hashable {
+struct OCRExtractionResult: Hashable, Sendable {
     var recognizedText: String
     var suggestedProductName: String?
     var suggestedMerchantName: String?

@@ -1,36 +1,49 @@
 import Foundation
+import SwiftData
 
-struct PurchaseRecord: Identifiable, Hashable {
-    let id: UUID
+@Model
+final class PurchaseRecord {
     var productName: String
     var merchantName: String?
     var purchaseDate: Date?
     var warrantyExpiryDate: Date?
     var notes: String?
-    var supportInfo: SupportInfo?
+
+    // Support info (embedded, not a separate model)
+    var supportProviderName: String?
+    var supportPhoneNumber: String?
+    var supportConfidence: String? // "verified" or "estimated"
+    var supportNote: String?
+
+    @Relationship(deleteRule: .cascade, inverse: \Attachment.record)
     var attachments: [Attachment]
+
     var createdAt: Date
     var updatedAt: Date
 
     init(
-        id: UUID = UUID(),
         productName: String,
         merchantName: String? = nil,
         purchaseDate: Date? = nil,
         warrantyExpiryDate: Date? = nil,
         notes: String? = nil,
-        supportInfo: SupportInfo? = nil,
+        supportProviderName: String? = nil,
+        supportPhoneNumber: String? = nil,
+        supportConfidence: String? = nil,
+        supportNote: String? = nil,
         attachments: [Attachment] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
-        self.id = id
         self.productName = productName
         self.merchantName = merchantName
         self.purchaseDate = purchaseDate
         self.warrantyExpiryDate = warrantyExpiryDate
         self.notes = notes
-        self.supportInfo = supportInfo
+        self.supportProviderName = supportProviderName
+        self.supportPhoneNumber = supportPhoneNumber
+        self.supportConfidence = supportConfidence
+        self.supportNote = supportNote
         self.attachments = attachments
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -38,18 +51,22 @@ struct PurchaseRecord: Identifiable, Hashable {
 }
 
 extension PurchaseRecord {
-    static let preview = PurchaseRecord(
-        productName: "Dyson V15 Detect",
-        merchantName: "Best Denki",
-        purchaseDate: Calendar.current.date(byAdding: .month, value: -2, to: .now),
-        warrantyExpiryDate: Calendar.current.date(byAdding: .year, value: 2, to: .now),
-        notes: "Receipt captured in-store after purchase.",
-        supportInfo: SupportInfo(
-            providerName: "Dyson Support",
-            phoneNumber: "+65 7000 435754",
-            confidence: .estimated,
-            note: "Estimated from manufacturer support lookup, not verified from receipt."
-        ),
-        attachments: [.preview]
-    )
+    var supportInfo: SupportInfo? {
+        guard let name = supportProviderName, let phone = supportPhoneNumber, let conf = supportConfidence else {
+            return nil
+        }
+        return SupportInfo(
+            providerName: name,
+            phoneNumber: phone,
+            confidence: SupportInfoConfidence(rawValue: conf) ?? .estimated,
+            note: supportNote
+        )
+    }
+
+    func setSupportInfo(_ info: SupportInfo?) {
+        supportProviderName = info?.providerName
+        supportPhoneNumber = info?.phoneNumber
+        supportConfidence = info?.confidence.rawValue
+        supportNote = info?.note
+    }
 }
