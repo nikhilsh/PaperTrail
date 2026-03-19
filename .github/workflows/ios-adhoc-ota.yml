@@ -26,6 +26,7 @@ jobs:
       EXPORT_METHOD: ad-hoc
       BUNDLE_ID: nikhilsh.PaperTrail
       TEAM_ID: EHW7L3679R
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
     steps:
