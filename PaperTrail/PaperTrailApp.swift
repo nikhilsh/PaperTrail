@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Sentry
+import CloudKit
 
 private enum SyncBackendState {
     static let defaultsKey = "activeSyncBackend"
@@ -11,6 +12,10 @@ private enum SyncBackendState {
 
 private enum AppDiagnostics {
     static let sentryDSNKey = "SENTRY_DSN"
+    static let cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
+    static let cloudKitAccountStatusKey = "cloudKitAccountStatus"
+    static let cloudKitContainerStatusKey = "cloudKitContainerStatus"
+    static let cloudKitContainerIdentifierKey = "cloudKitContainerIdentifier"
 }
 
 private func addStartupBreadcrumb(level: SentryLevel, category: String, message: String) {
@@ -44,6 +49,51 @@ private func configureSentry() {
     }
 
     addStartupBreadcrumb(level: .info, category: "app.lifecycle", message: "PaperTrail launch started")
+}
+
+private func accountStatusDescription(_ status: CKAccountStatus) -> String {
+    switch status {
+    case .available: return "Available"
+    case .noAccount: return "No iCloud account"
+    case .restricted: return "Restricted"
+    case .couldNotDetermine: return "Could not determine"
+    case .temporarilyUnavailable: return "Temporarily unavailable"
+    @unknown default: return "Unknown"
+    }
+}
+
+@MainActor
+private func runCloudKitPreflight() async {
+    let defaults = UserDefaults.standard
+    let containerID = AppDiagnostics.cloudKitContainerIdentifier
+    defaults.set(containerID, forKey: AppDiagnostics.cloudKitContainerIdentifierKey)
+
+    let container = CKContainer(identifier: containerID)
+
+    do {
+        let status = try await container.accountStatus()
+        let statusText = accountStatusDescription(status)
+        defaults.set(statusText, forKey: AppDiagnostics.cloudKitAccountStatusKey)
+        addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "Account status: \(statusText)")
+        SentrySDK.setTag(value: statusText, key: "cloudkit_account_status")
+
+        do {
+            _ = try await container.userRecordID()
+            defaults.set("User record lookup succeeded", forKey: AppDiagnostics.cloudKitContainerStatusKey)
+            addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "User record lookup succeeded for \(containerID)")
+        } catch {
+            let errorText = String(describing: error)
+            defaults.set("User record lookup failed: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
+            addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "User record lookup failed for \(containerID)")
+            SentrySDK.capture(message: "CloudKit preflight userRecordID failure: \(errorText)")
+        }
+    } catch {
+        let errorText = String(describing: error)
+        defaults.set("Account status failed: \(errorText)", forKey: AppDiagnostics.cloudKitAccountStatusKey)
+        defaults.set("Preflight failed before user record lookup: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
+        addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "Account status failed for \(containerID)")
+        SentrySDK.capture(message: "CloudKit preflight accountStatus failure: \(errorText)")
+    }
 }
 
 @main
@@ -97,6 +147,7 @@ struct PaperTrailApp: App {
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
                     await authManager.checkCredentialState()
+                    await runCloudKitPreflight()
                 }
         }
         .modelContainer(modelContainer)

@@ -8,6 +8,9 @@ struct SettingsView: View {
     @Environment(AuthenticationManager.self) private var authManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("cloudKitInitError") private var cloudKitInitError = ""
+    @AppStorage("cloudKitAccountStatus") private var cloudKitAccountStatus = "Unknown"
+    @AppStorage("cloudKitContainerStatus") private var cloudKitContainerStatus = "Not checked"
+    @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -76,6 +79,18 @@ struct SettingsView: View {
                 LabeledContent("iCloud", value: "Automatic")
                 LabeledContent("Backend", value: activeSyncBackend)
                 LabeledContent("Status", value: authManager.isSignedIn ? "Active" : "Sign in required")
+                LabeledContent("CK account", value: cloudKitAccountStatus)
+                LabeledContent("CK container", value: cloudKitContainerIdentifier)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Preflight")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(cloudKitContainerStatus)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+                .padding(.vertical, 4)
 
                 if activeSyncBackend == "Local fallback" {
                     Text("CloudKit failed during startup, so PaperTrail is currently using local-only storage on this device.")
