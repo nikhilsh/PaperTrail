@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Legacy placeholder — retained for Xcode file consistency.
 /// The actual root view is AppShellView, launched from PaperTrailApp.

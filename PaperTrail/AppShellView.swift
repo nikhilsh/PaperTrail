@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct AppShellView: View {
     @State private var selectedTab: AppTab = .library

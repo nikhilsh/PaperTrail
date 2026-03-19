@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import UserNotifications
 
 /// Manages local notifications for warranty expiry reminders.
@@ -21,7 +22,7 @@ struct NotificationManager {
     func scheduleWarrantyReminders(for record: PurchaseRecord) {
         guard let expiryDate = record.warrantyExpiryDate, expiryDate > .now else { return }
 
-        let recordID = record.persistentModelID.hashValue
+        let recordID = String(describing: record.persistentModelID)
         let center = UNUserNotificationCenter.current()
 
         // Remove any existing notifications for this record
@@ -64,12 +65,12 @@ struct NotificationManager {
 
     /// Remove warranty notifications for a record.
     func removeWarrantyReminders(for record: PurchaseRecord) {
-        let recordID = record.persistentModelID.hashValue
+        let recordID = String(describing: record.persistentModelID)
         let identifiers = reminderIdentifiers(for: recordID)
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
     }
 
-    private func reminderIdentifiers(for recordHash: Int) -> [String] {
+    private func reminderIdentifiers(for recordHash: String) -> [String] {
         [30, 7, 0].map { "\(recordHash)-warranty-\($0)" }
     }
 }

@@ -25,7 +25,7 @@ struct PaperTrailApp: App {
             AppShellView()
                 .environment(authManager)
                 .task {
-                    await NotificationManager.shared.requestPermission()
+                    _ = await NotificationManager.shared.requestPermission()
                     await authManager.checkCredentialState()
                 }
         }

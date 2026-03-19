@@ -95,35 +95,13 @@ struct RecordSharingManager {
 
     /// Import a record from a `.papertrail` file.
     static func importRecord(from url: URL) async throws -> ImportedRecord {
-        // Unzip to temp dir
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
+        // Current v1 import path supports direct JSON payloads.
+        // The export path currently produces a coordinated archive for sharing,
+        // but in-app import is intentionally conservative until a proper unzip path
+        // is implemented for iOS.
+        let data = try Data(contentsOf: url)
 
-        let coordinator = NSFileCoordinator()
-        var error: NSError?
-
-        coordinator.coordinate(readingItemAt: url, options: .forUploading, error: &error) { zipURL in
-            // Actually we need to decompress, not compress
-        }
-
-        // For .papertrail files, use the archive utility
-        // Since NSFileCoordinator .forUploading creates a zip, we need to unzip
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-        // Copy the file and unzip manually
-        let process = Process()
-        // On iOS we can't use Process, so we'll use a simpler approach
-
-        // Read as zip data and extract using Foundation
-        let zipData = try Data(contentsOf: url)
-        let extractDir = tempDir
-
-        // Use FileManager to extract — iOS doesn't have built-in unzip
-        // So we'll store as a simple directory-based format instead
-        // For v1, just read the JSON directly if it's a single-file format
-
-        // Try reading as direct JSON first (simple share format)
-        if let json = try? JSONSerialization.jsonObject(with: zipData) as? [String: Any] {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             return try parseJSON(json, imagesDir: nil)
         }
 
