@@ -42,10 +42,10 @@ private func configureSentry() {
 
     let info = Bundle.main.infoDictionary ?? [:]
     if let version = info["CFBundleShortVersionString"] as? String {
-        SentrySDK.setTag(value: version, key: "app_version")
+        SentrySDK.configureScope { scope in scope.setTag(value: version, key: "app_version") }
     }
     if let build = info["CFBundleVersion"] as? String {
-        SentrySDK.setTag(value: build, key: "build_number")
+        SentrySDK.configureScope { scope in scope.setTag(value: build, key: "build_number") }
     }
 
     addStartupBreadcrumb(level: .info, category: "app.lifecycle", message: "PaperTrail launch started")
@@ -75,7 +75,7 @@ private func runCloudKitPreflight() async {
         let statusText = accountStatusDescription(status)
         defaults.set(statusText, forKey: AppDiagnostics.cloudKitAccountStatusKey)
         addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "Account status: \(statusText)")
-        SentrySDK.setTag(value: statusText, key: "cloudkit_account_status")
+        SentrySDK.configureScope { scope in scope.setTag(value: statusText, key: "cloudkit_account_status") }
 
         do {
             _ = try await container.userRecordID()
@@ -116,7 +116,7 @@ struct PaperTrailApp: App {
             UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
             UserDefaults.standard.removeObject(forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .info, category: "sync", message: "CloudKit-backed ModelContainer initialized successfully")
-            SentrySDK.setTag(value: SyncBackendState.cloudKit, key: "sync_backend")
+            SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.cloudKit, key: "sync_backend") }
         } catch {
             let errorText = String(describing: error)
             print("⚠️ CloudKit ModelContainer failed: \(errorText). Falling back to local-only storage.")
@@ -124,7 +124,7 @@ struct PaperTrailApp: App {
             UserDefaults.standard.set(errorText, forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .error, category: "sync", message: "CloudKit-backed ModelContainer initialization failed")
             SentrySDK.capture(message: "CloudKit startup fallback: \(errorText)")
-            SentrySDK.setTag(value: SyncBackendState.localFallback, key: "sync_backend")
+            SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.localFallback, key: "sync_backend") }
 
             let localConfig = ModelConfiguration(
                 "PaperTrail",
