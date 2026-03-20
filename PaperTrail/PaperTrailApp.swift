@@ -88,14 +88,14 @@ private func runCloudKitPreflight() async {
             let errorText = String(describing: error)
             defaults.set("User record lookup failed: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
             addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "User record lookup failed for \(containerID)")
-            SentrySDK.capture(message: "CloudKit preflight userRecordID failure: \(errorText)")
+            AppLogger.error("CloudKit preflight userRecordID failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
         }
     } catch {
         let errorText = String(describing: error)
         defaults.set("Account status failed: \(errorText)", forKey: AppDiagnostics.cloudKitAccountStatusKey)
         defaults.set("Preflight failed before user record lookup: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
         addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "Account status failed for \(containerID)")
-        SentrySDK.capture(message: "CloudKit preflight accountStatus failure: \(errorText)")
+        AppLogger.error("CloudKit preflight accountStatus failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
     }
 }
 
@@ -107,15 +107,26 @@ struct PaperTrailApp: App {
     init() {
         configureSentry()
 
-        let schema = Schema([PurchaseRecord.self, Attachment.self])
+        let fullSchema = Schema([PurchaseRecord.self, Attachment.self])
+        let cloudRecordsSchema = Schema([PurchaseRecord.self])
+        let localAttachmentsSchema = Schema([Attachment.self])
+
         let cloudConfig = ModelConfiguration(
-            "PaperTrail",
-            schema: schema,
+            "PaperTrailCloud",
+            schema: cloudRecordsSchema,
             cloudKitDatabase: .automatic
+        )
+        let localAttachmentsConfig = ModelConfiguration(
+            "PaperTrailLocalAttachments",
+            schema: localAttachmentsSchema,
+            cloudKitDatabase: .none
         )
 
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
+            modelContainer = try ModelContainer(
+                for: fullSchema,
+                configurations: [cloudConfig, localAttachmentsConfig]
+            )
             UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
             UserDefaults.standard.removeObject(forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .info, category: "sync", message: "CloudKit-backed ModelContainer initialized successfully")
@@ -133,14 +144,17 @@ struct PaperTrailApp: App {
                 schema: cloudRecordsSchema,
                 cloudKitDatabase: .none
             )
-            let localAttachmentsConfig = ModelConfiguration(
+            let localAttachmentsFallbackConfig = ModelConfiguration(
                 "PaperTrailLocalAttachments",
                 schema: localAttachmentsSchema,
                 cloudKitDatabase: .none
             )
 
             do {
-                modelContainer = try ModelContainer(for: schema, configurations: [localRecordsConfig, localAttachmentsConfig])
+                modelContainer = try ModelContainer(
+                    for: fullSchema,
+                    configurations: [localRecordsConfig, localAttachmentsFallbackConfig]
+                )
             } catch {
                 fatalError("Failed to create local ModelContainer: \(error)")
             }
@@ -155,12 +169,6 @@ struct PaperTrailApp: App {
                     _ = await NotificationManager.shared.requestPermission()
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
-                }
-        }
-        .modelContainer(modelContainer)
-    }
-}
-flight()
                 }
         }
         .modelContainer(modelContainer)
