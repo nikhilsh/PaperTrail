@@ -15,12 +15,6 @@ final class Attachment {
     var localFilename: String
     var ocrText: String?
     var createdAt: Date
-
-    /// Image data stored for CloudKit sync.
-    /// On-device, we also cache to disk via ImageStorageManager for fast access.
-    @Attribute(.externalStorage)
-    var imageData: Data?
-
     var record: PurchaseRecord?
 
     var type: AttachmentType {
@@ -32,28 +26,16 @@ final class Attachment {
         type: AttachmentType,
         localFilename: String,
         ocrText: String? = nil,
-        imageData: Data? = nil,
         createdAt: Date = .now
     ) {
         self.typeRaw = type.rawValue
         self.localFilename = localFilename
         self.ocrText = ocrText
-        self.imageData = imageData
         self.createdAt = createdAt
     }
 
-    /// Load the image, preferring local disk cache, falling back to synced data.
+    /// Load the image from local on-device storage only.
     var image: UIImage? {
-        // Try disk cache first (fast)
-        if let cached = ImageStorageManager.load(localFilename) {
-            return cached
-        }
-        // Fall back to synced data
-        if let data = imageData, let img = UIImage(data: data) {
-            // Re-cache locally for next time
-            ImageStorageManager.save(img, withFilename: localFilename)
-            return img
-        }
-        return nil
+        ImageStorageManager.load(localFilename)
     }
 }

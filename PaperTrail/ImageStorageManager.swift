@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 
 /// Manages on-disk image storage in the app's documents directory.
-/// Acts as a local cache — the source of truth for sync is imageData on Attachment.
+/// Images are currently local-only; SwiftData/CloudKit syncs attachment metadata, not binary image blobs.
 struct ImageStorageManager {
     private static var imagesDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!

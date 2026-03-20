@@ -22,9 +22,6 @@ struct ScanningService {
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
 
-            // Store image data for CloudKit sync
-            let imageData = ImageStorageManager.jpegData(for: image, quality: 0.85)
-
             var ocrResult = OCRExtractionResult.empty
             do {
                 ocrResult = try await ocrService.extract(from: image)
@@ -35,8 +32,7 @@ struct ScanningService {
             let attachment = Attachment(
                 type: type,
                 localFilename: filename,
-                ocrText: ocrResult.recognizedText.isEmpty ? nil : ocrResult.recognizedText,
-                imageData: imageData
+                ocrText: ocrResult.recognizedText.isEmpty ? nil : ocrResult.recognizedText
             )
             attachments.append(attachment)
 

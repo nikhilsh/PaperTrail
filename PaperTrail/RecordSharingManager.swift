@@ -181,17 +181,11 @@ struct ImportedRecord {
         )
 
         for att in attachments {
-            let newFilename = UUID().uuidString + ".jpg"
             let attachment = Attachment(
                 type: att.type,
-                localFilename: newFilename,
-                ocrText: att.ocrText,
-                imageData: att.imageData
+                localFilename: att.filename,
+                ocrText: att.ocrText
             )
-            // Cache image locally if we have data
-            if let data = att.imageData, let image = UIImage(data: data) {
-                ImageStorageManager.save(image, withFilename: newFilename)
-            }
             attachment.record = record
             record.attachments.append(attachment)
         }
@@ -208,6 +202,22 @@ enum SharingError: LocalizedError {
         switch self {
         case .exportFailed: "Failed to export record."
         case .importFailed: "Failed to import record. The file may be corrupted."
+        }
+    }
+}
+
+enum SharingError: LocalizedError {
+    case exportFailed
+    case importFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .exportFailed: "Failed to export record."
+        case .importFailed: "Failed to import record. The file may be corrupted."
+        }
+    }
+}
+ortFailed: "Failed to import record. The file may be corrupted."
         }
     }
 }

@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("cloudKitContainerStatus") private var cloudKitContainerStatus = "Not checked"
     @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
     private let sentryStatus = AppLogger.isSentryEnabled ? "Enabled" : "Disabled"
+    private let sentryHost = AppLogger.sentryHost ?? "Not configured"
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -154,6 +155,12 @@ struct SettingsView: View {
 
 #Preview {
     NavigationStack {
+        SettingsView()
+    }
+    .environment(AuthenticationManager())
+    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
+}
+ack {
         SettingsView()
     }
     .environment(AuthenticationManager())

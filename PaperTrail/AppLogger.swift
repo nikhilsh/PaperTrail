@@ -5,6 +5,14 @@ import Sentry
 enum AppLogger {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "app")
 
+    static var sentryHost: String? {
+        guard let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String,
+              let url = URL(string: dsn) else {
+            return nil
+        }
+        return url.host
+    }
+
     static var isSentryEnabled: Bool {
         guard let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String else {
             return false
@@ -32,5 +40,10 @@ enum AppLogger {
             scope.setLevel(.error)
         }
         SentrySDK.capture(message: "[\(category)] \(message)")
+    }
+
+    static func testEvent() {
+        info("Manual Sentry test event requested", category: "observability")
+        error("Manual test event from Settings", category: "observability", tags: ["kind": "manual_test"])
     }
 }
