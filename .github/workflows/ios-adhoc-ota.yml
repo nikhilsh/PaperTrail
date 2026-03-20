@@ -145,6 +145,35 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      - name: Install sentry-cli
+        run: |
+          curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.40.0" sh
+
+      - name: Upload dSYMs to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          # Verify dSYM files exist
+          if [ -d "$ARCHIVE_PATH/dSYMs" ]; then
+            echo "Found dSYMs directory at $ARCHIVE_PATH/dSYMs"
+            ls -lh "$ARCHIVE_PATH/dSYMs"
+          else
+            echo "Warning: No dSYMs directory found at $ARCHIVE_PATH/dSYMs"
+            exit 1
+          fi
+
+          # Upload dSYMs with source context for better stack traces
+          sentry-cli debug-files upload \
+            --auth-token "$SENTRY_AUTH_TOKEN" \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --include-sources \
+            "$ARCHIVE_PATH/dSYMs"
+
+          echo "✅ dSYMs uploaded successfully to Sentry"
+
       - name: Prepare OTA site assets
         env:
           RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/adhoc-latest
