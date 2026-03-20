@@ -7,6 +7,9 @@ struct OCRExtractionResult: Hashable, Sendable {
     var suggestedPurchaseDate: Date?
     var suggestedAmount: Double?
     var suggestedCurrency: String?
+    var suggestedCategory: String?
+    var suggestedWarrantyDurationMonths: Int?
+    var extractionSource: ExtractionSource?
     var suggestedNotes: String?
 
     static let empty = OCRExtractionResult(recognizedText: "")

@@ -36,6 +36,15 @@ struct DraftRecordView: View {
             _amountText = State(initialValue: "")
         }
         _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
+        _category = State(initialValue: seededOCR?.suggestedCategory ?? "")
+
+        // If Foundation Models extracted a warranty duration, pre-fill the warranty toggle and date.
+        if let months = seededOCR?.suggestedWarrantyDurationMonths,
+           let purchaseDate = seededOCR?.suggestedPurchaseDate,
+           let expiryDate = Calendar.current.date(byAdding: .month, value: months, to: purchaseDate) {
+            _includeWarranty = State(initialValue: true)
+            _warrantyExpiryDate = State(initialValue: expiryDate)
+        }
     }
 
     var body: some View {
@@ -46,6 +55,17 @@ struct DraftRecordView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(8)
+
+                    if let source = seededOCR.extractionSource {
+                        HStack(spacing: 6) {
+                            Image(systemName: source == .foundationModel ? "cpu" : "text.magnifyingglass")
+                                .font(.caption2)
+                            Text(source == .foundationModel ? "Extracted with Apple Intelligence" : "Extracted with pattern matching")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                    }
                 }
             }
 

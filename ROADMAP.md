@@ -167,11 +167,12 @@ The research concluded that CloudKit sharing via `NSPersistentCloudKitContainer`
 ## Architecture Notes
 
 ### Current Stack
-- SwiftUI (iOS 18+)
+- SwiftUI (iOS 26+)
 - SwiftData for persistence
 - CloudKit automatic sync (private)
 - Vision framework for OCR
 - VisionKit for document scanning
+- Apple Foundation Models for intelligent field extraction (with heuristic fallback)
 - AuthenticationServices (Sign in with Apple)
 - UserNotifications (warranty reminders)
 

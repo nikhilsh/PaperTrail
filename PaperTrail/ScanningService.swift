@@ -18,6 +18,9 @@ struct ScanningService {
         var bestDate: Date?
         var bestAmount: Double?
         var bestCurrency: String?
+        var bestCategory: String?
+        var bestWarrantyMonths: Int?
+        var bestSource: ExtractionSource?
 
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
@@ -44,6 +47,9 @@ struct ScanningService {
             if bestDate == nil { bestDate = ocrResult.suggestedPurchaseDate }
             if bestAmount == nil { bestAmount = ocrResult.suggestedAmount }
             if bestCurrency == nil { bestCurrency = ocrResult.suggestedCurrency }
+            if bestCategory == nil { bestCategory = ocrResult.suggestedCategory }
+            if bestWarrantyMonths == nil { bestWarrantyMonths = ocrResult.suggestedWarrantyDurationMonths }
+            if bestSource == nil { bestSource = ocrResult.extractionSource }
         }
 
         let combined = OCRExtractionResult(
@@ -53,7 +59,10 @@ struct ScanningService {
             suggestedPurchaseDate: bestDate,
             suggestedAmount: bestAmount,
             suggestedCurrency: bestCurrency,
-            suggestedNotes: allText.isEmpty ? nil : "OCR draft extracted from scanned document."
+            suggestedCategory: bestCategory,
+            suggestedWarrantyDurationMonths: bestWarrantyMonths,
+            extractionSource: bestSource,
+            suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document."
         )
 
         return (attachments, combined)

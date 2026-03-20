@@ -2,7 +2,7 @@
 > Last updated: 2026-03-20
 
 ## What it is
-iOS app (SwiftUI, iOS 18+) for tracking purchase records, receipts, warranties. Scan → OCR → save → search → get reminded before warranty expires.
+iOS app (SwiftUI, iOS 26+) for tracking purchase records, receipts, warranties. Scan → OCR → save → search → get reminded before warranty expires.
 
 ## Current state: Milestone 3 working with OTA + CloudKit + Image Sync
 - SwiftData persistence
@@ -90,6 +90,21 @@ Working architecture now:
 - `99c90c4` — Use macro-safe SwiftData model defaults
 - `16bbcf5` — Polish OTA page and show local upload time
 - `53745a3` — single-store SwiftData / CloudKit direction (app-side fix lane)
+
+## Extraction Architecture (iOS 26+)
+The OCR pipeline now has two layers:
+1. **Vision OCR** — `VNRecognizeTextRequest` converts images to raw text (unchanged)
+2. **ExtractionPipeline** — takes raw text and extracts structured fields:
+   - Primary: `FoundationModelExtractionService` (Apple on-device LLM, `@Generable` structured output)
+   - Fallback: `HeuristicExtractionService` (regex/pattern matching, always available)
+   - Both run concurrently; FM values take priority, heuristics fill gaps
+   - New fields: `suggestedCategory`, `suggestedWarrantyDurationMonths`
+   - Per-field `ExtractionConfidence` tracking (high/medium/heuristic/none)
+   - DraftRecordView pre-fills category and warranty from extraction results
+
+### Key new files
+- `FoundationModelExtractor.swift` — FM service, heuristic service, schema, confidence types
+- `ExtractionPipeline.swift` — orchestrator, merge logic, OCRExtractionResult bridge
 
 ## Known follow-ups
 1. Verify one manual Sentry test event appears symbolicated in Sentry UI.

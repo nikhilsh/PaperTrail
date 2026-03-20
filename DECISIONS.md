@@ -44,3 +44,27 @@
 
 ### Support lookup policy
 - If a service/support number is inferred or looked up from external sources rather than extracted from proof, it must be clearly labeled as a best guess / unverified
+
+## 2026-03-20
+
+### iOS 26+ deployment target
+- Raised minimum deployment target from iOS 18.0 to iOS 26.0
+- Enables use of Apple Foundation Models framework for on-device LLM extraction
+- iOS 26 is the current release; no backward-compatibility burden for this early-stage app
+- CI already uses Xcode 26.3
+
+### Foundation Models extraction layer
+- Added `FoundationModelExtractionService` using Apple's on-device LLM via `@Generable` structured output
+- `ReceiptExtractionSchema` defines the JSON schema the model should produce
+- Added `ExtractionPipeline` orchestrator that runs FM + heuristic concurrently and merges results
+- Heuristic fallback ensures the app works on devices without Apple Intelligence
+- Per-field confidence tracking (`ExtractionConfidence`) lets the UI indicate extraction quality
+- New fields: `suggestedCategory`, `suggestedWarrantyDurationMonths` flow through from extraction to DraftRecordView
+- DraftRecordView shows extraction source badge ("Apple Intelligence" vs "pattern matching")
+- `VisionOCRService` simplified to Vision OCR only; field extraction delegated to `ExtractionPipeline`
+- Heuristic logic extracted to `HeuristicFieldExtractor` struct (was inline in VisionOCRService)
+
+### Design principle: graceful degradation
+- Foundation Models availability is checked at runtime via `LanguageModelSession.isAvailable`
+- `#if canImport(FoundationModels)` guards compile-time availability
+- App never crashes if the model is unavailable — always falls back to heuristics
