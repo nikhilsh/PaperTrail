@@ -160,9 +160,3 @@ struct SettingsView: View {
     .environment(AuthenticationManager())
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }
-ack {
-        SettingsView()
-    }
-    .environment(AuthenticationManager())
-    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
-}

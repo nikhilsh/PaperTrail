@@ -205,19 +205,3 @@ enum SharingError: LocalizedError {
         }
     }
 }
-
-enum SharingError: LocalizedError {
-    case exportFailed
-    case importFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .exportFailed: "Failed to export record."
-        case .importFailed: "Failed to import record. The file may be corrupted."
-        }
-    }
-}
-ortFailed: "Failed to import record. The file may be corrupted."
-        }
-    }
-}
