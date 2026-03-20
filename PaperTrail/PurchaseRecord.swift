@@ -23,6 +23,9 @@ final class PurchaseRecord {
     // Notification tracking
     var warrantyNotificationScheduled: Bool
 
+    @Relationship(deleteRule: .cascade, inverse: \Attachment.record)
+    var attachments: [Attachment]
+
     var createdAt: Date
     var updatedAt: Date
 
