@@ -168,6 +168,7 @@ struct LibraryView: View {
     private func deleteRecord(_ record: PurchaseRecord) {
         for attachment in attachments(for: record) {
             ImageStorageManager.delete(attachment.localFilename)
+            modelContext.delete(attachment)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         modelContext.delete(record)
