@@ -23,8 +23,9 @@ final class PurchaseRecord {
     // Notification tracking
     var warrantyNotificationScheduled: Bool
 
-    @Relationship(deleteRule: .cascade, inverse: \Attachment.record)
-    var attachments: [Attachment]
+    // NOTE: No @Relationship to Attachment — they live in separate SwiftData stores
+    // (PurchaseRecord in CloudKit, Attachment in local-only). Cross-store relationships
+    // are not supported. Link via Attachment.recordID == PurchaseRecord.id instead.
 
     var createdAt: Date
     var updatedAt: Date
@@ -45,7 +46,6 @@ final class PurchaseRecord {
         supportConfidence: String? = nil,
         supportNote: String? = nil,
         warrantyNotificationScheduled: Bool = false,
-        attachments: [Attachment] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -64,7 +64,6 @@ final class PurchaseRecord {
         self.supportConfidence = supportConfidence
         self.supportNote = supportNote
         self.warrantyNotificationScheduled = warrantyNotificationScheduled
-        self.attachments = attachments
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

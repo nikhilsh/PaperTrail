@@ -17,8 +17,6 @@ final class Attachment {
     var localFilename: String
     var ocrText: String?
     var createdAt: Date
-    
-    var record: PurchaseRecord?
 
     var type: AttachmentType {
         get { AttachmentType(rawValue: typeRaw) ?? .other }
