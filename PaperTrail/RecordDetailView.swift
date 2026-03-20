@@ -4,15 +4,16 @@ import SwiftData
 struct RecordDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var allAttachments: [Attachment]
     @Bindable var record: PurchaseRecord
     @State private var showDeleteConfirmation = false
     @State private var selectedImageFilename: SelectedFilename?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
-    
+
     private var attachments: [Attachment] {
-        record.attachments
+        allAttachments.filter { $0.recordID == record.id }
     }
 
     private var warrantyColor: Color {
@@ -207,7 +208,7 @@ struct RecordDetailView: View {
         isExporting = true
         defer { isExporting = false }
         do {
-            let url = try await RecordSharingManager.exportRecord(record)
+            let url = try await RecordSharingManager.exportRecord(record, attachments: attachments)
             shareURL = url
             showShareSheet = true
         } catch {

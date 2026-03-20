@@ -23,13 +23,11 @@ final class PurchaseRecord {
     // Notification tracking
     var warrantyNotificationScheduled: Bool
 
-    @Relationship(deleteRule: .cascade, inverse: \Attachment.record)
-    var attachments: [Attachment]
-
     var createdAt: Date
     var updatedAt: Date
 
     init(
+        id: UUID = UUID(),
         productName: String,
         merchantName: String? = nil,
         purchaseDate: Date? = nil,
@@ -48,6 +46,7 @@ final class PurchaseRecord {
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
+        self.id = id
         self.productName = productName
         self.merchantName = merchantName
         self.purchaseDate = purchaseDate

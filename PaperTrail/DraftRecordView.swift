@@ -133,12 +133,12 @@ struct DraftRecordView: View {
             tags: parsedTags
         )
 
+        modelContext.insert(record)
+
         for attachment in seededAttachments {
             attachment.recordID = record.id
-            record.attachments.append(attachment)
+            modelContext.insert(attachment)
         }
-
-        modelContext.insert(record)
 
         // Schedule warranty notifications if applicable
         if includeWarranty {

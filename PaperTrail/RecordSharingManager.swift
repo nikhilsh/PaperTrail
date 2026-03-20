@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// - `images/` — attachment images
 struct RecordSharingManager {
     /// Export a record to a shareable file URL.
-    static func exportRecord(_ record: PurchaseRecord) async throws -> URL {
+    static func exportRecord(_ record: PurchaseRecord, attachments: [Attachment]) async throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("share-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -19,7 +19,7 @@ struct RecordSharingManager {
 
         // Build JSON payload
         var attachmentMeta: [[String: String]] = []
-        for attachment in record.attachments {
+        for attachment in attachments {
             var meta: [String: String] = [
                 "type": attachment.typeRaw,
                 "filename": attachment.localFilename,
@@ -162,8 +162,9 @@ struct ImportedRecord {
     let supportNote: String?
     let attachments: [(type: AttachmentType, filename: String, ocrText: String?, imageData: Data?)]
 
-    /// Create a PurchaseRecord from the import.
-    func toPurchaseRecord() -> PurchaseRecord {
+    /// Create a PurchaseRecord and its linked Attachments from the import.
+    /// Both the record and the attachments must be inserted into the model context by the caller.
+    func toPurchaseRecordAndAttachments() -> (record: PurchaseRecord, attachments: [Attachment]) {
         let record = PurchaseRecord(
             productName: productName,
             merchantName: merchantName,
@@ -180,17 +181,16 @@ struct ImportedRecord {
             supportNote: supportNote
         )
 
-        for att in attachments {
-            let attachment = Attachment(
+        let importedAttachments = attachments.map { att in
+            Attachment(
                 recordID: record.id,
                 type: att.type,
                 localFilename: att.filename,
                 ocrText: att.ocrText
             )
-            record.attachments.append(attachment)
         }
 
-        return record
+        return (record, importedAttachments)
     }
 }
 
