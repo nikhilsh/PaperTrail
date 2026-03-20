@@ -3,8 +3,8 @@ import SwiftData
 
 @Model
 final class PurchaseRecord {
-    var id: UUID
-    var productName: String
+    var id: UUID = UUID()
+    var productName: String = ""
     var merchantName: String?
     var purchaseDate: Date?
     var warrantyExpiryDate: Date?
@@ -12,7 +12,7 @@ final class PurchaseRecord {
     var amount: Double?
     var currency: String?
     var category: String?
-    var tagsRaw: String
+    var tagsRaw: String = ""
 
     // Support info (embedded, not a separate model)
     var supportProviderName: String?
@@ -21,14 +21,14 @@ final class PurchaseRecord {
     var supportNote: String?
 
     // Notification tracking
-    var warrantyNotificationScheduled: Bool
+    var warrantyNotificationScheduled: Bool = false
 
-    // NOTE: No @Relationship to Attachment — they live in separate SwiftData stores
-    // (PurchaseRecord in CloudKit, Attachment in local-only). Cross-store relationships
-    // are not supported. Link via Attachment.recordID == PurchaseRecord.id instead.
+    // NOTE: No @Relationship to Attachment. Both models share one CloudKit-backed store,
+    // but we intentionally avoid @Relationship to keep the schema simple and avoid
+    // SwiftData relationship issues with CloudKit. Link via Attachment.recordID == PurchaseRecord.id.
 
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = .now
+    var updatedAt: Date = .now
 
     init(
         id: UUID = UUID(),

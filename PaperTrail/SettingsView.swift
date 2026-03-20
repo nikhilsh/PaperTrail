@@ -123,7 +123,7 @@ struct SettingsView: View {
                 LabeledContent("Records", value: "\(records.count)")
                 LabeledContent("Attachments", value: "\(attachments.count)")
                 LabeledContent("Image storage", value: totalImageSize)
-                LabeledContent("Persistence", value: "SwiftData + CloudKit")
+                LabeledContent("Persistence", value: "SwiftData + CloudKit (single store)")
             }
 
             // Warranties

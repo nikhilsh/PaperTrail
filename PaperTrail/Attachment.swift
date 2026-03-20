@@ -11,12 +11,12 @@ enum AttachmentType: String, Codable, Hashable, CaseIterable {
 
 @Model
 final class Attachment {
-    var id: UUID
+    var id: UUID = UUID()
     var recordID: UUID?
-    var typeRaw: String
-    var localFilename: String
+    var typeRaw: String = AttachmentType.other.rawValue
+    var localFilename: String = ""
     var ocrText: String?
-    var createdAt: Date
+    var createdAt: Date = .now
 
     var type: AttachmentType {
         get { AttachmentType(rawValue: typeRaw) ?? .other }

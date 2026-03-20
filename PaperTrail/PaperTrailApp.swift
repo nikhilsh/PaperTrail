@@ -107,26 +107,21 @@ struct PaperTrailApp: App {
     init() {
         configureSentry()
 
-        let fullSchema = Schema([PurchaseRecord.self, Attachment.self])
-        let cloudRecordsSchema = Schema([PurchaseRecord.self])
-        let localAttachmentsSchema = Schema([Attachment.self])
+        // Single-store approach: both PurchaseRecord and Attachment live in the same
+        // CloudKit-backed store. Attachment holds only lightweight metadata (filename,
+        // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.
+        // This avoids the multi-configuration + CloudKit bug that causes
+        // SwiftDataError.loadIssueModelContainer on iOS 17/18.
+        let schema = Schema([PurchaseRecord.self, Attachment.self])
 
         let cloudConfig = ModelConfiguration(
-            "PaperTrailCloud",
-            schema: cloudRecordsSchema,
+            "PaperTrail",
+            schema: schema,
             cloudKitDatabase: .automatic
-        )
-        let localAttachmentsConfig = ModelConfiguration(
-            "PaperTrailLocalAttachments",
-            schema: localAttachmentsSchema,
-            cloudKitDatabase: .none
         )
 
         do {
-            modelContainer = try ModelContainer(
-                for: fullSchema,
-                configurations: [cloudConfig, localAttachmentsConfig]
-            )
+            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
             UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
             UserDefaults.standard.removeObject(forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .info, category: "sync", message: "CloudKit-backed ModelContainer initialized successfully")
@@ -139,22 +134,14 @@ struct PaperTrailApp: App {
             AppLogger.error("CloudKit startup fallback: \(errorText)", category: "sync", tags: ["sync_backend": SyncBackendState.localFallback])
             SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.localFallback, key: "sync_backend") }
 
-            let localRecordsConfig = ModelConfiguration(
-                "PaperTrailLocalRecords",
-                schema: cloudRecordsSchema,
-                cloudKitDatabase: .none
-            )
-            let localAttachmentsFallbackConfig = ModelConfiguration(
-                "PaperTrailLocalAttachments",
-                schema: localAttachmentsSchema,
+            let localConfig = ModelConfiguration(
+                "PaperTrailLocal",
+                schema: schema,
                 cloudKitDatabase: .none
             )
 
             do {
-                modelContainer = try ModelContainer(
-                    for: fullSchema,
-                    configurations: [localRecordsConfig, localAttachmentsFallbackConfig]
-                )
+                modelContainer = try ModelContainer(for: schema, configurations: [localConfig])
             } catch {
                 fatalError("Failed to create local ModelContainer: \(error)")
             }
