@@ -28,8 +28,8 @@ private func addStartupBreadcrumb(level: SentryLevel, category: String, message:
 }
 
 private func configureSentry() {
-    guard let dsn = Bundle.main.object(forInfoDictionaryKey: AppDiagnostics.sentryDSNKey) as? String,
-          !dsn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    let dsn = BuildSecrets.sentryDSN
+    guard !dsn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return
     }
 

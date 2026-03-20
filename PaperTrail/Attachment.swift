@@ -11,11 +11,12 @@ enum AttachmentType: String, Codable, Hashable, CaseIterable {
 
 @Model
 final class Attachment {
+    var id: UUID
+    var recordID: UUID?
     var typeRaw: String
     var localFilename: String
     var ocrText: String?
     var createdAt: Date
-    var record: PurchaseRecord?
 
     var type: AttachmentType {
         get { AttachmentType(rawValue: typeRaw) ?? .other }
@@ -23,18 +24,21 @@ final class Attachment {
     }
 
     init(
+        id: UUID = UUID(),
+        recordID: UUID? = nil,
         type: AttachmentType,
         localFilename: String,
         ocrText: String? = nil,
         createdAt: Date = .now
     ) {
+        self.id = id
+        self.recordID = recordID
         self.typeRaw = type.rawValue
         self.localFilename = localFilename
         self.ocrText = ocrText
         self.createdAt = createdAt
     }
 
-    /// Load the image from local on-device storage only.
     var image: UIImage? {
         ImageStorageManager.load(localFilename)
     }

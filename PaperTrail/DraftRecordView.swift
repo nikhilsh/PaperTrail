@@ -134,7 +134,7 @@ struct DraftRecordView: View {
         )
 
         for attachment in seededAttachments {
-            attachment.record = record
+            attachment.recordID = record.id
             record.attachments.append(attachment)
         }
 

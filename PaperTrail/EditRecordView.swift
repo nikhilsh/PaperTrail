@@ -16,6 +16,10 @@ struct EditRecordView: View {
     @State private var category: String
     @State private var tagsText: String
 
+    private var attachments: [Attachment] {
+        allAttachments.filter { $0.recordID == record.id }
+    }
+
     init(record: PurchaseRecord) {
         self.record = record
         _productName = State(initialValue: record.productName)
@@ -76,12 +80,12 @@ struct EditRecordView: View {
                     .lineLimit(4, reservesSpace: true)
             }
 
-            Section("Attachments (\(record.attachments.count))") {
-                if record.attachments.isEmpty {
+            Section("Attachments (\(attachments.count))") {
+                if attachments.isEmpty {
                     Text("No attachments")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(record.attachments) { attachment in
+                    ForEach(attachments) { attachment in
                         HStack {
                             if let image = attachment.image {
                                 Image(uiImage: image)
@@ -149,4 +153,6 @@ struct EditRecordView: View {
     NavigationStack {
         Text("Preview requires SwiftData context")
     }
+}
+   }
 }

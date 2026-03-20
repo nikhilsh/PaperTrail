@@ -22,6 +22,10 @@ struct LibraryView: View {
     @State private var sortOption: LibrarySortOption = .newest
     @State private var filterOption: LibraryFilterOption = .all
 
+    private func attachments(for record: PurchaseRecord) -> [Attachment] {
+        allAttachments.filter { $0.recordID == record.id }
+    }
+
     private var processedRecords: [PurchaseRecord] {
         var result = records
 
@@ -44,7 +48,7 @@ struct LibraryView: View {
                 || (record.notes?.localizedCaseInsensitiveContains(searchText) ?? false)
                 || (record.category?.localizedCaseInsensitiveContains(searchText) ?? false)
                 || record.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
-                || record.attachments.contains { $0.ocrText?.localizedCaseInsensitiveContains(searchText) ?? false }
+                || attachments(for: record).contains { $0.ocrText?.localizedCaseInsensitiveContains(searchText) ?? false }
             }
         }
 
@@ -141,7 +145,7 @@ struct LibraryView: View {
                             NavigationLink {
                                 RecordDetailView(record: record)
                             } label: {
-                                PurchaseRecordCard(record: record)
+                                PurchaseRecordCard(record: record, attachmentCount: attachments(for: record).count)
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
@@ -161,7 +165,7 @@ struct LibraryView: View {
     }
 
     private func deleteRecord(_ record: PurchaseRecord) {
-        for attachment in record.attachments {
+        for attachment in attachments(for: record) {
             ImageStorageManager.delete(attachment.localFilename)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
@@ -211,6 +215,7 @@ private struct SummaryTile: View {
 
 private struct PurchaseRecordCard: View {
     let record: PurchaseRecord
+    let attachmentCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -230,7 +235,7 @@ private struct PurchaseRecordCard: View {
                 Spacer(minLength: 12)
 
                 VStack(alignment: .trailing, spacing: 4) {
-                    AttachmentBadge(count: record.attachments.count)
+                    AttachmentBadge(count: attachmentCount)
 
                     if let amount = record.formattedAmount {
                         Text(amount)

@@ -107,6 +107,16 @@ jobs:
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
+      - name: Generate build secrets
+        run: |
+          cat > PaperTrail/GeneratedSecrets.swift <<EOF
+          import Foundation
+
+          enum BuildSecrets {
+              static let sentryDSN = "${SENTRY_DSN}"
+          }
+          EOF
+
       - name: Show build settings
         run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings
 

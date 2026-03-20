@@ -119,13 +119,13 @@ struct RecordDetailView: View {
 
             // Attachments
             Section("Attachments") {
-                if record.attachments.isEmpty {
+                if attachments.isEmpty {
                     Text("No attachments")
                         .foregroundStyle(.secondary)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(record.attachments) { attachment in
+                            ForEach(attachments) { attachment in
                                 Button {
                                     selectedImageFilename = SelectedFilename(attachment.localFilename)
                                 } label: {
@@ -136,7 +136,7 @@ struct RecordDetailView: View {
                         }
                     }
 
-                    ForEach(record.attachments) { attachment in
+                    ForEach(attachments) { attachment in
                         if let ocrText = attachment.ocrText, !ocrText.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(attachment.type.rawValue.capitalized)
@@ -212,7 +212,7 @@ struct RecordDetailView: View {
     }
 
     private func deleteRecord() {
-        for attachment in record.attachments {
+        for attachment in attachments {
             ImageStorageManager.delete(attachment.localFilename)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
@@ -250,6 +250,16 @@ private struct AttachmentThumbnail: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(.separator), lineWidth: 0.5)
+        )
+    }
+}
+
+#Preview {
+    NavigationStack {
+        Text("Preview requires SwiftData context")
+    }
+}
+ 0.5)
         )
     }
 }

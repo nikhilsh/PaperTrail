@@ -3,6 +3,7 @@ import SwiftData
 
 @Model
 final class PurchaseRecord {
+    var id: UUID
     var productName: String
     var merchantName: String?
     var purchaseDate: Date?
@@ -142,4 +143,8 @@ enum WarrantyStatus {
         case .unknown: "secondary"
         }
     }
+}
+}
+}
+  }
 }

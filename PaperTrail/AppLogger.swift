@@ -6,18 +6,14 @@ enum AppLogger {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "app")
 
     static var sentryHost: String? {
-        guard let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String,
-              let url = URL(string: dsn) else {
+        guard let url = URL(string: BuildSecrets.sentryDSN) else {
             return nil
         }
         return url.host
     }
 
     static var isSentryEnabled: Bool {
-        guard let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String else {
-            return false
-        }
-        return !dsn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !BuildSecrets.sentryDSN.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     static func info(_ message: String, category: String = "app") {
