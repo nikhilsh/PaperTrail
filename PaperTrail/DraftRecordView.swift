@@ -10,6 +10,9 @@ struct DraftRecordView: View {
     let seededAttachments: [Attachment]
     let seededOCR: OCRExtractionResult?
 
+    /// The structured extraction result preserved for confidence badges and correction logging.
+    private let structuredResult: StructuredExtractionResult?
+
     @State private var productName: String
     @State private var merchantName: String
     @State private var notes: String
@@ -25,6 +28,8 @@ struct DraftRecordView: View {
         self.seedType = seedType
         self.seededAttachments = seededAttachments
         self.seededOCR = seededOCR
+        self.structuredResult = seededOCR?.structuredResult
+
         _productName = State(initialValue: seededOCR?.suggestedProductName ?? "")
         _merchantName = State(initialValue: seededOCR?.suggestedMerchantName ?? "")
         _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
@@ -47,10 +52,50 @@ struct DraftRecordView: View {
         }
     }
 
+    // MARK: - Confidence helpers
+
+    /// Get the confidence for a specific field from the structured result.
+    private func confidence(for keyPath: KeyPath<StructuredExtractionResult, ExtractedField<String>>) -> ExtractionConfidence? {
+        guard let sr = structuredResult, sr[keyPath: keyPath].value != nil else { return nil }
+        return sr[keyPath: keyPath].confidence
+    }
+
+    private var amountConfidence: ExtractionConfidence? {
+        guard let sr = structuredResult, sr.amount.value != nil else { return nil }
+        return sr.amount.confidence
+    }
+
+    private var dateConfidence: ExtractionConfidence? {
+        guard let sr = structuredResult, sr.purchaseDate.value != nil else { return nil }
+        return sr.purchaseDate.confidence
+    }
+
+    private var warrantyConfidence: ExtractionConfidence? {
+        guard let sr = structuredResult, sr.warrantyDurationMonths.value != nil else { return nil }
+        return sr.warrantyDurationMonths.confidence
+    }
+
     var body: some View {
         Form {
+            // Document kind + OCR text section
             if let seededOCR, !seededOCR.recognizedText.isEmpty {
                 Section("Extracted text") {
+                    // Document kind badge
+                    if let kind = seededOCR.documentKind, kind != .unknown {
+                        HStack(spacing: 6) {
+                            Image(systemName: iconForDocumentKind(kind))
+                                .font(.caption)
+                            Text(kind.label)
+                                .font(.caption.weight(.medium))
+                            if let sr = structuredResult,
+                               sr.documentKind.confidence.needsReview {
+                                ExtractionBadgeView(confidence: sr.documentKind.confidence)
+                            }
+                        }
+                        .foregroundStyle(.blue)
+                        .padding(.bottom, 2)
+                    }
+
                     Text(seededOCR.recognizedText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -88,15 +133,32 @@ struct DraftRecordView: View {
             }
 
             Section("Details") {
-                TextField("Product name", text: $productName)
-                TextField("Store", text: $merchantName)
-                DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
+                ExtractedTextField(
+                    title: "Product name",
+                    text: $productName,
+                    confidence: confidence(for: \.productName)
+                )
+                ExtractedTextField(
+                    title: "Store",
+                    text: $merchantName,
+                    confidence: confidence(for: \.merchantName)
+                )
+                HStack {
+                    DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
+                    if let conf = dateConfidence, conf.needsReview {
+                        ExtractionBadgeView(confidence: conf)
+                    }
+                }
             }
 
             Section("Amount") {
                 HStack {
-                    TextField("Amount", text: $amountText)
-                        .keyboardType(.decimalPad)
+                    ExtractedTextField(
+                        title: "Amount",
+                        text: $amountText,
+                        confidence: amountConfidence
+                    )
+                    .keyboardType(.decimalPad)
                     Picker("Currency", selection: $currency) {
                         Text("SGD").tag("SGD")
                         Text("USD").tag("USD")
@@ -110,14 +172,23 @@ struct DraftRecordView: View {
             }
 
             Section("Warranty") {
-                Toggle("Add warranty expiry", isOn: $includeWarranty)
+                HStack {
+                    Toggle("Add warranty expiry", isOn: $includeWarranty)
+                    if let conf = warrantyConfidence, conf.needsReview {
+                        ExtractionBadgeView(confidence: conf)
+                    }
+                }
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
             }
 
             Section("Organization") {
-                TextField("Category (e.g. Electronics, Kitchen)", text: $category)
+                ExtractedTextField(
+                    title: "Category (e.g. Electronics, Kitchen)",
+                    text: $category,
+                    confidence: confidence(for: \.category)
+                )
                 TextField("Tags (comma separated)", text: $tagsText)
             }
 
@@ -138,9 +209,48 @@ struct DraftRecordView: View {
         }
     }
 
+    // MARK: - Document kind icon
+
+    private func iconForDocumentKind(_ kind: DocumentKind) -> String {
+        switch kind {
+        case .receipt: "receipt"
+        case .invoice: "doc.text"
+        case .warrantyCard: "shield.lefthalf.filled"
+        case .orderConfirmation: "checkmark.circle"
+        case .packingSlip: "shippingbox"
+        case .supportDocument: "wrench.and.screwdriver"
+        case .manual: "book"
+        case .unknown: "questionmark.folder"
+        }
+    }
+
+    // MARK: - Save
+
     private func saveRecord() {
         let parsedAmount = Double(amountText.replacingOccurrences(of: ",", with: ""))
         let parsedTags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+        // Log corrections before saving — compare extraction vs user's final values.
+        let finalWarrantyMonths: Int? = {
+            guard includeWarranty,
+                  let sr = structuredResult,
+                  let originalMonths = sr.warrantyDurationMonths.value else { return nil }
+            // Reverse-calculate months from the user's chosen dates to compare.
+            let months = Calendar.current.dateComponents([.month], from: purchaseDate, to: warrantyExpiryDate).month
+            return months != originalMonths ? months : originalMonths
+        }()
+
+        CorrectionLogger.logCorrections(
+            structured: structuredResult,
+            documentKind: seededOCR?.documentKind,
+            finalProductName: productName,
+            finalMerchantName: merchantName,
+            finalPurchaseDate: purchaseDate,
+            finalAmount: parsedAmount,
+            finalCurrency: currency,
+            finalCategory: category,
+            finalWarrantyMonths: finalWarrantyMonths
+        )
 
         let record = PurchaseRecord(
             productName: productName,

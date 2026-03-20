@@ -54,6 +54,7 @@ struct ExtractionPipeline: Sendable {
         fallback: StructuredExtractionResult
     ) -> StructuredExtractionResult {
         StructuredExtractionResult(
+            documentKind: pick(primary.documentKind, fallback.documentKind),
             productName: pick(primary.productName, fallback.productName),
             merchantName: pick(primary.merchantName, fallback.merchantName),
             purchaseDate: pick(primary.purchaseDate, fallback.purchaseDate),
@@ -93,7 +94,9 @@ extension StructuredExtractionResult {
             suggestedCategory: category.value,
             suggestedWarrantyDurationMonths: warrantyDurationMonths.value,
             extractionSource: source,
-            suggestedNotes: recognizedText.isEmpty ? nil : "Extracted from scanned document."
+            suggestedNotes: recognizedText.isEmpty ? nil : "Extracted from scanned document.",
+            documentKind: documentKind.value,
+            structuredResult: self
         )
     }
 }

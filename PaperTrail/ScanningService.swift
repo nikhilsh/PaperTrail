@@ -21,6 +21,8 @@ struct ScanningService {
         var bestCategory: String?
         var bestWarrantyMonths: Int?
         var bestSource: ExtractionSource?
+        var bestDocumentKind: DocumentKind?
+        var bestStructuredResult: StructuredExtractionResult?
 
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
@@ -50,6 +52,8 @@ struct ScanningService {
             if bestCategory == nil { bestCategory = ocrResult.suggestedCategory }
             if bestWarrantyMonths == nil { bestWarrantyMonths = ocrResult.suggestedWarrantyDurationMonths }
             if bestSource == nil { bestSource = ocrResult.extractionSource }
+            if bestDocumentKind == nil { bestDocumentKind = ocrResult.documentKind }
+            if bestStructuredResult == nil { bestStructuredResult = ocrResult.structuredResult }
         }
 
         let combined = OCRExtractionResult(
@@ -62,7 +66,9 @@ struct ScanningService {
             suggestedCategory: bestCategory,
             suggestedWarrantyDurationMonths: bestWarrantyMonths,
             extractionSource: bestSource,
-            suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document."
+            suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document.",
+            documentKind: bestDocumentKind,
+            structuredResult: bestStructuredResult
         )
 
         return (attachments, combined)

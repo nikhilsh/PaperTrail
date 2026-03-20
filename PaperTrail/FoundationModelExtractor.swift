@@ -3,6 +3,34 @@ import Foundation
 import FoundationModels
 #endif
 
+// MARK: - Document kind
+
+/// Classifies the type of scanned document to guide downstream extraction and display.
+enum DocumentKind: String, Codable, Sendable, Hashable, CaseIterable {
+    case receipt
+    case invoice
+    case warrantyCard
+    case orderConfirmation
+    case packingSlip
+    case supportDocument
+    case manual
+    case unknown
+    
+    /// Human-readable label for display.
+    var label: String {
+        switch self {
+        case .receipt: "Receipt"
+        case .invoice: "Invoice"
+        case .warrantyCard: "Warranty Card"
+        case .orderConfirmation: "Order Confirmation"
+        case .packingSlip: "Packing Slip"
+        case .supportDocument: "Support Document"
+        case .manual: "Manual"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
 // MARK: - Extraction confidence
 
 /// Indicates how confident the extraction layer is about a particular field value.
@@ -13,8 +41,41 @@ enum ExtractionConfidence: String, Codable, Sendable, Hashable {
     case medium
     /// Derived from heuristic fallback, not the Foundation Model.
     case heuristic
+    /// Low confidence — suggest but flag for review.
+    case low
     /// No value could be extracted.
     case none
+    
+    /// Whether this confidence level warrants a review cue in the UI.
+    var needsReview: Bool {
+        switch self {
+        case .high: false
+        case .medium, .heuristic, .low: true
+        case .none: false // nothing to review if no value
+        }
+    }
+    
+    /// SF Symbol name for the confidence badge.
+    var badgeIcon: String? {
+        switch self {
+        case .high: nil
+        case .medium: "eye.trianglebadge.exclamationmark"
+        case .heuristic: "text.magnifyingglass"
+        case .low: "questionmark.circle"
+        case .none: nil
+        }
+    }
+    
+    /// Short label for the confidence badge.
+    var badgeLabel: String? {
+        switch self {
+        case .high: nil
+        case .medium: "Review"
+        case .heuristic: "Pattern match"
+        case .low: "Suggested"
+        case .none: nil
+        }
+    }
 }
 
 // MARK: - Structured extraction result
@@ -31,6 +92,7 @@ struct ExtractedField<T: Sendable & Hashable>: Sendable, Hashable {
 
 /// The complete set of fields extracted from OCR text, with per-field confidence.
 struct StructuredExtractionResult: Sendable, Hashable {
+    var documentKind: ExtractedField<DocumentKind>
     var productName: ExtractedField<String>
     var merchantName: ExtractedField<String>
     var purchaseDate: ExtractedField<Date>
@@ -43,6 +105,7 @@ struct StructuredExtractionResult: Sendable, Hashable {
     var source: ExtractionSource
 
     static let empty = StructuredExtractionResult(
+        documentKind: .absent,
         productName: .absent,
         merchantName: .absent,
         purchaseDate: .absent,
@@ -72,6 +135,9 @@ enum ExtractionSource: String, Sendable, Hashable {
 #if canImport(FoundationModels)
 @Generable
 struct ReceiptExtractionSchema: Sendable {
+    @Guide(description: "The type of document: one of receipt, invoice, warranty_card, order_confirmation, packing_slip, support_document, manual, unknown.")
+    var documentKind: String?
+
     @Guide(description: "The product or device name purchased. If multiple items, pick the most expensive or prominent one.")
     var productName: String?
 
@@ -171,7 +237,37 @@ struct FoundationModelExtractionService: FieldExtractionService {
             return nil
         }()
 
+        let documentKind: ExtractedField<DocumentKind> = {
+            guard let kindStr = schema.documentKind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+                return .absent
+            }
+            // Map the model's string output to our enum, handling common variations.
+            let kindMap: [String: DocumentKind] = [
+                "receipt": .receipt,
+                "invoice": .invoice,
+                "warranty_card": .warrantyCard,
+                "warranty card": .warrantyCard,
+                "warrantycard": .warrantyCard,
+                "order_confirmation": .orderConfirmation,
+                "order confirmation": .orderConfirmation,
+                "orderconfirmation": .orderConfirmation,
+                "packing_slip": .packingSlip,
+                "packing slip": .packingSlip,
+                "packingslip": .packingSlip,
+                "support_document": .supportDocument,
+                "support document": .supportDocument,
+                "supportdocument": .supportDocument,
+                "manual": .manual,
+                "unknown": .unknown,
+            ]
+            if let kind = kindMap[kindStr] {
+                return ExtractedField(value: kind, confidence: .high)
+            }
+            return ExtractedField(value: .unknown, confidence: .low)
+        }()
+
         return StructuredExtractionResult(
+            documentKind: documentKind,
             productName: field(schema.productName, minLength: 2),
             merchantName: field(schema.merchantName, minLength: 2),
             purchaseDate: ExtractedField(
@@ -220,6 +316,7 @@ struct HeuristicFieldExtractor {
 
     func extract(from text: String) -> StructuredExtractionResult {
         StructuredExtractionResult(
+            documentKind: classifyDocument(from: text),
             productName: ExtractedField(value: extractProductName(from: text), confidence: .heuristic),
             merchantName: ExtractedField(value: extractMerchantName(from: text), confidence: .heuristic),
             purchaseDate: ExtractedField(value: extractDate(from: text), confidence: .heuristic),
@@ -229,6 +326,35 @@ struct HeuristicFieldExtractor {
             warrantyDurationMonths: .absent,
             source: .heuristic
         )
+    }
+
+    // MARK: - Document classification
+
+    private func classifyDocument(from text: String) -> ExtractedField<DocumentKind> {
+        let lower = text.lowercased()
+
+        // Score each kind by keyword presence.
+        let scores: [(DocumentKind, Int)] = [
+            (.receipt, countKeywords(lower, ["receipt", "change due", "subtotal", "cashier", "payment method"])),
+            (.invoice, countKeywords(lower, ["invoice", "bill to", "due date", "payment terms", "invoice no", "invoice number"])),
+            (.warrantyCard, countKeywords(lower, ["warranty", "guarantee", "coverage", "warranty card", "warranty period"])),
+            (.orderConfirmation, countKeywords(lower, ["order confirmation", "order number", "order #", "your order", "shipping to"])),
+            (.packingSlip, countKeywords(lower, ["packing slip", "packing list", "shipped", "qty shipped", "items shipped"])),
+            (.supportDocument, countKeywords(lower, ["support", "service request", "case number", "ticket", "rma"])),
+            (.manual, countKeywords(lower, ["user manual", "instructions", "getting started", "safety information", "table of contents"])),
+        ]
+
+        let best = scores.max(by: { $0.1 < $1.1 })
+        if let best, best.1 >= 2 {
+            return ExtractedField(value: best.0, confidence: .heuristic)
+        } else if let best, best.1 == 1 {
+            return ExtractedField(value: best.0, confidence: .low)
+        }
+        return ExtractedField(value: .unknown, confidence: .low)
+    }
+
+    private func countKeywords(_ text: String, _ keywords: [String]) -> Int {
+        keywords.filter { text.contains($0) }.count
     }
 
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)

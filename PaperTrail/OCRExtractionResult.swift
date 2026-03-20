@@ -11,6 +11,11 @@ struct OCRExtractionResult: Hashable, Sendable {
     var suggestedWarrantyDurationMonths: Int?
     var extractionSource: ExtractionSource?
     var suggestedNotes: String?
+    var documentKind: DocumentKind?
+
+    /// The full structured extraction result, preserved for confidence-aware UI.
+    /// Only available when the extraction pipeline was used (not for manually constructed results).
+    var structuredResult: StructuredExtractionResult?
 
     static let empty = OCRExtractionResult(recognizedText: "")
 }
