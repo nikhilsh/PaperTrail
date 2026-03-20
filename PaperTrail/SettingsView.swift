@@ -32,6 +32,26 @@ struct SettingsView: View {
         attachments.count - localImageCount
     }
 
+    private var imageSyncSummary: String {
+        if attachments.isEmpty {
+            return "No proof images yet"
+        }
+        if !cloudImageSync.activeTransfers.isEmpty {
+            return "Syncing"
+        }
+        if !cloudImageSync.transferErrors.isEmpty {
+            return "Needs attention"
+        }
+        return "Synced"
+    }
+
+    private var localAvailabilitySummary: String {
+        if attachments.isEmpty {
+            return "None"
+        }
+        return "\(localImageCount) of \(attachments.count) available offline"
+    }
+
     private var activeWarrantyCount: Int {
         records.filter { $0.warrantyStatus == .active || $0.warrantyStatus == .expiringSoon }.count
     }
