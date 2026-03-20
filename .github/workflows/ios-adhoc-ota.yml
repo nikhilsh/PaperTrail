@@ -184,6 +184,7 @@ jobs:
           export IPA_URL="$RELEASE_BASE_URL/PaperTrail.ipa"
           export MANIFEST_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/manifest.plist"
           export BUILD_UPLOAD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          export BUILD_UPLOAD_TIME_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           export BUILD_CHANGELOG="$(git log -1 --pretty=%s | tr '\n' ' ' | sed 's/[&<>]/ /g')"
           envsubst < .github/ota/manifest.plist.template > ota/manifest.plist
           envsubst < .github/ota/index.html.template > ota/index.html

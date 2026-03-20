@@ -5,26 +5,247 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Install PaperTrail</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
-      .card { border: 1px solid #d0d7de; border-radius: 16px; padding: 1.25rem; }
-      a.button { display: inline-block; background: #0a84ff; color: white; text-decoration: none; padding: 0.8rem 1.1rem; border-radius: 12px; font-weight: 600; }
-      code { background: #f6f8fa; padding: 0.15rem 0.35rem; border-radius: 6px; }
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f7fb;
+        --card: rgba(255,255,255,0.82);
+        --card-border: rgba(15, 23, 42, 0.08);
+        --text: #0f172a;
+        --muted: #475569;
+        --accent: #0a84ff;
+        --accent-2: #34c759;
+        --chip: rgba(10,132,255,0.12);
+        --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1020;
+          --card: rgba(15, 23, 42, 0.78);
+          --card-border: rgba(148, 163, 184, 0.18);
+          --text: #f8fafc;
+          --muted: #cbd5e1;
+          --accent: #4da3ff;
+          --accent-2: #30d158;
+          --chip: rgba(77,163,255,0.16);
+          --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+        }
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(10,132,255,0.18), transparent 30%),
+          radial-gradient(circle at top right, rgba(52,199,89,0.12), transparent 25%),
+          var(--bg);
+        min-height: 100vh;
+      }
+      .wrap {
+        max-width: 56rem;
+        margin: 0 auto;
+        padding: 2rem 1rem 4rem;
+      }
+      .hero {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 28px;
+        padding: 1.5rem;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--accent);
+        font-weight: 700;
+        font-size: 0.88rem;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        margin: 0 0 0.6rem;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .lead {
+        margin: 0;
+        color: var(--muted);
+        font-size: 1.03rem;
+        max-width: 42rem;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.9rem;
+        margin-top: 1.4rem;
+      }
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.55rem;
+        background: linear-gradient(135deg, var(--accent), #5e5ce6);
+        color: white;
+        text-decoration: none;
+        padding: 0.95rem 1.2rem;
+        border-radius: 14px;
+        font-weight: 700;
+        box-shadow: 0 12px 30px rgba(10,132,255,0.28);
+      }
+      a.secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.95rem 1.05rem;
+        border-radius: 14px;
+        border: 1px solid var(--card-border);
+        color: var(--text);
+        text-decoration: none;
+        background: rgba(255,255,255,0.35);
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin-top: 1rem;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: 1rem 1.05rem;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.4rem;
+      }
+      .value {
+        font-size: 1rem;
+        font-weight: 650;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+      .value code, .technical code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.92em;
+      }
+      .steps, .technical {
+        margin-top: 1rem;
+      }
+      .steps ol {
+        margin: 0.6rem 0 0;
+        padding-left: 1.2rem;
+        color: var(--muted);
+      }
+      .steps li { margin: 0.5rem 0; }
+      .technical details {
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        background: var(--card);
+      }
+      .technical summary {
+        cursor: pointer;
+        font-weight: 650;
+      }
+      .technical p, .technical li {
+        color: var(--muted);
+      }
+      .changelog {
+        font-size: 1.02rem;
+        font-weight: 600;
+      }
+      .subtle {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .footer {
+        margin-top: 1rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
     </style>
   </head>
   <body>
-    <div class="card">
-      <h1>Install PaperTrail</h1>
-      <p>This build is signed for Ad Hoc distribution. The iPhone or iPad must already be registered in the provisioning profile.</p>
-      <p><a class="button" href="itms-services://?action=download-manifest&amp;url=${MANIFEST_URL}">Install on iPhone or iPad</a></p>
-      <p>If install fails, check that:</p>
-      <ul>
-        <li>the device UDID is in the Ad Hoc profile</li>
-        <li>the app was signed with the matching Apple Distribution certificate</li>
-        <li>the release assets are publicly reachable</li>
-      </ul>
-      <p>Direct IPA URL: <code>${IPA_URL}</code></p>
-      <p>Build uploaded: <strong>${BUILD_UPLOAD_TIME}</strong></p>
-      <p>What changed in this build: <strong>${BUILD_CHANGELOG}</strong></p>
-    </div>
+    <main class="wrap">
+      <section class="hero">
+        <div class="eyebrow">PaperTrail · Ad Hoc build</div>
+        <h1>Install the latest PaperTrail build</h1>
+        <p class="lead">This page is for internal iPhone/iPad testing. If your device is already included in the provisioning profile, install should work in one tap.</p>
+
+        <div class="cta-row">
+          <a class="button" href="itms-services://?action=download-manifest&amp;url=${MANIFEST_URL}">Install on iPhone or iPad</a>
+          <a class="secondary" href="${IPA_URL}">Download IPA</a>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="label">Uploaded</div>
+          <div class="value" id="build-upload-time-local">Loading local time…</div>
+          <div class="subtle" id="build-upload-time-utc">UTC: ${BUILD_UPLOAD_TIME}</div>
+        </article>
+
+        <article class="panel">
+          <div class="label">What changed</div>
+          <div class="value changelog">${BUILD_CHANGELOG}</div>
+        </article>
+      </section>
+
+      <section class="panel steps">
+        <div class="label">Install notes</div>
+        <ol>
+          <li>Open this page on the iPhone or iPad you want to test with.</li>
+          <li>Tap <strong>Install on iPhone or iPad</strong>.</li>
+          <li>If iOS warns about trust/profile/device eligibility, check that the device UDID is included in the Ad Hoc provisioning profile.</li>
+        </ol>
+      </section>
+
+      <section class="technical">
+        <details>
+          <summary>Technical details</summary>
+          <p>Use this if install fails or you want the raw release links.</p>
+          <ul>
+            <li>Manifest URL: <code>${MANIFEST_URL}</code></li>
+            <li>Direct IPA URL: <code>${IPA_URL}</code></li>
+            <li>Build uploaded at (UTC): <code>${BUILD_UPLOAD_TIME}</code></li>
+            <li>Build uploaded at (ISO): <code>${BUILD_UPLOAD_TIME_ISO}</code></li>
+          </ul>
+        </details>
+      </section>
+
+      <p class="footer">The displayed upload time is automatically converted to your device’s local timezone.</p>
+    </main>
+
+    <script>
+      (function () {
+        var iso = '${BUILD_UPLOAD_TIME_ISO}';
+        var localNode = document.getElementById('build-upload-time-local');
+        var utcNode = document.getElementById('build-upload-time-utc');
+        var parsed = new Date(iso);
+
+        if (!isNaN(parsed.getTime())) {
+          localNode.textContent = parsed.toLocaleString(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short'
+          });
+
+          utcNode.textContent = 'UTC: ' + parsed.toUTCString().replace('GMT', 'UTC');
+        } else {
+          localNode.textContent = '${BUILD_UPLOAD_TIME}';
+        }
+      })();
+    </script>
   </body>
 </html>
