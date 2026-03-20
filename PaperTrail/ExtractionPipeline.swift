@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Orchestrates field extraction from OCR text.
 ///
@@ -10,7 +11,13 @@ import Foundation
 /// This design means the app works on every iOS 26 device — even those without Apple Intelligence
 /// (e.g. base-model iPhones, or regions where it isn't enabled yet) — because the heuristic
 /// fallback always runs.
+///
+/// Key principle: **prefer blank over bad**. When only heuristics are available, high-value
+/// fields (product, merchant, date) are treated with extra skepticism. A blank field that
+/// the user fills in is better than confidently wrong autofill.
 struct ExtractionPipeline: Sendable {
+
+    private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.pipeline")
 
     private let foundationModelService: FieldExtractionService
     private let heuristicService: FieldExtractionService
@@ -28,8 +35,11 @@ struct ExtractionPipeline: Sendable {
     /// Returns a merged result: Foundation Model values take priority, heuristic values fill gaps.
     func extract(from ocrText: String) async -> StructuredExtractionResult {
         guard !ocrText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            Self.logger.info("Empty OCR text — skipping extraction")
             return .empty
         }
+
+        Self.logger.info("Starting extraction pipeline (OCR text: \(ocrText.count, privacy: .public) chars)")
 
         // Run both extractions concurrently.
         async let fmResult = foundationModelService.extract(from: ocrText)
@@ -38,13 +48,33 @@ struct ExtractionPipeline: Sendable {
         let fm = await fmResult
         let heuristic = await heuristicResult
 
+        // Build combined diagnostics.
+        let fmDiag = fm.diagnostics
+        let hDiag = heuristic.diagnostics
+
+        let combinedDiag = ExtractionDiagnostics(
+            foundationModelAvailable: fmDiag?.foundationModelAvailable ?? false,
+            foundationModelRan: fmDiag?.foundationModelRan ?? false,
+            foundationModelSkipReason: fmDiag?.foundationModelSkipReason,
+            foundationModelFieldCount: fmDiag?.foundationModelFieldCount ?? 0,
+            heuristicFieldCount: hDiag?.heuristicFieldCount ?? 0,
+            rejectedFields: hDiag?.rejectedFields ?? []
+        )
+
         // If Foundation Model returned nothing useful, use heuristic directly.
         if fm.source == .none {
-            return heuristic
+            Self.logger.info("Foundation Models returned empty — using heuristic-only result (fields: \(combinedDiag.heuristicFieldCount, privacy: .public), rejected: \(combinedDiag.rejectedFields.joined(separator: ","), privacy: .public))")
+            var result = heuristic
+            result.diagnostics = combinedDiag
+            return result
         }
 
+        Self.logger.info("Merging FM (\(combinedDiag.foundationModelFieldCount, privacy: .public) fields) + heuristic (\(combinedDiag.heuristicFieldCount, privacy: .public) fields)")
+
         // Merge: prefer FM values, fall back to heuristic for missing fields.
-        return merge(primary: fm, fallback: heuristic)
+        var merged = merge(primary: fm, fallback: heuristic)
+        merged.diagnostics = combinedDiag
+        return merged
     }
 
     // MARK: - Merging
@@ -62,7 +92,8 @@ struct ExtractionPipeline: Sendable {
             currency: pick(primary.currency, fallback.currency),
             category: pick(primary.category, fallback.category),
             warrantyDurationMonths: pick(primary.warrantyDurationMonths, fallback.warrantyDurationMonths),
-            source: primary.source
+            source: primary.source,
+            diagnostics: primary.diagnostics
         )
     }
 
@@ -84,7 +115,7 @@ extension StructuredExtractionResult {
     /// every downstream consumer at once. Over time, views can adopt `StructuredExtractionResult`
     /// directly to show per-field confidence.
     func toOCRExtractionResult(recognizedText: String) -> OCRExtractionResult {
-        OCRExtractionResult(
+        return OCRExtractionResult(
             recognizedText: recognizedText,
             suggestedProductName: productName.value,
             suggestedMerchantName: merchantName.value,

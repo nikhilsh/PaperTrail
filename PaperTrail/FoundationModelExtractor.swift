@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -71,7 +72,7 @@ enum ExtractionConfidence: String, Codable, Sendable, Hashable {
         switch self {
         case .high: nil
         case .medium: "Review"
-        case .heuristic: "Pattern match"
+        case .heuristic: "Best guess"
         case .low: "Suggested"
         case .none: nil
         }
@@ -104,6 +105,9 @@ struct StructuredExtractionResult: Sendable, Hashable {
     /// Which extraction backend produced this result.
     var source: ExtractionSource
 
+    /// Diagnostic info about which extraction path was taken and why.
+    var diagnostics: ExtractionDiagnostics?
+
     static let empty = StructuredExtractionResult(
         documentKind: .absent,
         productName: .absent,
@@ -113,8 +117,26 @@ struct StructuredExtractionResult: Sendable, Hashable {
         currency: .absent,
         category: .absent,
         warrantyDurationMonths: .absent,
-        source: .none
+        source: .none,
+        diagnostics: nil
     )
+}
+
+/// Diagnostic information about extraction pipeline execution.
+/// Used for debugging and understanding which path was taken.
+struct ExtractionDiagnostics: Sendable, Hashable {
+    /// Whether Foundation Models were available on this device.
+    var foundationModelAvailable: Bool
+    /// Whether Foundation Models actually ran and returned a result.
+    var foundationModelRan: Bool
+    /// Reason Foundation Models didn't run or failed, if applicable.
+    var foundationModelSkipReason: String?
+    /// Number of fields the Foundation Model populated (0 if it didn't run).
+    var foundationModelFieldCount: Int
+    /// Number of fields the heuristic populated.
+    var heuristicFieldCount: Int
+    /// Which fields were rejected by quality gates.
+    var rejectedFields: [String]
 }
 
 enum ExtractionSource: String, Sendable, Hashable {
@@ -179,14 +201,39 @@ protocol FieldExtractionService: Sendable {
 /// 4. Falls back to `.empty` if the model is unavailable or fails.
 struct FoundationModelExtractionService: FieldExtractionService {
 
+    private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.fm")
+
     func extract(from ocrText: String) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
+        let availability = SystemLanguageModel.default.availability
+
         // Check if the on-device model is available.
         // The model may be unavailable if Apple Intelligence is disabled,
         // the device doesn't support it, or the model asset hasn't downloaded.
-        guard SystemLanguageModel.default.availability == .available else {
-            return .empty
+        guard availability == .available else {
+            let reason: String
+            switch availability {
+            case .available:
+                reason = "available" // shouldn't reach here
+            case .unavailable:
+                reason = "unavailable (device/region not supported)"
+            default:
+                reason = "unknown availability state"
+            }
+            Self.logger.warning("Foundation Models unavailable: \(reason, privacy: .public)")
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: false,
+                foundationModelRan: false,
+                foundationModelSkipReason: reason,
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
         }
+
+        Self.logger.info("Foundation Models available — running structured extraction")
 
         do {
             let session = LanguageModelSession(
@@ -194,7 +241,9 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 You are a receipt and warranty document parser. Extract structured fields from the OCR text below. \
                 Be precise: prefer exact values from the text over guesses. \
                 If a field is not clearly present, leave it null. \
-                For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC.
+                Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
+                For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
+                Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.
                 """
             )
 
@@ -205,14 +254,49 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 generating: ReceiptExtractionSchema.self
             )
 
-            return mapSchemaToResult(response.content)
+            let schema = response.content
+            let fieldCount = [
+                schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
+            ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+
+            Self.logger.info("Foundation Models returned \(fieldCount, privacy: .public) fields")
+
+            var mapped = mapSchemaToResult(schema)
+            mapped.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: true,
+                foundationModelSkipReason: nil,
+                foundationModelFieldCount: fieldCount,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return mapped
         } catch {
-            // Model failed — caller will fall back to heuristics.
-            return .empty
+            Self.logger.error("Foundation Models extraction failed: \(error.localizedDescription, privacy: .public)")
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: false,
+                foundationModelSkipReason: "error: \(error.localizedDescription)",
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
         }
         #else
+        Self.logger.info("FoundationModels framework not available on this SDK")
         // FoundationModels not available on this SDK — return empty.
-        return .empty
+        var result = StructuredExtractionResult.empty
+        result.diagnostics = ExtractionDiagnostics(
+            foundationModelAvailable: false,
+            foundationModelRan: false,
+            foundationModelSkipReason: "FoundationModels framework not available (SDK)",
+            foundationModelFieldCount: 0,
+            heuristicFieldCount: 0,
+            rejectedFields: []
+        )
+        return result
         #endif
     }
 
@@ -284,7 +368,8 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 value: schema.warrantyDurationMonths,
                 confidence: schema.warrantyDurationMonths != nil ? .medium : .none
             ),
-            source: .foundationModel
+            source: .foundationModel,
+            diagnostics: nil
         )
     }
 
@@ -312,19 +397,93 @@ struct HeuristicExtractionService: FieldExtractionService {
 
 /// Encapsulates the regex/heuristic field extraction logic previously embedded in VisionOCRService.
 /// Pulled out so it can serve as a standalone fallback.
+///
+/// IMPORTANT: Heuristics are inherently unreliable for semantic fields (product name, merchant).
+/// This extractor is deliberately conservative: it prefers leaving fields blank over autofilling
+/// junk from OCR boilerplate, legal text, or misidentified lines. A blank field + "needs review"
+/// is always better than confidently wrong data.
 struct HeuristicFieldExtractor {
 
+    private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.heuristic")
+
     func extract(from text: String) -> StructuredExtractionResult {
-        StructuredExtractionResult(
-            documentKind: classifyDocument(from: text),
-            productName: ExtractedField(value: extractProductName(from: text), confidence: .heuristic),
-            merchantName: ExtractedField(value: extractMerchantName(from: text), confidence: .heuristic),
-            purchaseDate: ExtractedField(value: extractDate(from: text), confidence: .heuristic),
-            amount: ExtractedField(value: extractAmount(from: text), confidence: .heuristic),
-            currency: ExtractedField(value: extractCurrency(from: text), confidence: .heuristic),
+        let docKind = classifyDocument(from: text)
+
+        let rawProduct = extractProductName(from: text)
+        let rawMerchant = extractMerchantName(from: text)
+        let rawDate = extractDate(from: text)
+        let rawAmount = extractAmount(from: text)
+        let rawCurrency = extractCurrency(from: text)
+
+        var rejected: [String] = []
+
+        // Apply quality gates: reject values that look like OCR junk.
+        let productName: String? = {
+            guard let v = rawProduct else { return nil }
+            if looksLikeBoilerplate(v) || looksLikeOCRJunk(v) {
+                Self.logger.info("Rejected product name as junk: '\(v, privacy: .public)'")
+                rejected.append("productName")
+                return nil
+            }
+            return v
+        }()
+
+        let merchantName: String? = {
+            guard let v = rawMerchant else { return nil }
+            if looksLikeBoilerplate(v) || looksLikeOCRJunk(v) {
+                Self.logger.info("Rejected merchant name as junk: '\(v, privacy: .public)'")
+                rejected.append("merchantName")
+                return nil
+            }
+            return v
+        }()
+
+        let purchaseDate: Date? = {
+            guard let d = rawDate else { return nil }
+            // Reject dates that are implausibly old (before 2015) or in the future.
+            let year = Calendar.current.component(.year, from: d)
+            if year < 2015 || d > Date.now.addingTimeInterval(86400) {
+                Self.logger.info("Rejected date as implausible: year=\(year, privacy: .public)")
+                rejected.append("purchaseDate")
+                return nil
+            }
+            return d
+        }()
+
+        let amount: Double? = {
+            guard let a = rawAmount else { return nil }
+            // Reject amounts that are zero, negative, or implausibly large for a purchase receipt.
+            if a <= 0 || a > 999_999 {
+                Self.logger.info("Rejected amount as implausible: \(a, privacy: .public)")
+                rejected.append("amount")
+                return nil
+            }
+            return a
+        }()
+
+        let fieldCount = [productName, merchantName, rawCurrency].compactMap({ $0 }).count
+            + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0)
+
+        Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected")
+
+        return StructuredExtractionResult(
+            documentKind: docKind,
+            productName: ExtractedField(value: productName, confidence: productName != nil ? .heuristic : .none),
+            merchantName: ExtractedField(value: merchantName, confidence: merchantName != nil ? .heuristic : .none),
+            purchaseDate: ExtractedField(value: purchaseDate, confidence: purchaseDate != nil ? .heuristic : .none),
+            amount: ExtractedField(value: amount, confidence: amount != nil ? .heuristic : .none),
+            currency: ExtractedField(value: rawCurrency, confidence: rawCurrency != nil ? .heuristic : .none),
             category: .absent,
             warrantyDurationMonths: .absent,
-            source: .heuristic
+            source: .heuristic,
+            diagnostics: ExtractionDiagnostics(
+                foundationModelAvailable: false,
+                foundationModelRan: false,
+                foundationModelSkipReason: nil,
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: fieldCount,
+                rejectedFields: rejected
+            )
         )
     }
 
@@ -357,33 +516,154 @@ struct HeuristicFieldExtractor {
         keywords.filter { text.contains($0) }.count
     }
 
+    // MARK: - Boilerplate / junk detection
+
+    /// Detects legal boilerplate, footer text, copyright notices, terms & conditions, etc.
+    /// These should never be extracted as product or merchant names.
+    private func looksLikeBoilerplate(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let boilerplateSignals = [
+            "cheque", "cheques", "crossed", "non-negotiable",
+            "terms and conditions", "terms & conditions", "t&c",
+            "copyright", "©", "all rights reserved",
+            "privacy policy", "refund policy", "return policy", "exchange policy",
+            "goods sold are not", "no refund", "no exchange",
+            "retain this receipt", "keep this receipt", "proof of purchase",
+            "thank you for", "thanks for shopping", "visit us at",
+            "member since", "loyalty", "points earned",
+            "gst reg", "uen:", "co. reg", "company reg",
+            "powered by", "printed by", "generated by",
+            "page 1 of", "page 2 of",
+            "this is not a tax invoice", "this serves as",
+            "e. & o.e", "errors and omissions",
+            "subject to", "governing law", "jurisdiction",
+            "authorised signature", "authorized signature",
+            "void if", "valid only",
+        ]
+        return boilerplateSignals.contains { lower.contains($0) }
+    }
+
+    /// Detects OCR junk: very short fragments, lines that are mostly punctuation/symbols,
+    /// parenthetical fragments, or text that doesn't form coherent words.
+    private func looksLikeOCRJunk(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Too short to be meaningful
+        if trimmed.count < 3 { return true }
+
+        // Starts or ends with unmatched parenthesis/bracket — likely a fragment
+        if trimmed.hasPrefix("(") && !trimmed.contains(")") { return true }
+        if trimmed.hasPrefix(")") { return true }
+        if trimmed.hasPrefix("[") && !trimmed.contains("]") { return true }
+
+        // Mostly non-alphanumeric characters (punctuation/symbols)
+        let alphanumeric = trimmed.filter { $0.isLetter || $0.isNumber }
+        if alphanumeric.count < trimmed.count / 2 { return true }
+
+        // Very high ratio of uppercase + special chars — likely OCR noise or codes
+        let uppercaseCount = trimmed.filter { $0.isUppercase }.count
+        let letterCount = trimmed.filter { $0.isLetter }.count
+        if letterCount > 0 && letterCount <= 4 && uppercaseCount == letterCount {
+            // Short all-caps fragments like "COP", "GST", "QTY" — not product names
+            return true
+        }
+
+        return false
+    }
+
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)
 
+    /// Extract product name conservatively.
+    ///
+    /// Strategy: only return a product name if we find a line that looks like an actual
+    /// product/item description (contains model numbers, brand-like words, or is in a
+    /// clearly item-description context). The old approach of "longest non-filtered line"
+    /// was too aggressive and would pick up legal text or footer boilerplate.
     private func extractProductName(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-            .filter { !looksLikeDate($0) && !looksLikeTotal($0) && !looksLikeAddress($0) && !looksLikeHeader($0) }
-            .filter { $0.count >= 4 && $0.count <= 80 }
 
-        let candidates = lines.dropFirst()
-        return candidates.max(by: { $0.count < $1.count })
+        // First pass: look for lines that are clearly item descriptions.
+        // These typically contain model numbers, SKUs, or appear near quantity/price indicators.
+        let itemPatterns = [
+            #"(?i)(?:model|sku|item|product|description)\s*[:#]?\s*(.+)"#,
+            #"(?i)^\d+\s*x\s+(.+)"#,     // "1 x Product Name" pattern
+            #"(?i)^(\d+)\s+(.{10,}?)\s+\d"#,   // qty + description + price pattern
+        ]
+
+        for pattern in itemPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+                let lastGroup = match.numberOfRanges - 1
+                if let range = Range(match.range(at: lastGroup), in: text) {
+                    let candidate = String(text[range]).trimmingCharacters(in: .whitespaces)
+                    if candidate.count >= 4 && candidate.count <= 80
+                        && !looksLikeBoilerplate(candidate) && !looksLikeOCRJunk(candidate) {
+                        return candidate
+                    }
+                }
+            }
+        }
+
+        // Second pass: look for lines near "order" or "item" headers.
+        // Find the line after an "item"/"description"/"product" header.
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+            if (lower.contains("item") || lower.contains("description") || lower.contains("product"))
+                && line.count < 30 {
+                // The next non-empty line might be the product
+                if i + 1 < lines.count {
+                    let candidate = lines[i + 1]
+                    if candidate.count >= 4 && candidate.count <= 80
+                        && !looksLikeBoilerplate(candidate)
+                        && !looksLikeOCRJunk(candidate)
+                        && !looksLikeTotal(candidate)
+                        && !looksLikeAddress(candidate) {
+                        return candidate
+                    }
+                }
+            }
+        }
+
+        // Conservative: don't guess. Return nil and let the user fill it in.
+        return nil
     }
 
+    /// Extract merchant name conservatively.
+    ///
+    /// Strategy: only look at the first 3 lines (merchant is almost always at the top of a receipt).
+    /// Apply strict filtering to avoid OCR fragments, parenthetical junk, or address lines.
     private func extractMerchantName(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && $0.count >= 3 }
 
-        for line in lines.prefix(5) {
-            if !looksLikeDate(line) && !looksLikePureNumber(line) && line.count >= 3 {
+        // Only check the first 3 lines — merchant name is at the top.
+        for line in lines.prefix(3) {
+            if !looksLikeDate(line)
+                && !looksLikePureNumber(line)
+                && !looksLikeAddress(line)
+                && !looksLikeBoilerplate(line)
+                && !looksLikeOCRJunk(line)
+                && !looksLikeHeader(line)
+                && line.count >= 3
+                && line.count <= 60 {
                 return line
             }
         }
-        return lines.first
+
+        // Conservative: don't guess.
+        return nil
     }
 
+    /// Extract date conservatively.
+    ///
+    /// Strategy: prefer explicit date patterns (DD/MM/YYYY). Only use NSDataDetector
+    /// for date formats near transaction-related keywords (not from random legal text).
+    /// Reject dates before 2015 or in the future.
     private func extractDate(from text: String) -> Date? {
+        // Pass 1: explicit date patterns (most reliable).
         let sgPatterns = [
             #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"#,
             #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2})"#,
@@ -400,32 +680,60 @@ struct HeuristicFieldExtractor {
                 if yearStr.count == 2 { yearStr = "20" + yearStr }
 
                 if let day = Int(dayStr), let month = Int(monthStr), let year = Int(yearStr),
-                   day >= 1, day <= 31, month >= 1, month <= 12, year >= 2000, year <= 2099 {
+                   day >= 1, day <= 31, month >= 1, month <= 12, year >= 2015, year <= 2099 {
                     var components = DateComponents()
                     components.day = day
                     components.month = month
                     components.year = year
-                    if let date = Calendar.current.date(from: components) { return date }
+                    if let date = Calendar.current.date(from: components),
+                       date <= Date.now.addingTimeInterval(86400) {
+                        return date
+                    }
                 }
             }
         }
 
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = detector?.matches(in: text, options: [], range: range) ?? []
-        return matches.first?.date
+        // Pass 2: use NSDataDetector but ONLY on lines near transaction keywords.
+        // This prevents picking up copyright years or dates in legal boilerplate.
+        let lines = text.components(separatedBy: .newlines)
+        let transactionKeywords = ["date", "purchase", "transaction", "order", "invoice", "receipt", "paid"]
+
+        for line in lines {
+            let lower = line.lowercased()
+            let nearTransaction = transactionKeywords.contains { lower.contains($0) }
+            guard nearTransaction else { continue }
+
+            // Skip lines that are clearly boilerplate
+            if looksLikeBoilerplate(line) { continue }
+
+            let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+            let range = NSRange(line.startIndex..., in: line)
+            let matches = detector?.matches(in: line, options: [], range: range) ?? []
+            if let date = matches.first?.date {
+                let year = Calendar.current.component(.year, from: date)
+                if year >= 2015 && date <= Date.now.addingTimeInterval(86400) {
+                    return date
+                }
+            }
+        }
+
+        // Conservative: don't guess.
+        return nil
     }
 
     private func extractAmount(from text: String) -> Double? {
         let lines = text.components(separatedBy: .newlines)
 
+        // First: look for lines with "total"/"amount" keywords.
         for line in lines.reversed() {
             let lower = line.lowercased()
             if lower.contains("total") || lower.contains("amount") || lower.contains("grand total") || lower.contains("nett") {
-                if let amount = extractNumber(from: line) { return amount }
+                // Skip "subtotal" if we later find "total" — but still extract from total lines.
+                if let amount = extractNumber(from: line), amount > 0 { return amount }
             }
         }
 
+        // Second: look for currency-prefixed amounts.
         var amounts: [Double] = []
         let amountPattern = #"(?:\$|SGD|S\$|MYR|RM)\s*(\d{1,}[,.]?\d{0,2})"#
         if let regex = try? NSRegularExpression(pattern: amountPattern, options: .caseInsensitive) {
@@ -434,7 +742,7 @@ struct HeuristicFieldExtractor {
             for match in matches {
                 if let range = Range(match.range(at: 1), in: text) {
                     let numStr = String(text[range]).replacingOccurrences(of: ",", with: "")
-                    if let num = Double(numStr) { amounts.append(num) }
+                    if let num = Double(numStr), num > 0 { amounts.append(num) }
                 }
             }
         }
@@ -479,6 +787,7 @@ struct HeuristicFieldExtractor {
         return lower.contains("blk") || lower.contains("street") || lower.contains("road")
             || lower.contains("avenue") || lower.contains("tel:") || lower.contains("fax:")
             || lower.contains("singapore") || lower.contains("#0") || lower.contains("level")
+            || lower.contains("postal") || lower.contains("zip")
     }
 
     private func looksLikeHeader(_ line: String) -> Bool {

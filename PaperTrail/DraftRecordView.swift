@@ -105,11 +105,30 @@ struct DraftRecordView: View {
                         HStack(spacing: 6) {
                             Image(systemName: source == .foundationModel ? "cpu" : "text.magnifyingglass")
                                 .font(.caption2)
-                            Text(source == .foundationModel ? "Extracted with Apple Intelligence" : "Extracted with pattern matching")
+                            Text(source == .foundationModel
+                                ? "Extracted with Apple Intelligence"
+                                : "Extracted with pattern matching")
                                 .font(.caption2)
                         }
                         .foregroundStyle(.secondary)
                         .padding(.top, 2)
+
+                        // Show diagnostic detail when Foundation Models didn't run.
+                        if let diag = seededOCR.structuredResult?.diagnostics,
+                           !diag.foundationModelRan {
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption2)
+                                if let reason = diag.foundationModelSkipReason {
+                                    Text("AI unavailable: \(reason)")
+                                        .font(.caption2)
+                                } else {
+                                    Text("AI extraction did not run on this document")
+                                        .font(.caption2)
+                                }
+                            }
+                            .foregroundStyle(.orange)
+                        }
                     }
                 }
             }

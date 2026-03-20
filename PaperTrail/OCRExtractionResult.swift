@@ -17,5 +17,24 @@ struct OCRExtractionResult: Hashable, Sendable {
     /// Only available when the extraction pipeline was used (not for manually constructed results).
     var structuredResult: StructuredExtractionResult?
 
+    /// Whether Foundation Models actually ran for this extraction (vs heuristic fallback).
+    var foundationModelRan: Bool {
+        structuredResult?.diagnostics?.foundationModelRan ?? false
+    }
+
+    /// Human-readable description of the extraction path taken.
+    var extractionPathDescription: String {
+        guard let diag = structuredResult?.diagnostics else {
+            return "Unknown"
+        }
+        if diag.foundationModelRan {
+            return "Apple Intelligence (\(diag.foundationModelFieldCount) fields)"
+        } else if let reason = diag.foundationModelSkipReason {
+            return "Pattern matching (FM: \(reason))"
+        } else {
+            return "Pattern matching"
+        }
+    }
+
     static let empty = OCRExtractionResult(recognizedText: "")
 }
