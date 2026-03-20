@@ -16,7 +16,7 @@ final class Attachment {
     var typeRaw: String = AttachmentType.other.rawValue
     var localFilename: String = ""
     var ocrText: String?
-    var createdAt: Date = .now
+    var createdAt: Date = Date()
 
     var type: AttachmentType {
         get { AttachmentType(rawValue: typeRaw) ?? .other }
@@ -29,7 +29,7 @@ final class Attachment {
         type: AttachmentType,
         localFilename: String,
         ocrText: String? = nil,
-        createdAt: Date = .now
+        createdAt: Date = Date()
     ) {
         self.id = id
         self.recordID = recordID

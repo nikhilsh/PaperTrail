@@ -27,8 +27,8 @@ final class PurchaseRecord {
     // but we intentionally avoid @Relationship to keep the schema simple and avoid
     // SwiftData relationship issues with CloudKit. Link via Attachment.recordID == PurchaseRecord.id.
 
-    var createdAt: Date = .now
-    var updatedAt: Date = .now
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     init(
         id: UUID = UUID(),
@@ -46,8 +46,8 @@ final class PurchaseRecord {
         supportConfidence: String? = nil,
         supportNote: String? = nil,
         warrantyNotificationScheduled: Bool = false,
-        createdAt: Date = .now,
-        updatedAt: Date = .now
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
     ) {
         self.id = id
         self.productName = productName
