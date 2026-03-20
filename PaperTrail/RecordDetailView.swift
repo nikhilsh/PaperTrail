@@ -10,6 +10,10 @@ struct RecordDetailView: View {
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
+    
+    private var attachments: [Attachment] {
+        record.attachments
+    }
 
     private var warrantyColor: Color {
         switch record.warrantyStatus {
@@ -250,16 +254,6 @@ private struct AttachmentThumbnail: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(.separator), lineWidth: 0.5)
-        )
-    }
-}
-
-#Preview {
-    NavigationStack {
-        Text("Preview requires SwiftData context")
-    }
-}
- 0.5)
         )
     }
 }

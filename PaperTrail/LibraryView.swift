@@ -17,6 +17,7 @@ enum LibraryFilterOption: String, CaseIterable {
 
 struct LibraryView: View {
     @Query(sort: \PurchaseRecord.updatedAt, order: .reverse) private var records: [PurchaseRecord]
+    @Query private var allAttachments: [Attachment]
     @Environment(\.modelContext) private var modelContext
     @State private var searchText = ""
     @State private var sortOption: LibrarySortOption = .newest

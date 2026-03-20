@@ -4,6 +4,7 @@ import SwiftData
 struct EditRecordView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var record: PurchaseRecord
+    @Query private var allAttachments: [Attachment]
 
     @State private var productName: String
     @State private var merchantName: String
@@ -153,6 +154,4 @@ struct EditRecordView: View {
     NavigationStack {
         Text("Preview requires SwiftData context")
     }
-}
-   }
 }
