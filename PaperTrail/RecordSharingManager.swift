@@ -182,11 +182,11 @@ struct ImportedRecord {
 
         for att in attachments {
             let attachment = Attachment(
+                recordID: record.id,
                 type: att.type,
                 localFilename: att.filename,
                 ocrText: att.ocrText
             )
-            attachment.record = record
             record.attachments.append(attachment)
         }
 
