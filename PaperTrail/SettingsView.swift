@@ -137,20 +137,8 @@ struct SettingsView: View {
 
             // Image Sync
             Section("Image Sync") {
-                LabeledContent("Local images", value: "\(localImageCount) / \(attachments.count)")
-                if missingImageCount > 0 {
-                    LabeledContent("Missing", value: "\(missingImageCount)")
-                        .foregroundStyle(.orange)
-
-                    Button("Sync missing images now") {
-                        Task {
-                            let syncInfos = attachments.map {
-                                AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
-                            }
-                            await cloudImageSync.syncMissingImages(attachments: syncInfos)
-                        }
-                    }
-                }
+                LabeledContent("Proof images", value: imageSyncSummary)
+                LabeledContent("On this device", value: localAvailabilitySummary)
 
                 if !cloudImageSync.activeTransfers.isEmpty {
                     HStack {
@@ -161,14 +149,19 @@ struct SettingsView: View {
                     }
                 }
 
-                if cloudImageSync.transferErrors.isEmpty {
-                    if missingImageCount == 0 && !attachments.isEmpty {
-                        Label("All images available locally", systemImage: "checkmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.green)
+                if missingImageCount > 0 {
+                    Button("Download missing images") {
+                        Task {
+                            let syncInfos = attachments.map {
+                                AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
+                            }
+                            await cloudImageSync.syncMissingImages(attachments: syncInfos)
+                        }
                     }
-                } else {
-                    Label("\(cloudImageSync.transferErrors.count) sync error(s)", systemImage: "exclamationmark.triangle")
+                }
+
+                if !cloudImageSync.transferErrors.isEmpty {
+                    Label("\(cloudImageSync.transferErrors.count) image sync issue(s)", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -182,6 +175,34 @@ struct SettingsView: View {
 
             // Categories
             Section("Categories") {
+                Text(categorySummary)
+                    .foregroundStyle(.secondary)
+            }
+
+            // About
+            Section("About") {
+                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+            }
+
+            Section("Milestone") {
+                LabeledContent("Current", value: "Milestone 3")
+                LabeledContent("Focus", value: "CloudKit sync, Apple auth, sharing")
+            }
+        }
+        .navigationTitle("Settings")
+    }
+}
+
+#Preview {
+    NavigationStack {
+        SettingsView()
+    }
+    .environment(AuthenticationManager())
+    .environmentObject(CloudImageSyncManager.shared)
+    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
+}
+Section("Categories") {
                 Text(categorySummary)
                     .foregroundStyle(.secondary)
             }
