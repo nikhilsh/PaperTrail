@@ -4,6 +4,7 @@ import SwiftData
 struct DraftRecordView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
 
     let seedType: AttachmentType
     let seededAttachments: [Attachment]
@@ -146,6 +147,16 @@ struct DraftRecordView: View {
             NotificationManager.shared.scheduleWarrantyReminders(for: record)
         }
 
+        // Upload attachment images to CloudKit in the background
+        let attachmentsToUpload = seededAttachments.map {
+            AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
+        }
+        Task {
+            for info in attachmentsToUpload {
+                await cloudImageSync.upload(attachmentID: info.id, localFilename: info.localFilename)
+            }
+        }
+
         dismiss()
     }
 }
@@ -154,5 +165,6 @@ struct DraftRecordView: View {
     NavigationStack {
         DraftRecordView(seedType: .receipt)
     }
+    .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

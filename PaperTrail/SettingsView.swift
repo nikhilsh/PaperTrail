@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
     @Environment(AuthenticationManager.self) private var authManager
+    @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("cloudKitInitError") private var cloudKitInitError = ""
     @AppStorage("cloudKitAccountStatus") private var cloudKitAccountStatus = "Unknown"
@@ -21,6 +22,14 @@ struct SettingsView: View {
             total += size
         }
         return ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
+    }
+
+    private var localImageCount: Int {
+        attachments.filter { FileManager.default.fileExists(atPath: ImageStorageManager.url(for: $0.localFilename).path) }.count
+    }
+
+    private var missingImageCount: Int {
+        attachments.count - localImageCount
     }
 
     private var activeWarrantyCount: Int {
@@ -126,6 +135,45 @@ struct SettingsView: View {
                 LabeledContent("Persistence", value: "SwiftData + CloudKit (single store)")
             }
 
+            // Image Sync
+            Section("Image Sync") {
+                LabeledContent("Local images", value: "\(localImageCount) / \(attachments.count)")
+                if missingImageCount > 0 {
+                    LabeledContent("Missing", value: "\(missingImageCount)")
+                        .foregroundStyle(.orange)
+
+                    Button("Sync missing images now") {
+                        Task {
+                            let syncInfos = attachments.map {
+                                AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
+                            }
+                            await cloudImageSync.syncMissingImages(attachments: syncInfos)
+                        }
+                    }
+                }
+
+                if !cloudImageSync.activeTransfers.isEmpty {
+                    HStack {
+                        ProgressView()
+                        Text("Syncing \(cloudImageSync.activeTransfers.count) image(s)…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if cloudImageSync.transferErrors.isEmpty {
+                    if missingImageCount == 0 && !attachments.isEmpty {
+                        Label("All images available locally", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                } else {
+                    Label("\(cloudImageSync.transferErrors.count) sync error(s)", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             // Warranties
             Section("Warranties") {
                 LabeledContent("Active warranties", value: "\(activeWarrantyCount)")
@@ -158,5 +206,6 @@ struct SettingsView: View {
         SettingsView()
     }
     .environment(AuthenticationManager())
+    .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

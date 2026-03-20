@@ -19,6 +19,7 @@ struct LibraryView: View {
     @Query(sort: \PurchaseRecord.updatedAt, order: .reverse) private var records: [PurchaseRecord]
     @Query private var allAttachments: [Attachment]
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @State private var searchText = ""
     @State private var sortOption: LibrarySortOption = .newest
     @State private var filterOption: LibraryFilterOption = .all
@@ -166,12 +167,21 @@ struct LibraryView: View {
     }
 
     private func deleteRecord(_ record: PurchaseRecord) {
-        for attachment in attachments(for: record) {
+        let recordAttachments = attachments(for: record)
+        let attachmentIDs = recordAttachments.map { $0.id }
+        for attachment in recordAttachments {
             ImageStorageManager.delete(attachment.localFilename)
             modelContext.delete(attachment)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         modelContext.delete(record)
+
+        // Clean up CloudKit image assets in background
+        Task {
+            for id in attachmentIDs {
+                await cloudImageSync.delete(attachmentID: id)
+            }
+        }
     }
 }
 
@@ -336,5 +346,6 @@ private struct AttachmentBadge: View {
     NavigationStack {
         LibraryView()
     }
+    .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

@@ -4,6 +4,7 @@ import SwiftData
 struct RecordDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Query private var allAttachments: [Attachment]
     @Bindable var record: PurchaseRecord
     @State private var showDeleteConfirmation = false
@@ -132,12 +133,42 @@ struct RecordDetailView: View {
                         HStack(spacing: 10) {
                             ForEach(attachments) { attachment in
                                 Button {
-                                    selectedImageFilename = SelectedFilename(attachment.localFilename)
+                                    if attachment.image != nil {
+                                        selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                                    } else {
+                                        // Try downloading from CloudKit when tapped
+                                        Task {
+                                            let success = await cloudImageSync.download(
+                                                attachmentID: attachment.id,
+                                                localFilename: attachment.localFilename
+                                            )
+                                            if success {
+                                                selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                                            }
+                                        }
+                                    }
                                 } label: {
                                     AttachmentThumbnail(attachment: attachment)
+                                        .overlay(alignment: .bottomTrailing) {
+                                            CloudImageStatusOverlay(
+                                                attachmentID: attachment.id,
+                                                hasLocalImage: attachment.image != nil,
+                                                syncManager: cloudImageSync
+                                            )
+                                        }
                                 }
                                 .buttonStyle(.plain)
                             }
+                        }
+                    }
+                    .task {
+                        // Auto-download missing images when this view appears
+                        let missing = attachments.filter { $0.image == nil }
+                        for att in missing {
+                            await cloudImageSync.download(
+                                attachmentID: att.id,
+                                localFilename: att.localFilename
+                            )
                         }
                     }
 
@@ -200,7 +231,7 @@ struct RecordDetailView: View {
             Text("This will permanently remove the record and its attachments.")
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
-            ImageViewerView(filename: selected.value)
+            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
         }
     }
 
@@ -217,12 +248,21 @@ struct RecordDetailView: View {
     }
 
     private func deleteRecord() {
+        let attachmentIDs = attachments.map { $0.id }
         for attachment in attachments {
             ImageStorageManager.delete(attachment.localFilename)
             modelContext.delete(attachment)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         modelContext.delete(record)
+
+        // Clean up CloudKit image assets in background
+        Task {
+            for id in attachmentIDs {
+                await cloudImageSync.delete(attachmentID: id)
+            }
+        }
+
         dismiss()
     }
 }
@@ -231,7 +271,11 @@ struct RecordDetailView: View {
 struct SelectedFilename: Identifiable {
     let id = UUID()
     let value: String
-    init(_ value: String) { self.value = value }
+    let attachmentID: UUID?
+    init(_ value: String, attachmentID: UUID? = nil) {
+        self.value = value
+        self.attachmentID = attachmentID
+    }
 }
 
 // MARK: - Subviews
@@ -264,4 +308,5 @@ private struct AttachmentThumbnail: View {
     NavigationStack {
         Text("Preview requires SwiftData context")
     }
+    .environmentObject(CloudImageSyncManager.shared)
 }

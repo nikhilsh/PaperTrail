@@ -171,5 +171,6 @@ private struct CaptureActionRow: View {
     NavigationStack {
         CaptureView()
     }
+    .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

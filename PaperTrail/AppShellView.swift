@@ -42,5 +42,6 @@ private enum AppTab {
 
 #Preview {
     AppShellView()
+        .environmentObject(CloudImageSyncManager.shared)
         .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

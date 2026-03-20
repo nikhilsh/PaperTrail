@@ -152,12 +152,34 @@ struct PaperTrailApp: App {
         WindowGroup {
             AppShellView()
                 .environment(authManager)
+                .environmentObject(CloudImageSyncManager.shared)
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
+                    await syncCloudImages()
                 }
         }
         .modelContainer(modelContainer)
+    }
+
+    /// On launch, sync images in both directions:
+    /// 1. Upload any local images that haven't been pushed to CloudKit yet
+    /// 2. Download any images that arrived via metadata sync but lack local files
+    @MainActor
+    private func syncCloudImages() async {
+        let context = modelContainer.mainContext
+        let descriptor = FetchDescriptor<Attachment>()
+        guard let attachments = try? context.fetch(descriptor) else { return }
+
+        let syncInfos = attachments.map {
+            AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
+        }
+
+        let manager = CloudImageSyncManager.shared
+
+        // Upload first (source device pushes), then download (receiving device pulls)
+        await manager.uploadMissingImages(attachments: syncInfos)
+        await manager.syncMissingImages(attachments: syncInfos)
     }
 }
