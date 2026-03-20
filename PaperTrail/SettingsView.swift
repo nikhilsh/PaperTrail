@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("cloudKitAccountStatus") private var cloudKitAccountStatus = "Unknown"
     @AppStorage("cloudKitContainerStatus") private var cloudKitContainerStatus = "Not checked"
     @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
+    private let sentryStatus = AppLogger.isSentryEnabled ? "Enabled" : "Disabled"
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -83,6 +84,7 @@ struct SettingsView: View {
                 LabeledContent("iCloud", value: "Automatic")
                 LabeledContent("Backend", value: activeSyncBackend)
                 LabeledContent("Status", value: authManager.isSignedIn ? "Active" : "Sign in required")
+                LabeledContent("Sentry", value: sentryStatus)
                 LabeledContent("CK account", value: cloudKitAccountStatus)
                 LabeledContent("CK container", value: cloudKitContainerIdentifier)
 

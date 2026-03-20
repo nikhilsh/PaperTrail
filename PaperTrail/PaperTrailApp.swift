@@ -24,6 +24,7 @@ private func addStartupBreadcrumb(level: SentryLevel, category: String, message:
     crumb.category = category
     crumb.message = message
     SentrySDK.addBreadcrumb(crumb)
+    AppLogger.info(message, category: category)
 }
 
 private func configureSentry() {
@@ -39,6 +40,8 @@ private func configureSentry() {
         options.enableAutoSessionTracking = true
         options.attachScreenshot = false
     }
+
+    AppLogger.info("Sentry initialized", category: "observability")
 
     let info = Bundle.main.infoDictionary ?? [:]
     if let version = info["CFBundleShortVersionString"] as? String {
@@ -119,11 +122,10 @@ struct PaperTrailApp: App {
             SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.cloudKit, key: "sync_backend") }
         } catch {
             let errorText = String(describing: error)
-            print("⚠️ CloudKit ModelContainer failed: \(errorText). Falling back to local-only storage.")
             UserDefaults.standard.set(SyncBackendState.localFallback, forKey: SyncBackendState.defaultsKey)
             UserDefaults.standard.set(errorText, forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .error, category: "sync", message: "CloudKit-backed ModelContainer initialization failed")
-            SentrySDK.capture(message: "CloudKit startup fallback: \(errorText)")
+            AppLogger.error("CloudKit startup fallback: \(errorText)", category: "sync", tags: ["sync_backend": SyncBackendState.localFallback])
             SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.localFallback, key: "sync_backend") }
 
             let localConfig = ModelConfiguration(
