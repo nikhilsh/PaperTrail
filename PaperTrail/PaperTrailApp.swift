@@ -128,14 +128,19 @@ struct PaperTrailApp: App {
             AppLogger.error("CloudKit startup fallback: \(errorText)", category: "sync", tags: ["sync_backend": SyncBackendState.localFallback])
             SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.localFallback, key: "sync_backend") }
 
-            let localConfig = ModelConfiguration(
-                "PaperTrail",
-                schema: schema,
+            let localRecordsConfig = ModelConfiguration(
+                "PaperTrailLocalRecords",
+                schema: cloudRecordsSchema,
+                cloudKitDatabase: .none
+            )
+            let localAttachmentsConfig = ModelConfiguration(
+                "PaperTrailLocalAttachments",
+                schema: localAttachmentsSchema,
                 cloudKitDatabase: .none
             )
 
             do {
-                modelContainer = try ModelContainer(for: schema, configurations: [localConfig])
+                modelContainer = try ModelContainer(for: schema, configurations: [localRecordsConfig, localAttachmentsConfig])
             } catch {
                 fatalError("Failed to create local ModelContainer: \(error)")
             }
@@ -150,6 +155,12 @@ struct PaperTrailApp: App {
                     _ = await NotificationManager.shared.requestPermission()
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
+                }
+        }
+        .modelContainer(modelContainer)
+    }
+}
+flight()
                 }
         }
         .modelContainer(modelContainer)
