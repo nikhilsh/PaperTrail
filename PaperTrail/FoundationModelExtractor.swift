@@ -132,13 +132,14 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 """
             )
 
-            // respond(to:generating:) with a @Generable type returns the structured result directly.
-            let result = try await session.respond(
+            // respond(to:generating:) returns a Response<T> wrapper;
+            // extract the generated schema via .content.
+            let response = try await session.respond(
                 to: ocrText,
                 generating: ReceiptExtractionSchema.self
             )
 
-            return mapSchemaToResult(result)
+            return mapSchemaToResult(response.content)
         } catch {
             // Model failed — caller will fall back to heuristics.
             return .empty
