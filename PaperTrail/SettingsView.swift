@@ -202,31 +202,3 @@ struct SettingsView: View {
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }
-Section("Categories") {
-                Text(categorySummary)
-                    .foregroundStyle(.secondary)
-            }
-
-            // About
-            Section("About") {
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
-            }
-
-            Section("Milestone") {
-                LabeledContent("Current", value: "Milestone 3")
-                LabeledContent("Focus", value: "CloudKit sync, Apple auth, sharing")
-            }
-        }
-        .navigationTitle("Settings")
-    }
-}
-
-#Preview {
-    NavigationStack {
-        SettingsView()
-    }
-    .environment(AuthenticationManager())
-    .environmentObject(CloudImageSyncManager.shared)
-    .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
-}
