@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import UIKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -206,6 +207,10 @@ struct FoundationModelExtractionService: FieldExtractionService {
     func extract(from ocrText: String) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
         let availability = SystemLanguageModel.default.availability
+        let rawAvailability = String(describing: availability)
+
+        // Always log the raw availability value for diagnostics
+        Self.logger.info("Foundation Models raw availability: \(rawAvailability, privacy: .public)")
 
         // Check if the on-device model is available.
         // The model may be unavailable if Apple Intelligence is disabled,
@@ -218,14 +223,32 @@ struct FoundationModelExtractionService: FieldExtractionService {
             case .unavailable:
                 reason = "unavailable (device/region not supported)"
             default:
-                reason = "unknown availability state"
+                // Capture ALL non-.available states with their raw description
+                reason = "non-available state: \(rawAvailability)"
             }
-            Self.logger.warning("Foundation Models unavailable: \(reason, privacy: .public)")
+            Self.logger.warning("Foundation Models unavailable: \(reason, privacy: .public) [raw: \(rawAvailability, privacy: .public)]")
+
+            // Send Sentry event for devices that should support FM
+            let deviceModel = UIDevice.current.model // e.g. "iPhone"
+            let deviceName = Self.deviceModelIdentifier() // e.g. "iPhone17,1"
+            let iosVersion = UIDevice.current.systemVersion
+            AppLogger.error(
+                "Foundation Models unavailable on \(deviceName) (iOS \(iosVersion)): \(reason) [raw: \(rawAvailability)]",
+                category: "extraction.fm.availability",
+                tags: [
+                    "device_model": deviceName,
+                    "device_type": deviceModel,
+                    "ios_version": iosVersion,
+                    "fm_availability_raw": rawAvailability,
+                    "fm_reason": reason
+                ]
+            )
+
             var result = StructuredExtractionResult.empty
             result.diagnostics = ExtractionDiagnostics(
                 foundationModelAvailable: false,
                 foundationModelRan: false,
-                foundationModelSkipReason: reason,
+                foundationModelSkipReason: "\(reason) [raw: \(rawAvailability)]",
                 foundationModelFieldCount: 0,
                 heuristicFieldCount: 0,
                 rejectedFields: []
@@ -424,6 +447,17 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return ExtractedField(value: value.trimmingCharacters(in: .whitespacesAndNewlines), confidence: .high)
     }
     #endif
+
+    /// Returns the hardware model identifier (e.g. "iPhone17,1") instead of the generic "iPhone" from UIDevice.
+    private static func deviceModelIdentifier() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        return withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingCString: $0) ?? UIDevice.current.model
+            }
+        }
+    }
 }
 
 // MARK: - Heuristic extraction service (wraps existing logic)

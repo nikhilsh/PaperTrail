@@ -1,6 +1,10 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import AuthenticationServices
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
@@ -14,6 +18,8 @@ struct SettingsView: View {
     @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
     private let sentryStatus = AppLogger.isSentryEnabled ? "Enabled" : "Disabled"
     private let sentryHost = AppLogger.sentryHost ?? "Not configured"
+    @State private var fmDiagResult = ""
+    @State private var fmDiagRunning = false
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -199,6 +205,29 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Foundation Models Diagnostics
+            Section("Foundation Models Diagnostics") {
+                Button {
+                    Task { await runFMDiagnostic() }
+                } label: {
+                    HStack {
+                        Text("Test Foundation Models")
+                        Spacer()
+                        if fmDiagRunning {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(fmDiagRunning)
+
+                if !fmDiagResult.isEmpty {
+                    Text(fmDiagResult)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
             // About
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
@@ -211,6 +240,73 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+
+    // MARK: - Foundation Models Diagnostic
+
+    private func runFMDiagnostic() async {
+        fmDiagRunning = true
+        defer { fmDiagRunning = false }
+
+        #if canImport(FoundationModels)
+        let availability = SystemLanguageModel.default.availability
+        let rawAvailability = String(describing: availability)
+        var result = "Raw availability: \(rawAvailability)\n"
+
+        let deviceModel = Self.deviceModelIdentifier()
+        let iosVersion = UIDevice.current.systemVersion
+        result += "Device: \(deviceModel)\n"
+        result += "iOS: \(iosVersion)\n"
+
+        guard availability == .available else {
+            result += "\n⚠️ Model not available.\n"
+            result += "State: \(rawAvailability)\n"
+            result += "This may mean Apple Intelligence is off, the model is downloading, or the region/language is unsupported."
+            fmDiagResult = result
+            return
+        }
+
+        // Test 1: Plain text generation (no @Generable)
+        do {
+            let session = LanguageModelSession()
+            let response = try await session.respond(to: "Say hello in one word")
+            result += "\n✅ Plain text: \(response)\n"
+        } catch {
+            result += "\n❌ Plain text error: \(error.localizedDescription)\n"
+            result += "Full: \(String(describing: error))\n"
+        }
+
+        // Test 2: Structured generation with @Generable
+        do {
+            let session = LanguageModelSession(
+                instructions: "Extract receipt fields from the text. Respond in English."
+            )
+            let structuredResponse = try await session.respond(
+                to: "Store: Apple Singapore, Product: iPhone 16 Pro, Amount: $1599, Date: 2025-01-15",
+                generating: ReceiptExtractionSchema.self
+            )
+            let schema = structuredResponse.content
+            result += "✅ Structured: product=\(schema.productName ?? "nil"), merchant=\(schema.merchantName ?? "nil"), amount=\(schema.amount.map { String($0) } ?? "nil")\n"
+        } catch {
+            result += "❌ Structured error: \(error.localizedDescription)\n"
+            result += "Full: \(String(describing: error))\n"
+        }
+
+        fmDiagResult = result
+        #else
+        fmDiagResult = "FoundationModels framework not available in this build"
+        #endif
+    }
+
+    /// Returns the hardware model identifier (e.g. "iPhone17,1").
+    private static func deviceModelIdentifier() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        return withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingCString: $0) ?? UIDevice.current.model
+            }
+        }
     }
 }
 
