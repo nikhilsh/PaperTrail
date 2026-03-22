@@ -544,9 +544,36 @@ struct HeuristicFieldExtractor {
 
     private func classifyDocument(from text: String) -> ExtractedField<DocumentKind> {
         let lower = text.lowercased()
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // Check for exact heading phrases that appear as standalone lines or prominent text.
+        // These are very strong signals — a document that says "ORDER CONFIRMATION" as a heading
+        // is almost certainly an order confirmation, regardless of other keyword matches.
+        let headingBonus: [DocumentKind: Int] = {
+            var bonus: [DocumentKind: Int] = [:]
+            let headingPatterns: [(String, DocumentKind)] = [
+                ("order confirmation", .orderConfirmation),
+                ("invoice", .invoice),
+                ("tax invoice", .invoice),
+                ("warranty card", .warrantyCard),
+                ("packing slip", .packingSlip),
+                ("packing list", .packingSlip),
+            ]
+            for line in lines {
+                let lineLower = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                for (phrase, kind) in headingPatterns {
+                    // Give a big bonus if the phrase appears as the entire line or a significant portion
+                    if lineLower == phrase || (lineLower.contains(phrase) && lineLower.count < phrase.count + 15) {
+                        bonus[kind, default: 0] += 3
+                    }
+                }
+            }
+            return bonus
+        }()
 
         // Score each kind by keyword presence.
-        let scores: [(DocumentKind, Int)] = [
+        let baseScores: [(DocumentKind, Int)] = [
             (.receipt, countKeywords(lower, ["receipt", "change due", "subtotal", "cashier", "payment method"])),
             (.invoice, countKeywords(lower, ["invoice", "bill to", "due date", "payment terms", "invoice no", "invoice number"])),
             (.warrantyCard, countKeywords(lower, ["warranty", "guarantee", "coverage", "warranty card", "warranty period"])),
@@ -555,6 +582,11 @@ struct HeuristicFieldExtractor {
             (.supportDocument, countKeywords(lower, ["support", "service request", "case number", "ticket", "rma"])),
             (.manual, countKeywords(lower, ["user manual", "instructions", "getting started", "safety information", "table of contents"])),
         ]
+
+        // Combine base scores with heading bonuses
+        let scores: [(DocumentKind, Int)] = baseScores.map { (kind, score) in
+            (kind, score + (headingBonus[kind] ?? 0))
+        }
 
         let best = scores.max(by: { $0.1 < $1.1 })
         if let best, best.1 >= 2 {
@@ -719,12 +751,27 @@ struct HeuristicFieldExtractor {
 
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)
 
-    /// Extract product name conservatively.
+    /// Well-known consumer electronics/appliance brands for product detection.
+    private static let knownBrands: Set<String> = [
+        "samsung", "apple", "sony", "lg", "dyson", "panasonic", "philips",
+        "bosch", "siemens", "miele", "braun", "asus", "acer", "dell", "hp",
+        "lenovo", "microsoft", "google", "bose", "jbl", "harman",
+        "whirlpool", "electrolux", "hitachi", "toshiba", "sharp",
+        "daikin", "mitsubishi", "fujitsu", "nikon", "canon", "olympus",
+        "garmin", "fitbit", "xiaomi", "huawei", "oppo", "vivo",
+        "nintendo", "playstation", "xbox", "razer", "logitech",
+        "breville", "delonghi", "kitchenaid", "cuisinart", "tefal",
+        "ikea", "muji", "osim", "ogawa",
+    ]
+
+    /// Extract product name with brand/model detection.
     ///
-    /// Strategy: only return a product name if we find a line that looks like an actual
-    /// product/item description (contains model numbers, brand-like words, or is in a
-    /// clearly item-description context). The old approach of "longest non-filtered line"
-    /// was too aggressive and would pick up legal text or footer boilerplate.
+    /// Strategy:
+    /// 1. Look for explicit item description patterns (model/sku/item headers).
+    /// 2. Look for lines near "item"/"description"/"product" headers.
+    /// 3. Scan all lines for known brand names.
+    /// 4. Scan all lines for model number patterns (alphanumeric codes >= 6 chars).
+    /// If a brand line is found, also check the next line for model numbers and concatenate.
     private func extractProductName(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -772,20 +819,179 @@ struct HeuristicFieldExtractor {
             }
         }
 
+        // Third pass: scan ALL lines for known brand names.
+        // If found, also grab adjacent lines that look like model info, and concatenate.
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Skip very short lines, address lines, boilerplate, and total lines
+            if trimmed.count < 3 || looksLikeBoilerplate(trimmed) || looksLikeAddress(trimmed) || looksLikeTotal(trimmed) {
+                continue
+            }
+
+            // Check if this line contains a known brand
+            let containsBrand = Self.knownBrands.contains { brand in
+                // Match as whole word to avoid false positives
+                let pattern = #"\b"# + NSRegularExpression.escapedPattern(for: brand) + #"\b"#
+                return lower.range(of: pattern, options: .regularExpression) != nil
+            }
+
+            if containsBrand {
+                var productName = trimmed
+
+                // Check if the next line looks like a model number — concatenate if so
+                if i + 1 < lines.count {
+                    let nextLine = lines[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if looksLikeModelNumber(nextLine) && !looksLikeBoilerplate(nextLine) {
+                        productName = productName + " " + nextLine
+                    }
+                }
+
+                // Also check if THIS line already contains a model number (common: "Samsung QA65LS03FWKXXS")
+                if productName.count >= 4 && productName.count <= 120 {
+                    return productName
+                }
+            }
+        }
+
+        // Fourth pass: scan for lines that contain model number patterns without a known brand.
+        // Model numbers look like: QA65LS03FWKXXS, RT-AX88U, A2894, etc.
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count < 6 || trimmed.count > 80 { continue }
+            if looksLikeBoilerplate(trimmed) || looksLikeAddress(trimmed) || looksLikeTotal(trimmed) { continue }
+
+            if looksLikeModelNumber(trimmed) {
+                // Check if the previous line has a brand or descriptive text
+                if i > 0 {
+                    let prevLine = lines[i - 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let prevLower = prevLine.lowercased()
+                    let prevHasBrand = Self.knownBrands.contains { brand in
+                        prevLower.range(of: #"\b"# + NSRegularExpression.escapedPattern(for: brand) + #"\b"#, options: .regularExpression) != nil
+                    }
+                    if prevHasBrand && !looksLikeBoilerplate(prevLine) {
+                        return prevLine + " " + trimmed
+                    }
+                }
+                return trimmed
+            }
+        }
+
         // Conservative: don't guess. Return nil and let the user fill it in.
         return nil
     }
 
-    /// Extract merchant name conservatively.
+    /// Checks if a string looks like a product model number.
+    /// Model numbers typically contain a mix of uppercase letters and digits, total length >= 6.
+    /// Examples: QA65LS03FWKXXS, RT-AX88U, WF-1000XM5
+    private func looksLikeModelNumber(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Remove hyphens for analysis
+        let cleaned = trimmed.replacingOccurrences(of: "-", with: "")
+
+        guard cleaned.count >= 6 else { return false }
+
+        let hasLetters = cleaned.contains(where: { $0.isLetter })
+        let hasDigits = cleaned.contains(where: { $0.isNumber })
+
+        // Must have both letters and digits
+        guard hasLetters && hasDigits else { return false }
+
+        // Check pattern: sequence of uppercase letters + digits, or vice versa
+        // Allow alphanumeric with hyphens, must be mostly alphanumeric
+        let alnumCount = cleaned.filter { $0.isLetter || $0.isNumber }.count
+        if alnumCount < cleaned.count * 3 / 4 { return false }
+
+        // Should have a reasonable mix — not just "Page1" but more like "QA65LS03"
+        let uppercaseLetters = cleaned.filter { $0.isUppercase }.count
+        let digits = cleaned.filter { $0.isNumber }.count
+        if uppercaseLetters >= 2 && digits >= 1 { return true }
+        if digits >= 2 && uppercaseLetters >= 1 { return true }
+
+        return false
+    }
+
+    /// Extract merchant name with company-pattern scanning.
     ///
-    /// Strategy: only look at the first 3 lines (merchant is almost always at the top of a receipt).
-    /// Apply strict filtering to avoid OCR fragments, parenthetical junk, or address lines.
+    /// Strategy:
+    /// 1. Scan ALL lines for company name suffixes (Pte Ltd, Inc, Corp, LLC, etc.) — very reliable signal.
+    /// 2. Scan for "Store :" field and extract the store name.
+    /// 3. Fall back to first 3 non-junk lines (original approach).
+    /// Prefer company-suffix matches over top-of-receipt guessing.
     private func extractMerchantName(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && $0.count >= 3 }
 
-        // Only check the first 3 lines — merchant name is at the top.
+        // Pass 1: Look for lines containing well-known company name suffixes.
+        // These are extremely reliable signals for a merchant/company name.
+        let companySuffixes = [
+            "Pte Ltd", "Pte. Ltd", "Pte Ltd.", "Pte. Ltd.",
+            "Sdn Bhd", "Sdn. Bhd", "Sdn Bhd.", "Sdn. Bhd.",
+            "Inc", "Inc.", "Corp", "Corp.",
+            "LLC", "L.L.C", "L.L.C.",
+            "Co.", "Co.,", "& Co",
+            "Ltd", "Ltd.", "Limited",
+            "GmbH", "Pty Ltd", "Pty. Ltd",
+        ]
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            for suffix in companySuffixes {
+                if trimmed.localizedCaseInsensitiveContains(suffix)
+                    && trimmed.count >= 8
+                    && trimmed.count <= 80
+                    && !looksLikeBoilerplate(trimmed)
+                    && !looksLikeAddress(trimmed) {
+                    // Clean up: remove registration numbers in parentheses at the end
+                    let cleaned = trimmed.replacingOccurrences(
+                        of: #"\s*\((?:Regn?\.?\s*No\.?|UEN|Co\.?\s*Reg).*$"#,
+                        with: "",
+                        options: .regularExpression
+                    ).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if cleaned.count >= 5 {
+                        return cleaned
+                    }
+                    return trimmed
+                }
+            }
+        }
+
+        // Pass 2: Look for "Store :" or "Store:" field — common in order confirmations.
+        // Parse "Store : 1004 Suntec City" → try to extract the name part after the store number.
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+            // Check current line for "store" label with value on same line
+            if lower.hasPrefix("store") || lower.contains("store :") || lower.contains("store:") {
+                let storeLine: String
+                // Handle split lines: "Store" on one line, ": value" on next
+                if line.contains(":") {
+                    storeLine = line
+                } else if i + 1 < lines.count && lines[i + 1].hasPrefix(":") {
+                    storeLine = line + " " + lines[i + 1]
+                } else {
+                    continue
+                }
+                // Extract value after the colon
+                if let colonRange = storeLine.range(of: ":") {
+                    let value = String(storeLine[colonRange.upperBound...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if value.count >= 3 {
+                        // Try to strip leading store number (e.g. "1004 Suntec City" → "Suntec City")
+                        let stripped = value.replacingOccurrences(
+                            of: #"^\d+\s+"#, with: "", options: .regularExpression
+                        )
+                        if stripped.count >= 3 {
+                            return stripped
+                        }
+                        return value
+                    }
+                }
+            }
+        }
+
+        // Pass 3: Original approach — first 3 non-junk lines.
         for line in lines.prefix(3) {
             if !looksLikeDate(line)
                 && !looksLikePureNumber(line)
@@ -803,13 +1009,95 @@ struct HeuristicFieldExtractor {
         return nil
     }
 
-    /// Extract date conservatively.
+    /// Extract date with keyword priority ordering.
     ///
-    /// Strategy: prefer explicit date patterns (DD/MM/YYYY). Only use NSDataDetector
-    /// for date formats near transaction-related keywords (not from random legal text).
-    /// Reject dates before 2015 or in the future.
+    /// Strategy:
+    /// 1. Scan ALL lines for date-related keywords with priority levels.
+    /// 2. Handle OCR split-line format where label is on one line, ": value" on the next.
+    /// 3. Parse dates from matched lines using explicit patterns and NSDataDetector.
+    /// 4. Return the highest-priority date found.
+    /// 5. Fall back to first explicit date pattern if no keyword matches.
     private func extractDate(from text: String) -> Date? {
-        // Pass 1: explicit date patterns (most reliable).
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // Priority levels for date-related keywords.
+        // Lower number = higher priority.
+        let highPriority: [(String, Int)] = [
+            ("creation date", 1), ("purchase date", 1), ("transaction date", 1),
+            ("date of purchase", 1), ("order date", 1),
+        ]
+        let mediumPriority: [(String, Int)] = [
+            ("invoice date", 2), ("receipt date", 2),
+        ]
+        let lowPriority: [(String, Int)] = [
+            ("change date", 3), ("print date", 3), ("delivery date", 3),
+            ("ship date", 3), ("dispatch date", 3),
+        ]
+        let allKeywords = highPriority + mediumPriority + lowPriority
+
+        // Collect date candidates with their priority.
+        var candidates: [(date: Date, priority: Int)] = []
+
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+
+            for (keyword, priority) in allKeywords {
+                guard lower.contains(keyword) else { continue }
+
+                // Skip boilerplate lines
+                if looksLikeBoilerplate(line) { continue }
+
+                // Try to extract date from this line first
+                if let date = parseDateFromLine(line), isPlausibleDate(date) {
+                    candidates.append((date, priority))
+                    continue
+                }
+
+                // Handle split-line OCR: label on this line, ": value" on the next
+                // e.g. "Creation Date" on line i, ": 15-Nov-25" on line i+1
+                if i + 1 < lines.count {
+                    let nextLine = lines[i + 1]
+                    // Next line starts with ":" or is just a date value
+                    let combined = line + " " + nextLine
+                    if let date = parseDateFromLine(combined), isPlausibleDate(date) {
+                        candidates.append((date, priority))
+                        continue
+                    }
+                    // Also try just the next line in case the date is there standalone
+                    if let date = parseDateFromLine(nextLine), isPlausibleDate(date) {
+                        candidates.append((date, priority))
+                    }
+                }
+            }
+        }
+
+        // Return the highest-priority candidate (lowest priority number).
+        if let best = candidates.min(by: { $0.priority < $1.priority }) {
+            return best.date
+        }
+
+        // Fallback: scan for lines containing generic "date" keyword (medium-ish priority).
+        let genericDateKeywords = ["date", "purchase", "transaction", "order", "invoice", "receipt", "paid"]
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+            let nearTransaction = genericDateKeywords.contains { lower.contains($0) }
+            guard nearTransaction else { continue }
+            if looksLikeBoilerplate(line) { continue }
+
+            if let date = parseDateFromLine(line), isPlausibleDate(date) {
+                return date
+            }
+            // Handle split lines
+            if i + 1 < lines.count {
+                let combined = line + " " + lines[i + 1]
+                if let date = parseDateFromLine(combined), isPlausibleDate(date) {
+                    return date
+                }
+            }
+        }
+
+        // Last resort: first explicit date pattern in entire text.
         let sgPatterns = [
             #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"#,
             #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2})"#,
@@ -831,34 +1119,9 @@ struct HeuristicFieldExtractor {
                     components.day = day
                     components.month = month
                     components.year = year
-                    if let date = Calendar.current.date(from: components),
-                       date <= Date.now.addingTimeInterval(86400) {
+                    if let date = Calendar.current.date(from: components), isPlausibleDate(date) {
                         return date
                     }
-                }
-            }
-        }
-
-        // Pass 2: use NSDataDetector but ONLY on lines near transaction keywords.
-        // This prevents picking up copyright years or dates in legal boilerplate.
-        let lines = text.components(separatedBy: .newlines)
-        let transactionKeywords = ["date", "purchase", "transaction", "order", "invoice", "receipt", "paid"]
-
-        for line in lines {
-            let lower = line.lowercased()
-            let nearTransaction = transactionKeywords.contains { lower.contains($0) }
-            guard nearTransaction else { continue }
-
-            // Skip lines that are clearly boilerplate
-            if looksLikeBoilerplate(line) { continue }
-
-            let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-            let range = NSRange(line.startIndex..., in: line)
-            let matches = detector?.matches(in: line, options: [], range: range) ?? []
-            if let date = matches.first?.date {
-                let year = Calendar.current.component(.year, from: date)
-                if year >= 2015 && date <= Date.now.addingTimeInterval(86400) {
-                    return date
                 }
             }
         }
@@ -867,33 +1130,161 @@ struct HeuristicFieldExtractor {
         return nil
     }
 
-    private func extractAmount(from text: String) -> Double? {
-        let lines = text.components(separatedBy: .newlines)
+    /// Parse a date from a single line of text, trying multiple formats.
+    private func parseDateFromLine(_ line: String) -> Date? {
+        // Try explicit numeric patterns first: DD/MM/YYYY, DD-MM-YYYY, etc.
+        let numericPatterns = [
+            #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"#,
+            #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2})"#,
+        ]
 
-        // First: look for lines with "total"/"amount" keywords.
-        for line in lines.reversed() {
-            let lower = line.lowercased()
-            if lower.contains("total") || lower.contains("amount") || lower.contains("grand total") || lower.contains("nett") {
-                // Skip "subtotal" if we later find "total" — but still extract from total lines.
-                if let amount = extractNumber(from: line), amount > 0 { return amount }
+        for pattern in numericPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+                let dayStr = String(line[Range(match.range(at: 1), in: line)!])
+                let monthStr = String(line[Range(match.range(at: 2), in: line)!])
+                var yearStr = String(line[Range(match.range(at: 3), in: line)!])
+
+                if yearStr.count == 2 { yearStr = "20" + yearStr }
+
+                if let day = Int(dayStr), let month = Int(monthStr), let year = Int(yearStr),
+                   day >= 1, day <= 31, month >= 1, month <= 12, year >= 2015, year <= 2099 {
+                    var components = DateComponents()
+                    components.day = day
+                    components.month = month
+                    components.year = year
+                    if let date = Calendar.current.date(from: components) {
+                        return date
+                    }
+                }
             }
         }
 
-        // Second: look for currency-prefixed amounts.
-        var amounts: [Double] = []
-        let amountPattern = #"(?:\$|SGD|S\$|MYR|RM)\s*(\d{1,}[,.]?\d{0,2})"#
+        // Try named month patterns: "15-Nov-25", "23 Nov 2025", "Nov 15, 2025", etc.
+        let namedMonthFormats = [
+            "dd-MMM-yy", "dd-MMM-yyyy",
+            "dd MMM yy", "dd MMM yyyy",
+            "MMM dd, yyyy", "MMM dd yyyy",
+            "dd/MMM/yy", "dd/MMM/yyyy",
+        ]
+        for fmt in namedMonthFormats {
+            let formatter = DateFormatter()
+            formatter.dateFormat = fmt
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            // Try to find a date substring in the line
+            // Extract potential date strings near colons or at end of line
+            let searchText = line.contains(":") ?
+                String(line[line.index(after: line.firstIndex(of: ":")!)...]).trimmingCharacters(in: .whitespacesAndNewlines) :
+                line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let date = formatter.date(from: searchText) {
+                return date
+            }
+            // Also try the whole line
+            if let date = formatter.date(from: line.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return date
+            }
+        }
+
+        // Fallback: NSDataDetector
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+        let range = NSRange(line.startIndex..., in: line)
+        let matches = detector?.matches(in: line, options: [], range: range) ?? []
+        return matches.first?.date
+    }
+
+    /// Check if a date is plausible (not too old, not in the future).
+    private func isPlausibleDate(_ date: Date) -> Bool {
+        let year = Calendar.current.component(.year, from: date)
+        return year >= 2015 && date <= Date.now.addingTimeInterval(86400)
+    }
+
+    private func extractAmount(from text: String) -> Double? {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // Total-related keywords in priority order (prefer "grand total" > "total" > "subtotal").
+        let totalKeywords = [
+            "grand total", "nett total", "total amount", "amount due", "total due",
+            "total value", "net total", "balance due", "amount payable",
+            "total", "nett", "amount",
+        ]
+
+        // Pass 1: Look for lines with total keywords and extract amounts from them.
+        // Also handle split lines where the keyword is on one line and the amount on the next.
+        var totalAmounts: [(amount: Double, priority: Int)] = []
+
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+
+            for (priority, keyword) in totalKeywords.enumerated() {
+                guard lower.contains(keyword) else { continue }
+                // Skip "subtotal" lines if keyword is "total" (avoid matching subtotal as total)
+                if keyword == "total" && lower.contains("subtotal") { continue }
+
+                // Try extracting from this line
+                if let amount = extractDecimalAmount(from: line), amount > 0 {
+                    totalAmounts.append((amount, priority))
+                    break
+                }
+
+                // Handle split lines: "Total value" on one line, amount on the next
+                if i + 1 < lines.count {
+                    let nextLine = lines[i + 1]
+                    if let amount = extractDecimalAmount(from: nextLine), amount > 0 {
+                        totalAmounts.append((amount, priority))
+                        break
+                    }
+                    // Also try combining the lines
+                    let combined = line + " " + nextLine
+                    if let amount = extractDecimalAmount(from: combined), amount > 0 {
+                        totalAmounts.append((amount, priority))
+                        break
+                    }
+                }
+            }
+        }
+
+        // Return the highest-priority total amount (lowest priority index).
+        if let best = totalAmounts.min(by: { $0.priority < $1.priority }) {
+            return best.amount
+        }
+
+        // Pass 2: Look for currency-prefixed amounts anywhere in the text.
+        // These are amounts like "SGD 3,180.00", "$99.90", "S$1,200.00"
+        var currencyAmounts: [Double] = []
+        let amountPattern = #"(?:\$|SGD|S\$|MYR|RM)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"#
         if let regex = try? NSRegularExpression(pattern: amountPattern, options: .caseInsensitive) {
             let fullText = text as NSString
             let matches = regex.matches(in: text, range: NSRange(location: 0, length: fullText.length))
             for match in matches {
                 if let range = Range(match.range(at: 1), in: text) {
                     let numStr = String(text[range]).replacingOccurrences(of: ",", with: "")
-                    if let num = Double(numStr), num > 0 { amounts.append(num) }
+                    if let num = Double(numStr), num > 0 { currencyAmounts.append(num) }
                 }
             }
         }
 
-        return amounts.max()
+        // Return the largest currency-prefixed amount (likely the total).
+        return currencyAmounts.max()
+    }
+
+    /// Extract a decimal amount from a line, handling comma-separated thousands.
+    /// Matches patterns like "3,180.00", "1200.50", "99.90", etc.
+    private func extractDecimalAmount(from line: String) -> Double? {
+        // Match amounts with optional comma thousands separators and optional decimal places
+        let pattern = #"(\d{1,3}(?:,\d{3})*\.\d{1,2}|\d{1,3}(?:,\d{3})+|\d+\.\d{1,2})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(line.startIndex..., in: line)
+        let matches = regex.matches(in: line, range: range)
+
+        // Return the last (rightmost) amount on the line — typically the line total
+        if let lastMatch = matches.last,
+           let matchRange = Range(lastMatch.range(at: 1), in: line) {
+            let numStr = String(line[matchRange]).replacingOccurrences(of: ",", with: "")
+            return Double(numStr)
+        }
+        return nil
     }
 
     private func extractCurrency(from text: String) -> String? {
@@ -903,15 +1294,6 @@ struct HeuristicFieldExtractor {
         if lower.contains("usd") || lower.contains("us$") { return "USD" }
         if lower.contains("$") { return "SGD" }
         return nil
-    }
-
-    private func extractNumber(from line: String) -> Double? {
-        let pattern = #"(\d{1,}[,.]?\d{0,2})\s*$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let range = Range(match.range(at: 1), in: line) else { return nil }
-        let numStr = String(line[range]).replacingOccurrences(of: ",", with: "")
-        return Double(numStr)
     }
 
     // MARK: - Line classifiers
