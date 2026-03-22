@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import Sentry
 
 /// Orchestrates field extraction from OCR text.
 ///
@@ -66,6 +67,7 @@ struct ExtractionPipeline: Sendable {
             Self.logger.info("Foundation Models returned empty — using heuristic-only result (fields: \(combinedDiag.heuristicFieldCount, privacy: .public), rejected: \(combinedDiag.rejectedFields.joined(separator: ","), privacy: .public))")
             var result = heuristic
             result.diagnostics = combinedDiag
+            addSentryBreadcrumb(ocrTextLength: ocrText.count, diagnostics: combinedDiag, source: heuristic.source)
             return result
         }
 
@@ -74,7 +76,32 @@ struct ExtractionPipeline: Sendable {
         // Merge: prefer FM values, fall back to heuristic for missing fields.
         var merged = merge(primary: fm, fallback: heuristic)
         merged.diagnostics = combinedDiag
+        addSentryBreadcrumb(ocrTextLength: ocrText.count, diagnostics: combinedDiag, source: fm.source)
         return merged
+    }
+
+    // MARK: - Sentry breadcrumbs
+
+    private func addSentryBreadcrumb(
+        ocrTextLength: Int,
+        diagnostics: ExtractionDiagnostics,
+        source: ExtractionSource
+    ) {
+        let crumb = Breadcrumb()
+        crumb.category = "extraction"
+        crumb.message = "Pipeline completed"
+        crumb.level = .info
+        crumb.data = [
+            "ocrTextLength": ocrTextLength,
+            "fmAvailable": diagnostics.foundationModelAvailable,
+            "fmRan": diagnostics.foundationModelRan,
+            "fmSkipReason": diagnostics.foundationModelSkipReason ?? "none",
+            "fmFieldCount": diagnostics.foundationModelFieldCount,
+            "heuristicFieldCount": diagnostics.heuristicFieldCount,
+            "rejectedFields": diagnostics.rejectedFields.joined(separator: ","),
+            "source": source.rawValue,
+        ]
+        SentrySDK.addBreadcrumb(crumb)
     }
 
     // MARK: - Merging

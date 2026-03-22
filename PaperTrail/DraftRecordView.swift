@@ -23,6 +23,7 @@ struct DraftRecordView: View {
     @State private var currency: String
     @State private var category: String = ""
     @State private var tagsText: String = ""
+    @State private var showExtractionLogSheet = false
 
     init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
@@ -129,6 +130,17 @@ struct DraftRecordView: View {
                             }
                             .foregroundStyle(.orange)
                         }
+
+                        // Share extraction log button — available when structured result exists.
+                        if seededOCR.structuredResult != nil {
+                            Button {
+                                showExtractionLogSheet = true
+                            } label: {
+                                Label("Share extraction log", systemImage: "square.and.arrow.up")
+                                    .font(.caption2)
+                            }
+                            .padding(.top, 2)
+                        }
                     }
                 }
             }
@@ -226,6 +238,11 @@ struct DraftRecordView: View {
                 .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .sheet(isPresented: $showExtractionLogSheet) {
+            if let logText = generateExtractionLog() {
+                ShareSheetView(activityItems: [logText])
+            }
+        }
     }
 
     // MARK: - Document kind icon
@@ -241,6 +258,85 @@ struct DraftRecordView: View {
         case .manual: "book"
         case .unknown: "questionmark.folder"
         }
+    }
+
+    // MARK: - Extraction log
+
+    private func generateExtractionLog() -> String? {
+        guard let ocr = seededOCR, let sr = ocr.structuredResult else { return nil }
+        let diag = sr.diagnostics
+
+        var lines: [String] = []
+        lines.append("📋 PaperTrail Extraction Log")
+        lines.append("═══════════════════════════════")
+        lines.append("")
+
+        // OCR text preview
+        let ocrPreview = String(ocr.recognizedText.prefix(500))
+        lines.append("📝 OCR Text (\(ocr.recognizedText.count) chars):")
+        lines.append(ocrPreview)
+        if ocr.recognizedText.count > 500 {
+            lines.append("… (truncated)")
+        }
+        lines.append("")
+
+        // Document kind
+        if let kind = ocr.documentKind {
+            let kindConf = sr.documentKind.confidence.rawValue
+            lines.append("📄 Document: \(kind.label) [\(kindConf)]")
+        }
+        lines.append("")
+
+        // Foundation Models status
+        lines.append("🤖 Foundation Models:")
+        if let diag {
+            lines.append("  Available: \(diag.foundationModelAvailable ? "yes" : "no")")
+            lines.append("  Ran: \(diag.foundationModelRan ? "yes" : "no")")
+            if let reason = diag.foundationModelSkipReason {
+                lines.append("  Skip reason: \(reason)")
+            }
+            lines.append("  FM fields: \(diag.foundationModelFieldCount)")
+            lines.append("  Heuristic fields: \(diag.heuristicFieldCount)")
+        } else {
+            lines.append("  No diagnostics available")
+        }
+        lines.append("")
+
+        // Fields
+        lines.append("📊 Extracted Fields:")
+
+        func fieldLine<T>(_ name: String, _ field: ExtractedField<T>) -> String {
+            if let v = field.value {
+                return "  \(name): \(v) [\(field.confidence.rawValue)]"
+            }
+            return "  \(name): — [none]"
+        }
+
+        lines.append(fieldLine("Product", sr.productName))
+        lines.append(fieldLine("Merchant", sr.merchantName))
+        if let date = sr.purchaseDate.value {
+            let fmt = DateFormatter()
+            fmt.dateStyle = .medium
+            lines.append("  Date: \(fmt.string(from: date)) [\(sr.purchaseDate.confidence.rawValue)]")
+        } else {
+            lines.append("  Date: — [none]")
+        }
+        lines.append(fieldLine("Amount", sr.amount))
+        lines.append(fieldLine("Currency", sr.currency))
+        lines.append(fieldLine("Category", sr.category))
+        lines.append(fieldLine("Warranty (months)", sr.warrantyDurationMonths))
+        lines.append("")
+
+        // Source
+        lines.append("🔧 Source: \(sr.source.rawValue)")
+
+        // Rejected fields
+        if let diag, !diag.rejectedFields.isEmpty {
+            lines.append("")
+            lines.append("⚠️ Rejected: \(diag.rejectedFields.joined(separator: ", "))")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Save

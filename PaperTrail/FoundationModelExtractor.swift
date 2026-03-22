@@ -235,17 +235,21 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         Self.logger.info("Foundation Models available — running structured extraction")
 
+        // Instructions explicitly state English to work around locale-related failures
+        // ("An unsupported language or locale was used"). The model processes OCR text
+        // that may originate from any locale, but our prompts and schema are English.
+        let instructions = """
+            You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
+            Extract structured fields from the OCR text below. \
+            Be precise: prefer exact values from the text over guesses. \
+            If a field is not clearly present, leave it null. \
+            Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
+            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
+            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.
+            """
+
         do {
-            let session = LanguageModelSession(
-                instructions: """
-                You are a receipt and warranty document parser. Extract structured fields from the OCR text below. \
-                Be precise: prefer exact values from the text over guesses. \
-                If a field is not clearly present, leave it null. \
-                Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
-                For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-                Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.
-                """
-            )
+            let session = LanguageModelSession(instructions: instructions)
 
             // respond(to:generating:) returns a Response<T> wrapper;
             // extract the generated schema via .content.
@@ -272,12 +276,51 @@ struct FoundationModelExtractionService: FieldExtractionService {
             )
             return mapped
         } catch {
-            Self.logger.error("Foundation Models extraction failed: \(error.localizedDescription, privacy: .public)")
+            let errorDesc = error.localizedDescription
+            let isLocaleError = errorDesc.lowercased().contains("locale")
+                || errorDesc.lowercased().contains("language")
+                || errorDesc.lowercased().contains("unsupported")
+
+            // If the error looks locale-related, retry with minimal instructions.
+            if isLocaleError {
+                Self.logger.warning("Foundation Models locale error — retrying with simplified instructions: \(errorDesc, privacy: .public)")
+                do {
+                    let retrySession = LanguageModelSession(
+                        instructions: "Extract receipt fields from the text. Respond in English."
+                    )
+                    let retryResponse = try await retrySession.respond(
+                        to: ocrText,
+                        generating: ReceiptExtractionSchema.self
+                    )
+
+                    let schema = retryResponse.content
+                    let fieldCount = [
+                        schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
+                    ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+
+                    Self.logger.info("Foundation Models retry succeeded with \(fieldCount, privacy: .public) fields")
+
+                    var mapped = mapSchemaToResult(schema)
+                    mapped.diagnostics = ExtractionDiagnostics(
+                        foundationModelAvailable: true,
+                        foundationModelRan: true,
+                        foundationModelSkipReason: "locale retry succeeded",
+                        foundationModelFieldCount: fieldCount,
+                        heuristicFieldCount: 0,
+                        rejectedFields: []
+                    )
+                    return mapped
+                } catch {
+                    Self.logger.error("Foundation Models retry also failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+
+            Self.logger.error("Foundation Models extraction failed: \(errorDesc, privacy: .public)")
             var result = StructuredExtractionResult.empty
             result.diagnostics = ExtractionDiagnostics(
                 foundationModelAvailable: true,
                 foundationModelRan: false,
-                foundationModelSkipReason: "error: \(error.localizedDescription)",
+                foundationModelSkipReason: "error: \(errorDesc)",
                 foundationModelFieldCount: 0,
                 heuristicFieldCount: 0,
                 rejectedFields: []
@@ -417,11 +460,16 @@ struct HeuristicFieldExtractor {
 
         var rejected: [String] = []
 
-        // Apply quality gates: reject values that look like OCR junk.
+        // Apply quality gates: reject values that look like OCR junk or fail validation.
         let productName: String? = {
             guard let v = rawProduct else { return nil }
             if looksLikeBoilerplate(v) || looksLikeOCRJunk(v) {
-                Self.logger.info("Rejected product name as junk: '\(v, privacy: .public)'")
+                Self.logger.info("Rejected product name as junk/boilerplate: '\(v, privacy: .public)'")
+                rejected.append("productName")
+                return nil
+            }
+            if !isValidProductName(v) {
+                Self.logger.info("Rejected product name as invalid (single word/stopword): '\(v, privacy: .public)'")
                 rejected.append("productName")
                 return nil
             }
@@ -431,7 +479,12 @@ struct HeuristicFieldExtractor {
         let merchantName: String? = {
             guard let v = rawMerchant else { return nil }
             if looksLikeBoilerplate(v) || looksLikeOCRJunk(v) {
-                Self.logger.info("Rejected merchant name as junk: '\(v, privacy: .public)'")
+                Self.logger.info("Rejected merchant name as junk/boilerplate: '\(v, privacy: .public)'")
+                rejected.append("merchantName")
+                return nil
+            }
+            if !isValidMerchantName(v) {
+                Self.logger.info("Rejected merchant name as invalid (fragment/too short): '\(v, privacy: .public)'")
                 rejected.append("merchantName")
                 return nil
             }
@@ -543,8 +596,34 @@ struct HeuristicFieldExtractor {
         return boilerplateSignals.contains { lower.contains($0) }
     }
 
+    // MARK: - Stopwords and validation sets
+
+    /// Common English words that should never be extracted as product or merchant names.
+    /// These appear frequently in receipts/order confirmations as status text, not product names.
+    private static let stopwords: Set<String> = [
+        "delivering", "delivery", "shipping", "processing", "pending",
+        "confirmed", "printed", "generated", "page", "copy",
+        "original", "duplicate", "payment", "status", "complete",
+        "completed", "cancelled", "refunded", "shipped", "dispatched",
+        "estimated", "tracking", "ordered", "received", "returned",
+        "summary", "details", "information", "customer", "account",
+        "address", "email", "phone", "mobile", "contact",
+        "total", "subtotal", "discount", "tax", "amount",
+        "quantity", "price", "item", "items", "description",
+        "date", "time", "number", "order", "invoice",
+        "receipt", "thank", "thanks", "welcome", "hello",
+    ]
+
+    /// Well-known short brand names that should be accepted despite being short/single-word.
+    private static let knownShortBrands: Set<String> = [
+        "3M", "HP", "LG", "BQ", "JBL", "UE",
+        "IKEA", "Sony", "Acer", "Asus", "Dell",
+        "Bose", "Dyson", "Nike", "Zara", "H&M",
+        "MUJI", "Braun", "Miele", "Smeg", "Bosch",
+    ]
+
     /// Detects OCR junk: very short fragments, lines that are mostly punctuation/symbols,
-    /// parenthetical fragments, or text that doesn't form coherent words.
+    /// parenthetical fragments, single common English words, or text that doesn't form coherent words.
     private func looksLikeOCRJunk(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -565,10 +644,77 @@ struct HeuristicFieldExtractor {
         let letterCount = trimmed.filter { $0.isLetter }.count
         if letterCount > 0 && letterCount <= 4 && uppercaseCount == letterCount {
             // Short all-caps fragments like "COP", "GST", "QTY" — not product names
+            // But allow known short brands like "IKEA", "Sony", "3M"
+            if !Self.knownShortBrands.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                return true
+            }
+        }
+
+        // Single common English word — not a product or merchant name
+        let words = trimmed.split(separator: " ")
+        if words.count == 1 && Self.stopwords.contains(trimmed.lowercased()) {
             return true
         }
 
         return false
+    }
+
+    /// Validates a candidate product name beyond basic junk detection.
+    /// Product names should be multi-word or contain model-number-like patterns.
+    private func isValidProductName(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = trimmed.split(separator: " ").map(String.init)
+
+        // Reject single-word candidates unless they look like a model number (alphanumeric mix)
+        if words.count < 2 {
+            // Allow model numbers like "A2894" or "RT-AX88U"
+            let hasLetters = trimmed.contains(where: { $0.isLetter })
+            let hasDigits = trimmed.contains(where: { $0.isNumber })
+            if hasLetters && hasDigits { return true }
+            // Allow known brands
+            if Self.knownShortBrands.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                return true
+            }
+            // Single generic word — reject
+            return false
+        }
+
+        // Check that at least one word is NOT a stopword (i.e., contains something product-like)
+        let nonStopwords = words.filter { !Self.stopwords.contains($0.lowercased()) }
+        if nonStopwords.isEmpty { return false }
+
+        return true
+    }
+
+    /// Validates a candidate merchant name beyond basic junk detection.
+    /// Merchant names should not be partial-word OCR fragments.
+    private func isValidMerchantName(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Reject very short candidates — likely OCR fragments
+        if trimmed.count < 5 {
+            // Allow known short brands (e.g. "IKEA", "3M", "H&M")
+            if Self.knownShortBrands.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                return true
+            }
+            return false
+        }
+
+        // Reject candidates that start with a lowercase letter — likely mid-word OCR fragment
+        // (e.g. "rman" from "Norman")
+        if let first = trimmed.first, first.isLetter && first.isLowercase {
+            return false
+        }
+
+        // Single-word candidates must be properly capitalized (first letter uppercase, >= 5 chars)
+        // or contain a space (multi-word like "Harvey Norman")
+        let words = trimmed.split(separator: " ")
+        if words.count == 1 {
+            // Single word: must start with uppercase and be >= 5 chars, or be a known brand
+            guard let first = trimmed.first, first.isUppercase else { return false }
+        }
+
+        return true
     }
 
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)
