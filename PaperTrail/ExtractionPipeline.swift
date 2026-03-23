@@ -115,7 +115,11 @@ struct ExtractionPipeline: Sendable {
             productName: pick(primary.productName, fallback.productName),
             merchantName: pick(primary.merchantName, fallback.merchantName),
             purchaseDate: pick(primary.purchaseDate, fallback.purchaseDate),
-            amount: pick(primary.amount, fallback.amount),
+            // For amount, prefer the larger value — the correct total
+            // is almost always the largest amount on a receipt. This handles
+            // cases where both FM and heuristic extract a subtotal instead
+            // of the grand total.
+            amount: pickLargerAmount(primary.amount, fallback.amount),
             currency: pick(primary.currency, fallback.currency),
             category: pick(primary.category, fallback.category),
             warrantyDurationMonths: pick(primary.warrantyDurationMonths, fallback.warrantyDurationMonths),
@@ -130,6 +134,20 @@ struct ExtractionPipeline: Sendable {
             return primary
         }
         return fallback
+    }
+
+    /// For amounts, prefer the larger value — the correct total is almost always
+    /// the largest reasonable amount on a receipt (grand total > subtotal).
+    private func pickLargerAmount(
+        _ primary: ExtractedField<Double>,
+        _ fallback: ExtractedField<Double>
+    ) -> ExtractedField<Double> {
+        guard let pVal = primary.value, let fVal = fallback.value else {
+            // If only one has a value, use whichever has one
+            return primary.value != nil ? primary : fallback
+        }
+        // Prefer the larger amount (grand total > subtotal)
+        return pVal >= fVal ? primary : fallback
     }
 }
 

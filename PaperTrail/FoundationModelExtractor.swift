@@ -1376,15 +1376,28 @@ struct HeuristicFieldExtractor {
                     break
                 }
 
-                // Handle split lines: "Total value" on one line, amount on the next
-                if i + 1 < lines.count {
-                    let nextLine = lines[i + 1]
-                    if let amount = extractDecimalAmount(from: nextLine), amount > 0 {
-                        totalAmounts.append((amount, priority))
+                // Handle split lines: "Total value" on one line, amounts on the following lines.
+                // Scan up to 5 subsequent lines for amounts and take the LARGEST one.
+                // This handles the common receipt pattern where a total keyword is followed
+                // by a column of amounts (subtotals, tax, grand total).
+                let maxLookahead = min(5, lines.count - i - 1)
+                if maxLookahead > 0 {
+                    var blockAmounts: [(amount: Double, lineOffset: Int)] = []
+                    for offset in 1...maxLookahead {
+                        let nextLine = lines[i + offset]
+                        if let amount = extractDecimalAmount(from: nextLine), amount > 0 {
+                            blockAmounts.append((amount, offset))
+                        } else if !blockAmounts.isEmpty {
+                            // We've passed the contiguous amount block
+                            break
+                        }
+                    }
+                    if let largest = blockAmounts.max(by: { $0.amount < $1.amount }) {
+                        totalAmounts.append((largest.amount, priority))
                         break
                     }
-                    // Also try combining the lines
-                    let combined = line + " " + nextLine
+                    // Also try combining with the immediate next line
+                    let combined = line + " " + lines[i + 1]
                     if let amount = extractDecimalAmount(from: combined), amount > 0 {
                         totalAmounts.append((amount, priority))
                         break
