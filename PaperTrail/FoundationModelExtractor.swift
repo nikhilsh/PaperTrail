@@ -491,6 +491,7 @@ struct HeuristicFieldExtractor {
         let rawDate = extractDate(from: text)
         let rawAmount = extractAmount(from: text)
         let rawCurrency = extractCurrency(from: text)
+        let rawWarrantyMonths = extractWarrantyMonths(from: text)
 
         var rejected: [String] = []
 
@@ -549,7 +550,7 @@ struct HeuristicFieldExtractor {
         }()
 
         let fieldCount = [productName, merchantName, rawCurrency].compactMap({ $0 }).count
-            + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0)
+            + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (rawWarrantyMonths != nil ? 1 : 0)
 
         Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected")
 
@@ -561,7 +562,7 @@ struct HeuristicFieldExtractor {
             amount: ExtractedField(value: amount, confidence: amount != nil ? .heuristic : .none),
             currency: ExtractedField(value: rawCurrency, confidence: rawCurrency != nil ? .heuristic : .none),
             category: .absent,
-            warrantyDurationMonths: .absent,
+            warrantyDurationMonths: ExtractedField(value: rawWarrantyMonths, confidence: rawWarrantyMonths != nil ? .heuristic : .none),
             source: .heuristic,
             diagnostics: ExtractionDiagnostics(
                 foundationModelAvailable: false,
@@ -1238,10 +1239,14 @@ struct HeuristicFieldExtractor {
             .map { $0.trimmingCharacters(in: .whitespaces) }
 
         // Total-related keywords in priority order (prefer "grand total" > "total" > "subtotal").
-        let totalKeywords = [
-            "grand total", "nett total", "total amount", "amount due", "total due",
-            "total value", "net total", "balance due", "amount payable",
-            "total", "nett", "amount",
+        // Lower priority number = higher preference.
+        let totalKeywords: [(keyword: String, priority: Int)] = [
+            ("grand total", 0),
+            ("nett total", 1), ("net total", 1),
+            ("total amount", 2), ("total due", 2), ("amount due", 2),
+            ("total value", 3), ("balance due", 3), ("amount payable", 3),
+            ("total", 4),
+            ("nett", 5), ("amount", 5),
         ]
 
         // Pass 1: Look for lines with total keywords and extract amounts from them.
@@ -1251,7 +1256,7 @@ struct HeuristicFieldExtractor {
         for (i, line) in lines.enumerated() {
             let lower = line.lowercased()
 
-            for (priority, keyword) in totalKeywords.enumerated() {
+            for (keyword, priority) in totalKeywords {
                 guard lower.contains(keyword) else { continue }
                 // Skip "subtotal" lines if keyword is "total" (avoid matching subtotal as total)
                 if keyword == "total" && lower.contains("subtotal") { continue }
@@ -1279,8 +1284,13 @@ struct HeuristicFieldExtractor {
             }
         }
 
-        // Return the highest-priority total amount (lowest priority index).
-        if let best = totalAmounts.min(by: { $0.priority < $1.priority }) {
+        // Return the best total: highest priority (lowest number), then largest amount as tiebreaker.
+        // This ensures "grand total 3,180.00" beats "total 380.00", and when two keywords share
+        // the same priority level, the larger amount wins (grand total > subtotal).
+        if let best = totalAmounts.sorted(by: {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            return $0.amount > $1.amount  // same priority → prefer larger amount
+        }).first {
             return best.amount
         }
 
@@ -1304,20 +1314,65 @@ struct HeuristicFieldExtractor {
     }
 
     /// Extract a decimal amount from a line, handling comma-separated thousands.
-    /// Matches patterns like "3,180.00", "1200.50", "99.90", etc.
+    /// Matches patterns like "3,180.00", "1200.50", "99.90", "$3,180.00", "SGD 1,200.00", etc.
     private func extractDecimalAmount(from line: String) -> Double? {
-        // Match amounts with optional comma thousands separators and optional decimal places
+        // Match amounts with comma thousands separators and/or decimal places.
+        // Ordered so comma-thousands with decimals are tried first (most specific),
+        // then comma-thousands without decimals, then plain decimals.
         let pattern = #"(\d{1,3}(?:,\d{3})*\.\d{1,2}|\d{1,3}(?:,\d{3})+|\d+\.\d{1,2})"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(line.startIndex..., in: line)
         let matches = regex.matches(in: line, range: range)
 
-        // Return the last (rightmost) amount on the line — typically the line total
-        if let lastMatch = matches.last,
-           let matchRange = Range(lastMatch.range(at: 1), in: line) {
-            let numStr = String(line[matchRange]).replacingOccurrences(of: ",", with: "")
-            return Double(numStr)
+        // Collect all amounts on the line; return the largest.
+        // This handles lines like "Subtotal 380.00 Total 3,180.00" by picking the bigger one,
+        // and also handles "3,180.00" appearing after labels.
+        var amounts: [Double] = []
+        for match in matches {
+            if let matchRange = Range(match.range(at: 1), in: line) {
+                let numStr = String(line[matchRange]).replacingOccurrences(of: ",", with: "")
+                if let num = Double(numStr), num > 0 {
+                    amounts.append(num)
+                }
+            }
         }
+        return amounts.max()
+    }
+
+    /// Extract warranty duration in months from text.
+    /// Looks for patterns like "3 years warranty", "24 months guarantee", etc.
+    private func extractWarrantyMonths(from text: String) -> Int? {
+        let lower = text.lowercased()
+
+        // Patterns where the number comes BEFORE the duration keyword
+        // e.g. "3 years warranty", "24 months guarantee"
+        let prefixPatterns: [(pattern: String, multiplier: Int)] = [
+            (#"(\d+)\s*years?\s*(?:warranty|guarantee)"#, 12),
+            (#"(\d+)\s*months?\s*(?:warranty|guarantee)"#, 1),
+        ]
+
+        // Patterns where the number comes AFTER the keyword
+        // e.g. "warranty of 3 years", "warranty period: 24 months"
+        let suffixPatterns: [(pattern: String, multiplier: Int)] = [
+            (#"(?:warranty|guarantee)[\s\w]*?(\d+)\s*years?"#, 12),
+            (#"(?:warranty|guarantee)[\s\w]*?(\d+)\s*months?"#, 1),
+        ]
+
+        let allPatterns = prefixPatterns + suffixPatterns
+
+        for (pattern, multiplier) in allPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)),
+               let numRange = Range(match.range(at: 1), in: lower),
+               let months = Int(lower[numRange]) {
+                let total = months * multiplier
+                // Sanity check: warranty should be between 1 month and 10 years
+                if total >= 1 && total <= 120 {
+                    return total
+                }
+            }
+        }
+
         return nil
     }
 
