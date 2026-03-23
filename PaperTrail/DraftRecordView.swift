@@ -272,10 +272,10 @@ struct DraftRecordView: View {
         lines.append("")
 
         // OCR text preview
-        let ocrPreview = String(ocr.recognizedText.prefix(500))
+        let ocrPreview = String(ocr.recognizedText.prefix(1500))
         lines.append("📝 OCR Text (\(ocr.recognizedText.count) chars):")
         lines.append(ocrPreview)
-        if ocr.recognizedText.count > 500 {
+        if ocr.recognizedText.count > 1500 {
             lines.append("… (truncated)")
         }
         lines.append("")

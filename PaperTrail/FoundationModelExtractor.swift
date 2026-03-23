@@ -1310,7 +1310,43 @@ struct HeuristicFieldExtractor {
         }
 
         // Return the largest currency-prefixed amount (likely the total).
-        return currencyAmounts.max()
+        if let largest = currencyAmounts.max() {
+            return largest
+        }
+
+        // Pass 3: Look for comma-thousands amounts anywhere in the text.
+        // Amounts like "3,180.00" almost always represent totals or significant values —
+        // small line items rarely use comma-thousands formatting.
+        let commaThousandsPattern = #"(\d{1,3},\d{3}\.\d{2})"#
+        var commaAmounts: [Double] = []
+        if let regex = try? NSRegularExpression(pattern: commaThousandsPattern) {
+            let fullText = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: fullText.length))
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: text) {
+                    let numStr = String(text[range]).replacingOccurrences(of: ",", with: "")
+                    if let num = Double(numStr), num > 0 { commaAmounts.append(num) }
+                }
+            }
+        }
+        if let largest = commaAmounts.max() {
+            return largest
+        }
+
+        // Pass 4: Last resort — find the single largest decimal amount anywhere in the text.
+        let anyAmountPattern = #"(\d{1,3}(?:,\d{3})*\.\d{1,2}|\d+\.\d{1,2})"#
+        var allAmounts: [Double] = []
+        if let regex = try? NSRegularExpression(pattern: anyAmountPattern) {
+            let fullText = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: fullText.length))
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: text) {
+                    let numStr = String(text[range]).replacingOccurrences(of: ",", with: "")
+                    if let num = Double(numStr), num > 0 { allAmounts.append(num) }
+                }
+            }
+        }
+        return allAmounts.max()
     }
 
     /// Extract a decimal amount from a line, handling comma-separated thousands.
