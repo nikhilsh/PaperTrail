@@ -197,12 +197,111 @@ protocol FieldExtractionService: Sendable {
 ///
 /// The service:
 /// 1. Checks model availability at runtime.
-/// 2. Sends the OCR text with a system prompt to the on-device model.
-/// 3. Requests structured `ReceiptExtractionSchema` output.
-/// 4. Falls back to `.empty` if the model is unavailable or fails.
+/// 2. Cleans OCR text to remove junk that triggers locale detection errors.
+/// 3. Sends the cleaned text with a system prompt to the on-device model.
+/// 4. Retries with progressively more aggressive filtering on locale errors.
+/// 5. Falls back to `.empty` if the model is unavailable or all attempts fail.
 struct FoundationModelExtractionService: FieldExtractionService {
 
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.fm")
+
+    // MARK: - OCR text cleaning
+
+    /// Cleans raw OCR text to remove junk lines that may trigger the on-device model's
+    /// language detection (causing "unsupported language or locale" errors).
+    ///
+    /// - Parameter text: Raw OCR text from Vision.
+    /// - Parameter aggressive: If true, applies stricter filtering (removes more lines).
+    /// - Parameter maxLength: Maximum character count for the returned string.
+    /// - Returns: Cleaned text with an English context prefix.
+    private func cleanOCRTextForModel(_ text: String, aggressive: Bool = false, maxLength: Int = 3000) -> String {
+        let lines = text.components(separatedBy: .newlines)
+
+        let filtered = lines.compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Remove empty lines
+            guard !trimmed.isEmpty else { return nil }
+
+            // Remove lines shorter than 3 characters (OCR fragments like "(C", "rm")
+            guard trimmed.count >= 3 else { return nil }
+
+            // Remove lines that are purely numeric, dates, or punctuation
+            let stripped = trimmed.replacingOccurrences(of: " ", with: "")
+            if stripped.allSatisfy({ $0.isNumber || $0 == "." || $0 == "," || $0 == "-" || $0 == "/" || $0 == ":" }) {
+                return nil
+            }
+
+            // Remove lines that look like page headers
+            let lower = trimmed.lowercased()
+            if lower.hasPrefix("page ") || lower.contains("1 of 1") || lower.contains("print date") {
+                return nil
+            }
+
+            // In aggressive mode, apply stricter filters
+            if aggressive {
+                // Remove lines shorter than 5 characters
+                guard trimmed.count >= 5 else { return nil }
+
+                // Remove lines with fewer than 2 letter characters (likely codes/junk)
+                let letterCount = trimmed.filter { $0.isLetter }.count
+                guard letterCount >= 2 else { return nil }
+
+                // Remove lines that are mostly non-ASCII (potential non-English trigger)
+                let asciiCount = trimmed.unicodeScalars.filter { $0.isASCII }.count
+                guard asciiCount > trimmed.count / 2 else { return nil }
+
+                // Remove lines that start with punctuation/special chars (OCR fragments)
+                if let first = trimmed.first, !first.isLetter && !first.isNumber {
+                    return nil
+                }
+
+                // Remove lines with very low English word ratio
+                let words = trimmed.split(separator: " ")
+                if words.count >= 2 {
+                    let englishishWords = words.filter { word in
+                        let w = String(word).lowercased()
+                        // A word is "English-ish" if it's alphabetic and >= 2 chars
+                        return w.count >= 2 && w.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" })
+                    }
+                    if englishishWords.count == 0 { return nil }
+                }
+            } else {
+                // Standard mode: remove lines that start with unmatched parenthesis (OCR fragment)
+                if trimmed.hasPrefix("(") && trimmed.count < 6 && !trimmed.contains(")") {
+                    return nil
+                }
+
+                // Remove lines that are clearly junk fragments (< 3 letter chars)
+                let letterCount = trimmed.filter { $0.isLetter }.count
+                if letterCount < 2 { return nil }
+            }
+
+            return trimmed
+        }
+
+        // Join and truncate
+        var cleaned = filtered.joined(separator: "\n")
+        if cleaned.count > maxLength {
+            // Truncate at a line boundary
+            let truncated = String(cleaned.prefix(maxLength))
+            if let lastNewline = truncated.lastIndex(of: "\n") {
+                cleaned = String(truncated[..<lastNewline])
+            } else {
+                cleaned = truncated
+            }
+        }
+
+        // Prepend English context to anchor the model's language detection
+        let prefix = "The following is OCR text from a purchase receipt or order document:\n\n"
+        return prefix + cleaned
+    }
+
+    /// Checks whether an error is a locale/language-related Foundation Models error.
+    private func isLocaleError(_ error: Error) -> Bool {
+        let desc = error.localizedDescription.lowercased()
+        return desc.contains("locale") || desc.contains("language") || desc.contains("unsupported")
+    }
 
     func extract(from ocrText: String) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
@@ -258,9 +357,6 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         Self.logger.info("Foundation Models available — running structured extraction")
 
-        // Instructions explicitly state English to work around locale-related failures
-        // ("An unsupported language or locale was used"). The model processes OCR text
-        // that may originate from any locale, but our prompts and schema are English.
         let instructions = """
             You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
             Extract structured fields from the OCR text below. \
@@ -271,85 +367,98 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.
             """
 
-        do {
-            let session = LanguageModelSession(instructions: instructions)
+        // Build the extraction attempts: each is (label, inputText, instructions).
+        // Attempt 1: cleaned OCR text (standard filter)
+        // Attempt 2: aggressively cleaned text (on locale error)
+        // Attempt 3: first 500 chars of aggressively cleaned text (on locale error)
+        let cleanedText = cleanOCRTextForModel(ocrText)
+        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true)
+        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 500)
 
-            // respond(to:generating:) returns a Response<T> wrapper;
-            // extract the generated schema via .content.
-            let response = try await session.respond(
-                to: ocrText,
-                generating: ReceiptExtractionSchema.self
-            )
+        let attempts: [(label: String, input: String)] = [
+            ("attempt 1: cleaned OCR", cleanedText),
+            ("attempt 2: aggressive filter", aggressiveText),
+            ("attempt 3: minimal (500 chars)", minimalText),
+        ]
 
-            let schema = response.content
-            let fieldCount = [
-                schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
-            ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+        var lastError: Error?
 
-            Self.logger.info("Foundation Models returned \(fieldCount, privacy: .public) fields")
+        for (index, attempt) in attempts.enumerated() {
+            let attemptNumber = index + 1
+            Self.logger.info("FM \(attempt.label, privacy: .public) (\(attempt.input.count, privacy: .public) chars)")
 
-            var mapped = mapSchemaToResult(schema)
-            mapped.diagnostics = ExtractionDiagnostics(
-                foundationModelAvailable: true,
-                foundationModelRan: true,
-                foundationModelSkipReason: nil,
-                foundationModelFieldCount: fieldCount,
-                heuristicFieldCount: 0,
-                rejectedFields: []
-            )
-            return mapped
-        } catch {
-            let errorDesc = error.localizedDescription
-            let isLocaleError = errorDesc.lowercased().contains("locale")
-                || errorDesc.lowercased().contains("language")
-                || errorDesc.lowercased().contains("unsupported")
+            do {
+                let session = LanguageModelSession(instructions: instructions)
+                let response = try await session.respond(
+                    to: attempt.input,
+                    generating: ReceiptExtractionSchema.self
+                )
 
-            // If the error looks locale-related, retry with minimal instructions.
-            if isLocaleError {
-                Self.logger.warning("Foundation Models locale error — retrying with simplified instructions: \(errorDesc, privacy: .public)")
-                do {
-                    let retrySession = LanguageModelSession(
-                        instructions: "Extract receipt fields from the text. Respond in English."
+                let schema = response.content
+                let fieldCount = [
+                    schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
+                ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+
+                Self.logger.info("FM \(attempt.label, privacy: .public) succeeded with \(fieldCount, privacy: .public) fields")
+
+                // Log to Sentry which attempt worked
+                let skipReason: String? = attemptNumber > 1 ? "locale retry succeeded on \(attempt.label)" : nil
+                if attemptNumber > 1 {
+                    AppLogger.info(
+                        "FM extraction succeeded on \(attempt.label) after \(attemptNumber - 1) locale error(s)",
+                        category: "extraction.fm.retry"
                     )
-                    let retryResponse = try await retrySession.respond(
-                        to: ocrText,
-                        generating: ReceiptExtractionSchema.self
-                    )
-
-                    let schema = retryResponse.content
-                    let fieldCount = [
-                        schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
-                    ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
-
-                    Self.logger.info("Foundation Models retry succeeded with \(fieldCount, privacy: .public) fields")
-
-                    var mapped = mapSchemaToResult(schema)
-                    mapped.diagnostics = ExtractionDiagnostics(
-                        foundationModelAvailable: true,
-                        foundationModelRan: true,
-                        foundationModelSkipReason: "locale retry succeeded",
-                        foundationModelFieldCount: fieldCount,
-                        heuristicFieldCount: 0,
-                        rejectedFields: []
-                    )
-                    return mapped
-                } catch {
-                    Self.logger.error("Foundation Models retry also failed: \(error.localizedDescription, privacy: .public)")
                 }
-            }
 
-            Self.logger.error("Foundation Models extraction failed: \(errorDesc, privacy: .public)")
-            var result = StructuredExtractionResult.empty
-            result.diagnostics = ExtractionDiagnostics(
-                foundationModelAvailable: true,
-                foundationModelRan: false,
-                foundationModelSkipReason: "error: \(errorDesc)",
-                foundationModelFieldCount: 0,
-                heuristicFieldCount: 0,
-                rejectedFields: []
-            )
-            return result
+                var mapped = mapSchemaToResult(schema)
+                mapped.diagnostics = ExtractionDiagnostics(
+                    foundationModelAvailable: true,
+                    foundationModelRan: true,
+                    foundationModelSkipReason: skipReason,
+                    foundationModelFieldCount: fieldCount,
+                    heuristicFieldCount: 0,
+                    rejectedFields: []
+                )
+                return mapped
+            } catch {
+                let errorDesc = error.localizedDescription
+                Self.logger.warning("FM \(attempt.label, privacy: .public) failed: \(errorDesc, privacy: .public)")
+                lastError = error
+
+                // Only retry on locale/language errors — other errors should fail immediately
+                guard isLocaleError(error) else {
+                    Self.logger.error("FM non-locale error, not retrying: \(errorDesc, privacy: .public)")
+                    break
+                }
+
+                // Continue to next attempt for locale errors
+            }
         }
+
+        // All attempts failed (or a non-locale error broke the loop)
+        let finalErrorDesc = lastError?.localizedDescription ?? "unknown"
+        Self.logger.error("Foundation Models extraction failed after all attempts: \(finalErrorDesc, privacy: .public)")
+
+        AppLogger.error(
+            "FM extraction failed after \(attempts.count) attempts: \(finalErrorDesc)",
+            category: "extraction.fm.failure",
+            tags: [
+                "fm_error": finalErrorDesc,
+                "fm_attempts": String(attempts.count),
+                "fm_is_locale_error": String(lastError.map { isLocaleError($0) } ?? false)
+            ]
+        )
+
+        var result = StructuredExtractionResult.empty
+        result.diagnostics = ExtractionDiagnostics(
+            foundationModelAvailable: true,
+            foundationModelRan: false,
+            foundationModelSkipReason: "error after \(attempts.count) attempts: \(finalErrorDesc)",
+            foundationModelFieldCount: 0,
+            heuristicFieldCount: 0,
+            rejectedFields: []
+        )
+        return result
         #else
         Self.logger.info("FoundationModels framework not available on this SDK")
         // FoundationModels not available on this SDK — return empty.
