@@ -110,7 +110,11 @@ struct ExtractionPipeline: Sendable {
         primary: StructuredExtractionResult,
         fallback: StructuredExtractionResult
     ) -> StructuredExtractionResult {
-        StructuredExtractionResult(
+        // Prefer FM line items if available (they have better classification);
+        // otherwise use heuristic line items.
+        let mergedLineItems = primary.lineItems.isEmpty ? fallback.lineItems : primary.lineItems
+
+        return StructuredExtractionResult(
             documentKind: pick(primary.documentKind, fallback.documentKind),
             productName: pick(primary.productName, fallback.productName),
             merchantName: pick(primary.merchantName, fallback.merchantName),
@@ -123,6 +127,7 @@ struct ExtractionPipeline: Sendable {
             currency: pick(primary.currency, fallback.currency),
             category: pick(primary.category, fallback.category),
             warrantyDurationMonths: pick(primary.warrantyDurationMonths, fallback.warrantyDurationMonths),
+            lineItems: mergedLineItems,
             source: primary.source,
             diagnostics: primary.diagnostics
         )
@@ -172,6 +177,7 @@ extension StructuredExtractionResult {
             extractionSource: source,
             suggestedNotes: recognizedText.isEmpty ? nil : "Extracted from scanned document.",
             documentKind: documentKind.value,
+            lineItems: lineItems,
             structuredResult: self
         )
     }

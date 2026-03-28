@@ -13,6 +13,9 @@ struct OCRExtractionResult: Hashable, Sendable {
     var suggestedNotes: String?
     var documentKind: DocumentKind?
 
+    /// Individual line items extracted from the document.
+    var lineItems: [LineItem]
+
     /// The full structured extraction result, preserved for confidence-aware UI.
     /// Only available when the extraction pipeline was used (not for manually constructed results).
     var structuredResult: StructuredExtractionResult?
@@ -36,5 +39,5 @@ struct OCRExtractionResult: Hashable, Sendable {
         }
     }
 
-    static let empty = OCRExtractionResult(recognizedText: "")
+    static let empty = OCRExtractionResult(recognizedText: "", lineItems: [])
 }

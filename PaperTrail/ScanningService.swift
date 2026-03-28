@@ -23,6 +23,7 @@ struct ScanningService {
         var bestSource: ExtractionSource?
         var bestDocumentKind: DocumentKind?
         var bestStructuredResult: StructuredExtractionResult?
+        var bestLineItems: [LineItem] = []
 
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
@@ -54,6 +55,7 @@ struct ScanningService {
             if bestSource == nil { bestSource = ocrResult.extractionSource }
             if bestDocumentKind == nil { bestDocumentKind = ocrResult.documentKind }
             if bestStructuredResult == nil { bestStructuredResult = ocrResult.structuredResult }
+            if bestLineItems.isEmpty { bestLineItems = ocrResult.lineItems }
         }
 
         let combined = OCRExtractionResult(
@@ -68,6 +70,7 @@ struct ScanningService {
             extractionSource: bestSource,
             suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document.",
             documentKind: bestDocumentKind,
+            lineItems: bestLineItems,
             structuredResult: bestStructuredResult
         )
 

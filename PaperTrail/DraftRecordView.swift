@@ -25,31 +25,69 @@ struct DraftRecordView: View {
     @State private var tagsText: String = ""
     @State private var showExtractionLogSheet = false
 
+    /// Line items extracted from the document, for user selection.
+    private let lineItems: [LineItem]
+    /// The currently selected line item ID (user picks the main item for the record).
+    @State private var selectedItemId: UUID?
+
     init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
         self.seededAttachments = seededAttachments
         self.seededOCR = seededOCR
         self.structuredResult = seededOCR?.structuredResult
+        self.lineItems = seededOCR?.lineItems ?? []
 
-        _productName = State(initialValue: seededOCR?.suggestedProductName ?? "")
+        // Auto-select the best line item: first .product, or the most expensive item.
+        let autoSelected: LineItem? = {
+            let items = seededOCR?.lineItems ?? []
+            guard !items.isEmpty else { return nil }
+            // First product-classified item
+            if let product = items.first(where: { $0.kind == .product }) {
+                return product
+            }
+            // Most expensive record-worthy item
+            if let expensive = items
+                .filter({ $0.kind.isRecordWorthy })
+                .max(by: { ($0.amount ?? 0) < ($1.amount ?? 0) }) {
+                return expensive
+            }
+            // Fallback: most expensive item of any kind (except fee)
+            return items
+                .filter({ $0.kind != .fee })
+                .max(by: { ($0.amount ?? 0) < ($1.amount ?? 0) })
+        }()
+
+        _selectedItemId = State(initialValue: autoSelected?.id)
+
+        // Pre-fill from auto-selected item if available, otherwise from OCR suggestions
+        let initialProductName = autoSelected?.name ?? seededOCR?.suggestedProductName ?? ""
+        let initialAmount: String = {
+            if let amount = autoSelected?.amount {
+                return String(format: "%.2f", amount)
+            } else if let amount = seededOCR?.suggestedAmount {
+                return String(format: "%.2f", amount)
+            }
+            return ""
+        }()
+
+        _productName = State(initialValue: initialProductName)
         _merchantName = State(initialValue: seededOCR?.suggestedMerchantName ?? "")
         _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
         _purchaseDate = State(initialValue: seededOCR?.suggestedPurchaseDate ?? .now)
-
-        if let amount = seededOCR?.suggestedAmount {
-            _amountText = State(initialValue: String(format: "%.2f", amount))
-        } else {
-            _amountText = State(initialValue: "")
-        }
+        _amountText = State(initialValue: initialAmount)
         _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
         _category = State(initialValue: seededOCR?.suggestedCategory ?? "")
 
         // If Foundation Models extracted a warranty duration, pre-fill the warranty toggle and date.
+        // Also auto-enable warranty if any line item is classified as a warranty.
+        let hasWarrantyItem = (seededOCR?.lineItems ?? []).contains(where: { $0.kind == .warranty })
         if let months = seededOCR?.suggestedWarrantyDurationMonths,
            let purchaseDate = seededOCR?.suggestedPurchaseDate,
            let expiryDate = Calendar.current.date(byAdding: .month, value: months, to: purchaseDate) {
             _includeWarranty = State(initialValue: true)
             _warrantyExpiryDate = State(initialValue: expiryDate)
+        } else if hasWarrantyItem {
+            _includeWarranty = State(initialValue: true)
         }
     }
 
@@ -163,6 +201,38 @@ struct DraftRecordView: View {
                 }
             }
 
+            // Line item picker — shown when multiple items were extracted
+            if !lineItems.isEmpty {
+                Section("Items on this receipt") {
+                    ForEach(lineItems) { item in
+                        Button {
+                            selectItem(item)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name)
+                                        .font(item.kind.isRecordWorthy ? .body.bold() : .body)
+                                    Text(item.kind.label)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if let amount = item.amount {
+                                    Text(String(format: "%.2f", amount))
+                                        .font(.body.monospacedDigit())
+                                }
+                                if selectedItemId == item.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                        .tint(.primary)
+                        .disabled(item.kind == .fee)
+                    }
+                }
+            }
+
             Section("Details") {
                 ExtractedTextField(
                     title: "Product name",
@@ -242,6 +312,22 @@ struct DraftRecordView: View {
             if let logText = generateExtractionLog() {
                 ShareSheetView(activityItems: [logText])
             }
+        }
+    }
+
+    // MARK: - Item selection
+
+    /// Called when the user taps a line item to select it as the main record item.
+    private func selectItem(_ item: LineItem) {
+        selectedItemId = item.id
+        productName = item.name
+        if let amount = item.amount {
+            amountText = String(format: "%.2f", amount)
+        }
+        // Auto-toggle warranty if any line item is a warranty
+        let hasWarrantyLineItem = lineItems.contains(where: { $0.kind == .warranty })
+        if hasWarrantyLineItem && !includeWarranty {
+            includeWarranty = true
         }
     }
 
@@ -326,6 +412,16 @@ struct DraftRecordView: View {
         lines.append(fieldLine("Category", sr.category))
         lines.append(fieldLine("Warranty (months)", sr.warrantyDurationMonths))
         lines.append("")
+
+        // Line items
+        if !sr.lineItems.isEmpty {
+            lines.append("")
+            lines.append("🛒 Line Items (\(sr.lineItems.count)):")
+            for item in sr.lineItems {
+                let amountStr = item.amount.map { String(format: "%.2f", $0) } ?? "—"
+                lines.append("  [\(item.kind.label)] \(item.name): \(amountStr)")
+            }
+        }
 
         // Source
         lines.append("🔧 Source: \(sr.source.rawValue)")

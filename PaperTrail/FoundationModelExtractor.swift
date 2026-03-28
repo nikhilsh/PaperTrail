@@ -80,6 +80,50 @@ enum ExtractionConfidence: String, Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - Line item
+
+/// A single line item extracted from a receipt or order document.
+/// Represents individual products, accessories, warranties, services, or fees.
+struct LineItem: Sendable, Hashable, Identifiable {
+    let id: UUID
+    let name: String
+    let amount: Double?
+    let quantity: Int?
+    let kind: LineItemKind
+
+    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown) {
+        self.id = UUID()
+        self.name = name
+        self.amount = amount
+        self.quantity = quantity
+        self.kind = kind
+    }
+
+    enum LineItemKind: String, Sendable, Hashable, CaseIterable {
+        case product
+        case accessory
+        case warranty
+        case service
+        case fee
+        case unknown
+
+        var label: String {
+            switch self {
+            case .product: "Product"
+            case .accessory: "Accessory"
+            case .warranty: "Warranty"
+            case .service: "Service"
+            case .fee: "Fee"
+            case .unknown: "Item"
+            }
+        }
+
+        var isRecordWorthy: Bool {
+            self == .product || self == .unknown
+        }
+    }
+}
+
 // MARK: - Structured extraction result
 
 /// A single extracted field with its value and confidence.
@@ -103,6 +147,9 @@ struct StructuredExtractionResult: Sendable, Hashable {
     var category: ExtractedField<String>
     var warrantyDurationMonths: ExtractedField<Int>
 
+    /// Individual line items extracted from the document (products, accessories, warranties, etc.).
+    var lineItems: [LineItem]
+
     /// Which extraction backend produced this result.
     var source: ExtractionSource
 
@@ -118,6 +165,7 @@ struct StructuredExtractionResult: Sendable, Hashable {
         currency: .absent,
         category: .absent,
         warrantyDurationMonths: .absent,
+        lineItems: [],
         source: .none,
         diagnostics: nil
     )
@@ -157,6 +205,21 @@ enum ExtractionSource: String, Sendable, Hashable {
 /// Field names are kept short and JSON-friendly for the model's constrained output.
 #if canImport(FoundationModels)
 @Generable
+struct LineItemSchema: Sendable {
+    @Guide(description: "Item name/description as shown on the receipt.")
+    var name: String?
+
+    @Guide(description: "Price as decimal number, null if bundled or no separate price.")
+    var amount: Double?
+
+    @Guide(description: "Quantity purchased, default 1.")
+    var quantity: Int?
+
+    @Guide(description: "Type of item: product, accessory, warranty, service, or fee.")
+    var kind: String?
+}
+
+@Generable
 struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The type of document: one of receipt, invoice, warranty_card, order_confirmation, packing_slip, support_document, manual, unknown.")
     var documentKind: String?
@@ -181,6 +244,9 @@ struct ReceiptExtractionSchema: Sendable {
 
     @Guide(description: "Warranty duration in months if mentioned on the receipt or warranty card, e.g. 12 or 24. Null if not found.")
     var warrantyDurationMonths: Int?
+
+    @Guide(description: "Individual line items on the receipt. Each has name, optional amount, optional quantity, and kind (product/accessory/warranty/service/fee). Include all distinct items, not totals or subtotals.")
+    var lineItems: [LineItemSchema]?
 }
 #endif
 
@@ -525,6 +591,19 @@ struct FoundationModelExtractionService: FieldExtractionService {
             return ExtractedField(value: .unknown, confidence: .low)
         }()
 
+        // Map line items from schema
+        let mappedLineItems: [LineItem] = (schema.lineItems ?? []).compactMap { itemSchema in
+            guard let name = itemSchema.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else { return nil }
+            let kind = LineItem.LineItemKind(rawValue: itemSchema.kind?.lowercased() ?? "") ?? .unknown
+            return LineItem(
+                name: name,
+                amount: itemSchema.amount,
+                quantity: itemSchema.quantity ?? 1,
+                kind: kind
+            )
+        }
+
         return StructuredExtractionResult(
             documentKind: documentKind,
             productName: field(schema.productName, minLength: 2),
@@ -543,6 +622,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 value: schema.warrantyDurationMonths,
                 confidence: schema.warrantyDurationMonths != nil ? .medium : .none
             ),
+            lineItems: mappedLineItems,
             source: .foundationModel,
             diagnostics: nil
         )
@@ -658,10 +738,12 @@ struct HeuristicFieldExtractor {
             return a
         }()
 
+        let lineItems = extractLineItems(from: text)
+
         let fieldCount = [productName, merchantName, rawCurrency].compactMap({ $0 }).count
             + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (rawWarrantyMonths != nil ? 1 : 0)
 
-        Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected")
+        Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected, \(lineItems.count, privacy: .public) line items")
 
         return StructuredExtractionResult(
             documentKind: docKind,
@@ -672,6 +754,7 @@ struct HeuristicFieldExtractor {
             currency: ExtractedField(value: rawCurrency, confidence: rawCurrency != nil ? .heuristic : .none),
             category: .absent,
             warrantyDurationMonths: ExtractedField(value: rawWarrantyMonths, confidence: rawWarrantyMonths != nil ? .heuristic : .none),
+            lineItems: lineItems,
             source: .heuristic,
             diagnostics: ExtractionDiagnostics(
                 foundationModelAvailable: false,
@@ -1541,6 +1624,290 @@ struct HeuristicFieldExtractor {
         if lower.contains("usd") || lower.contains("us$") { return "USD" }
         if lower.contains("$") { return "SGD" }
         return nil
+    }
+
+    // MARK: - Line item extraction
+
+    /// Extract individual line items from OCR text.
+    ///
+    /// Strategy:
+    /// 1. Look for a table section bounded by item headers (Article/Description/Item/Qty) and total lines.
+    /// 2. Within that section, parse lines for quantity + description + price patterns.
+    /// 3. If no clear table section is found, scan all lines for price-annotated items.
+    /// 4. Classify each item by keywords.
+    func extractLineItems(from text: String) -> [LineItem] {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // Find the item table section boundaries
+        let headerKeywords = ["article", "description", "item", "qty", "product", "unit price", "amount"]
+        let totalKeywords = ["total", "subtotal", "sub total", "grand total", "nett total", "amount due",
+                             "balance due", "amount payable", "total value", "payment"]
+
+        var tableStart: Int?
+        var tableEnd: Int?
+
+        // Find the header line (start of items section)
+        for (i, line) in lines.enumerated() {
+            let lower = line.lowercased()
+            let matchCount = headerKeywords.filter { lower.contains($0) }.count
+            // A header line typically contains 2+ keywords like "Qty Description Amount"
+            if matchCount >= 2 && line.count < 80 {
+                tableStart = i + 1
+                break
+            }
+        }
+
+        // Find the total line (end of items section)
+        if let start = tableStart {
+            for i in start..<lines.count {
+                let lower = lines[i].lowercased()
+                if totalKeywords.contains(where: { lower.hasPrefix($0) || lower.contains("total") }) {
+                    // Verify it's actually a total line (has a number or is a label)
+                    if lower.contains("total") || lower.contains("subtotal") {
+                        tableEnd = i
+                        break
+                    }
+                }
+            }
+        }
+
+        var items: [LineItem] = []
+
+        // Price pattern: captures amounts like "2,800.00", "380.00", "99.90"
+        let pricePattern = #"(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})"#
+
+        if let start = tableStart {
+            // Parse the table section
+            let end = tableEnd ?? lines.count
+            let tableLines = Array(lines[start..<end])
+            items = parseTableLines(tableLines, pricePattern: pricePattern)
+        }
+
+        // If we found fewer than 2 items from table parsing, try a broader scan
+        if items.count < 2 {
+            let broadItems = parseBroadItems(lines: lines, pricePattern: pricePattern)
+            if broadItems.count > items.count {
+                items = broadItems
+            }
+        }
+
+        return items
+    }
+
+    /// Parse lines within a detected table section for line items.
+    private func parseTableLines(_ lines: [String], pricePattern: String) -> [LineItem] {
+        var items: [LineItem] = []
+        let priceRegex = try? NSRegularExpression(pattern: pricePattern)
+
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !trimmed.isEmpty else { i += 1; continue }
+
+            // Skip lines that look like totals/subtotals
+            if looksLikeTotal(trimmed) { i += 1; continue }
+
+            // Skip address/boilerplate lines
+            if looksLikeAddress(trimmed) || looksLikeBoilerplate(trimmed) { i += 1; continue }
+
+            // Try to extract a price from this line
+            var amount: Double?
+            var itemName = trimmed
+
+            if let regex = priceRegex {
+                let range = NSRange(trimmed.startIndex..., in: trimmed)
+                let matches = regex.matches(in: trimmed, range: range)
+                if let lastMatch = matches.last,
+                   let matchRange = Range(lastMatch.range(at: 1), in: trimmed) {
+                    let numStr = String(trimmed[matchRange]).replacingOccurrences(of: ",", with: "")
+                    amount = Double(numStr)
+                    // Remove the price from the item name
+                    let beforePrice = String(trimmed[..<matchRange.lowerBound])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !beforePrice.isEmpty {
+                        itemName = beforePrice
+                    }
+                }
+            }
+
+            // Try to extract quantity prefix: "1 x" or "2x" or leading number
+            var quantity: Int? = 1
+            let qtyPattern = #"^(\d+)\s*[xX×]\s+"#
+            if let qtyRegex = try? NSRegularExpression(pattern: qtyPattern),
+               let match = qtyRegex.firstMatch(in: itemName, range: NSRange(itemName.startIndex..., in: itemName)),
+               let qtyRange = Range(match.range(at: 1), in: itemName) {
+                quantity = Int(itemName[qtyRange])
+                let afterQty = String(itemName[Range(match.range, in: itemName)!.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !afterQty.isEmpty {
+                    itemName = afterQty
+                }
+            }
+
+            // Clean up: remove trailing currency symbols, hyphens, colons
+            itemName = itemName
+                .replacingOccurrences(of: #"\s*[\$SGDMYRsgdmyr]{2,4}\s*$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: ":-")))
+
+            // Check if next line is a continuation (model number or no-price line)
+            if i + 1 < lines.count {
+                let nextLine = lines[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !nextLine.isEmpty && !looksLikeTotal(nextLine) && !looksLikeAddress(nextLine) {
+                    // If next line has no price and looks like a model number or continuation
+                    if let regex = priceRegex {
+                        let nextRange = NSRange(nextLine.startIndex..., in: nextLine)
+                        if regex.firstMatch(in: nextLine, range: nextRange) == nil
+                            && nextLine.count < 50
+                            && !nextLine.lowercased().contains("total") {
+                            // Continuation line — append to current item name
+                            itemName = itemName + " " + nextLine
+                            i += 1
+                        }
+                    }
+                }
+            }
+
+            // Minimum name length check
+            let cleanedName = itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanedName.count >= 3 && !looksLikeOCRJunk(cleanedName) && !looksLikePureNumber(cleanedName) {
+                let kind = classifyLineItem(name: cleanedName)
+                items.append(LineItem(name: cleanedName, amount: amount, quantity: quantity, kind: kind))
+            }
+
+            i += 1
+        }
+
+        return items
+    }
+
+    /// Broader scan: look for lines anywhere in the document that have a price and look like items.
+    private func parseBroadItems(lines: [String], pricePattern: String) -> [LineItem] {
+        var items: [LineItem] = []
+        let priceRegex = try? NSRegularExpression(pattern: pricePattern)
+
+        // Track lines we've already processed to avoid duplicates
+        var processedLines: Set<Int> = []
+
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            // Skip total/address/boilerplate/header lines
+            if looksLikeTotal(trimmed) || looksLikeAddress(trimmed)
+                || looksLikeBoilerplate(trimmed) || looksLikeHeader(trimmed)
+                || looksLikePureNumber(trimmed) { continue }
+
+            // Must contain a price
+            guard let regex = priceRegex else { continue }
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            let matches = regex.matches(in: trimmed, range: range)
+            guard let lastMatch = matches.last,
+                  let matchRange = Range(lastMatch.range(at: 1), in: trimmed) else { continue }
+
+            let numStr = String(trimmed[matchRange]).replacingOccurrences(of: ",", with: "")
+            guard let amount = Double(numStr), amount > 0, amount < 500_000 else { continue }
+
+            // Extract the item name (text before the price)
+            var itemName = String(trimmed[..<matchRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Remove leading quantity
+            let qtyPattern = #"^(\d+)\s*[xX×]\s+"#
+            var quantity: Int? = 1
+            if let qtyRegex = try? NSRegularExpression(pattern: qtyPattern),
+               let qtyMatch = qtyRegex.firstMatch(in: itemName, range: NSRange(itemName.startIndex..., in: itemName)),
+               let qtyRange = Range(qtyMatch.range(at: 1), in: itemName) {
+                quantity = Int(itemName[qtyRange])
+                itemName = String(itemName[Range(qtyMatch.range, in: itemName)!.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            // Remove trailing currency symbols
+            itemName = itemName
+                .replacingOccurrences(of: #"\s*[\$SGDMYRsgdmyr]{2,4}\s*$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: ":-")))
+
+            // Check if previous line is a description without price (continuation above)
+            if i > 0 && !processedLines.contains(i - 1) {
+                let prevLine = lines[i - 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !prevLine.isEmpty
+                    && !looksLikeTotal(prevLine) && !looksLikeAddress(prevLine)
+                    && !looksLikeBoilerplate(prevLine) && !looksLikeHeader(prevLine)
+                    && !looksLikePureNumber(prevLine) {
+                    let prevRange = NSRange(prevLine.startIndex..., in: prevLine)
+                    if regex.firstMatch(in: prevLine, range: prevRange) == nil && prevLine.count >= 3 {
+                        // Previous line has no price — likely the item name/description
+                        if itemName.isEmpty || itemName.count < 3 {
+                            itemName = prevLine
+                        } else {
+                            itemName = prevLine + " " + itemName
+                        }
+                        processedLines.insert(i - 1)
+                    }
+                }
+            }
+
+            let cleanedName = itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleanedName.count >= 3, !looksLikeOCRJunk(cleanedName) else { continue }
+
+            let kind = classifyLineItem(name: cleanedName)
+            items.append(LineItem(name: cleanedName, amount: amount, quantity: quantity, kind: kind))
+            processedLines.insert(i)
+        }
+
+        return items
+    }
+
+    /// Classify a line item by its name into a category.
+    private func classifyLineItem(name: String) -> LineItem.LineItemKind {
+        let lower = name.lowercased()
+
+        // Warranty/protection plan keywords
+        let warrantyKeywords = ["warranty", "protection", "care", "guarantee", "extended",
+                                "p/c", "acp", "applecare", "geek squad", "coverage",
+                                "insurance", "safeguard"]
+        if warrantyKeywords.contains(where: { lower.contains($0) }) {
+            return .warranty
+        }
+
+        // Service keywords
+        let serviceKeywords = ["delivery", "install", "installation", "setup", "set up",
+                               "labour", "labor", "service", "assembly", "mounting",
+                               "configuration", "disposal", "recycling", "haul away"]
+        if serviceKeywords.contains(where: { lower.contains($0) }) {
+            return .service
+        }
+
+        // Fee keywords
+        let feeKeywords = ["gst", "tax", "fee", "charge", "rounding", "surcharge",
+                           "levy", "duty", "shipping cost", "freight"]
+        if feeKeywords.contains(where: { lower.contains($0) }) {
+            return .fee
+        }
+
+        // Accessory keywords
+        let accessoryKeywords = ["bezel", "case", "cable", "mount", "stand", "adapter",
+                                 "bracket", "cover", "sleeve", "skin", "protector",
+                                 "screen protector", "tempered glass", "charger", "dongle",
+                                 "hub", "dock", "remote", "stylus", "pen", "keyboard",
+                                 "mouse", "earbuds", "headphones", "strap", "band"]
+        if accessoryKeywords.contains(where: { lower.contains($0) }) {
+            return .accessory
+        }
+
+        // If it contains a known electronics brand + substantial name, likely a product
+        let hasBrand = Self.knownBrands.contains { brand in
+            lower.range(of: #"\b"# + NSRegularExpression.escapedPattern(for: brand) + #"\b"#,
+                       options: .regularExpression) != nil
+        }
+        if hasBrand {
+            return .product
+        }
+
+        return .unknown
     }
 
     // MARK: - Line classifiers
