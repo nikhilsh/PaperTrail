@@ -254,7 +254,7 @@ struct ReceiptExtractionSchema: Sendable {
 
 /// Protocol for extracting structured fields from raw OCR text.
 protocol FieldExtractionService: Sendable {
-    func extract(from ocrText: String) async -> StructuredExtractionResult
+    func extract(from ocrText: String, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult
 }
 
 // MARK: - Foundation Model extraction service
@@ -369,7 +369,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return desc.contains("locale") || desc.contains("language") || desc.contains("unsupported")
     }
 
-    func extract(from ocrText: String) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
         let availability = SystemLanguageModel.default.availability
         let rawAvailability = String(describing: availability)
@@ -423,6 +423,33 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         Self.logger.info("Foundation Models available — running structured extraction")
 
+        let adaptiveHints = learningContext.map { context in
+            var hints: [String] = []
+            if let displayName = context.displayMerchantName {
+                hints.append("Known merchant: \(displayName).")
+            }
+            if let category = context.categorySuggestion {
+                hints.append("This merchant often maps to category '\(category)'.")
+            }
+            if let currency = context.currencySuggestion {
+                hints.append("Preferred currency is usually \(currency).")
+            }
+            if let warranty = context.warrantySuggestionMonths {
+                hints.append("Common warranty duration is \(warranty) months.")
+            }
+            if let amountHint = context.amountHint {
+                hints.append(amountHint)
+            }
+            if let dateHint = context.dateHint {
+                hints.append(dateHint)
+            }
+            if let productHint = context.productHint {
+                hints.append(productHint)
+            }
+            guard !hints.isEmpty else { return "" }
+            return "\nMerchant-specific hints:\n" + hints.joined(separator: "\n")
+        } ?? ""
+
         let instructions = """
             You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
             Extract structured fields from the OCR text below. \
@@ -430,7 +457,8 @@ struct FoundationModelExtractionService: FieldExtractionService {
             If a field is not clearly present, leave it null. \
             Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
             For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.
+            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            \(adaptiveHints)
             """
 
         // Build the extraction attempts: each is (label, inputText, instructions).
@@ -654,10 +682,10 @@ struct FoundationModelExtractionService: FieldExtractionService {
 /// Wraps the existing VisionOCRService heuristic extraction into the `FieldExtractionService` protocol.
 /// This is the fallback when Foundation Models are unavailable.
 struct HeuristicExtractionService: FieldExtractionService {
-    func extract(from ocrText: String) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         // Delegate to the same heuristic logic that VisionOCRService already uses.
         let heuristic = HeuristicFieldExtractor()
-        return heuristic.extract(from: ocrText)
+        return heuristic.extract(from: ocrText, learningContext: learningContext)
     }
 }
 
@@ -672,7 +700,7 @@ struct HeuristicFieldExtractor {
 
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.heuristic")
 
-    func extract(from text: String) -> StructuredExtractionResult {
+    func extract(from text: String, learningContext: MerchantLearningContext? = nil) -> StructuredExtractionResult {
         let docKind = classifyDocument(from: text)
 
         let rawProduct = extractProductName(from: text)
@@ -740,8 +768,16 @@ struct HeuristicFieldExtractor {
 
         let lineItems = extractLineItems(from: text)
 
-        let fieldCount = [productName, merchantName, rawCurrency].compactMap({ $0 }).count
-            + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (rawWarrantyMonths != nil ? 1 : 0)
+        let learnedCategory = learningContext?.categorySuggestion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let learnedCurrency = learningContext?.currencySuggestion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let learnedWarrantyMonths = learningContext?.warrantySuggestionMonths
+
+        let resolvedCurrency = rawCurrency ?? (learnedCurrency?.isEmpty == false ? learnedCurrency : nil)
+        let resolvedCategory = (learnedCategory?.isEmpty == false ? learnedCategory : nil)
+        let resolvedWarrantyMonths = rawWarrantyMonths ?? learnedWarrantyMonths
+
+        let fieldCount = [productName, merchantName, resolvedCurrency, resolvedCategory].compactMap({ $0 }).count
+            + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (resolvedWarrantyMonths != nil ? 1 : 0)
 
         Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected, \(lineItems.count, privacy: .public) line items")
 
@@ -751,9 +787,9 @@ struct HeuristicFieldExtractor {
             merchantName: ExtractedField(value: merchantName, confidence: merchantName != nil ? .heuristic : .none),
             purchaseDate: ExtractedField(value: purchaseDate, confidence: purchaseDate != nil ? .heuristic : .none),
             amount: ExtractedField(value: amount, confidence: amount != nil ? .heuristic : .none),
-            currency: ExtractedField(value: rawCurrency, confidence: rawCurrency != nil ? .heuristic : .none),
-            category: .absent,
-            warrantyDurationMonths: ExtractedField(value: rawWarrantyMonths, confidence: rawWarrantyMonths != nil ? .heuristic : .none),
+            currency: ExtractedField(value: resolvedCurrency, confidence: rawCurrency != nil ? .heuristic : (resolvedCurrency != nil ? .low : .none)),
+            category: ExtractedField(value: resolvedCategory, confidence: resolvedCategory != nil ? .low : .none),
+            warrantyDurationMonths: ExtractedField(value: resolvedWarrantyMonths, confidence: rawWarrantyMonths != nil ? .heuristic : (resolvedWarrantyMonths != nil ? .low : .none)),
             lineItems: lineItems,
             source: .heuristic,
             diagnostics: ExtractionDiagnostics(

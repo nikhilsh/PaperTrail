@@ -34,7 +34,7 @@ struct ExtractionPipeline: Sendable {
     /// Extract structured fields from OCR text.
     ///
     /// Returns a merged result: Foundation Model values take priority, heuristic values fill gaps.
-    func extract(from ocrText: String) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         guard !ocrText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             Self.logger.info("Empty OCR text — skipping extraction")
             return .empty
@@ -43,8 +43,8 @@ struct ExtractionPipeline: Sendable {
         Self.logger.info("Starting extraction pipeline (OCR text: \(ocrText.count, privacy: .public) chars)")
 
         // Run both extractions concurrently.
-        async let fmResult = foundationModelService.extract(from: ocrText)
-        async let heuristicResult = heuristicService.extract(from: ocrText)
+        async let fmResult = foundationModelService.extract(from: ocrText, learningContext: learningContext)
+        async let heuristicResult = heuristicService.extract(from: ocrText, learningContext: learningContext)
 
         let fm = await fmResult
         let heuristic = await heuristicResult

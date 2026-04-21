@@ -13,6 +13,8 @@ import OSLog
 enum CorrectionLogger {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "corrections")
 
+    static var onLearningFeedback: ((LearningFeedbackPayload) -> Void)?
+
     /// A single correction event.
     struct CorrectionEntry: Codable, Sendable {
         let timestamp: Date
@@ -152,6 +154,20 @@ enum CorrectionLogger {
                 documentKind: kind
             ))
         }
+
+        let payload = LearningFeedbackPayload(
+            structured: structured,
+            documentKind: documentKind,
+            finalProductName: finalProductName,
+            finalMerchantName: finalMerchantName,
+            finalPurchaseDate: finalPurchaseDate,
+            finalAmount: finalAmount,
+            finalCurrency: finalCurrency,
+            finalCategory: finalCategory,
+            finalWarrantyMonths: finalWarrantyMonths
+        )
+
+        onLearningFeedback?(payload)
 
         // Write corrections
         for entry in corrections {

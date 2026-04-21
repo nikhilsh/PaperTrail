@@ -112,7 +112,7 @@ struct PaperTrailApp: App {
         // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.
         // This avoids the multi-configuration + CloudKit bug that causes
         // SwiftDataError.loadIssueModelContainer on iOS 17/18.
-        let schema = Schema([PurchaseRecord.self, Attachment.self])
+        let schema = Schema([PurchaseRecord.self, Attachment.self, MerchantProfile.self])
 
         let cloudConfig = ModelConfiguration(
             "PaperTrail",
@@ -158,6 +158,12 @@ struct PaperTrailApp: App {
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
                     await syncCloudImages()
+                    CorrectionLogger.onLearningFeedback = { payload in
+                        Task { @MainActor in
+                            let service = MerchantLearningService(modelContext: modelContainer.mainContext)
+                            service.captureFeedback(payload)
+                        }
+                    }
                 }
         }
         .modelContainer(modelContainer)

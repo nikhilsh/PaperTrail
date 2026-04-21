@@ -5,6 +5,7 @@ struct DraftRecordView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
+    @State private var learningContext: MerchantLearningContext?
 
     let seedType: AttachmentType
     let seededAttachments: [Attachment]
@@ -313,6 +314,37 @@ struct DraftRecordView: View {
                 ShareSheetView(activityItems: [logText])
             }
         }
+        .task {
+            guard learningContext == nil, let structuredResult else { return }
+            let service = MerchantLearningService(modelContext: modelContext)
+            learningContext = service.learningContext(for: structuredResult)
+            applyLearningContextIfHelpful()
+        }
+    }
+
+    private func applyLearningContextIfHelpful() {
+        guard let learningContext else { return }
+
+        if category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let suggestedCategory = learningContext.categorySuggestion,
+           !suggestedCategory.isEmpty {
+            category = suggestedCategory
+        }
+
+        if currency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || currency == "SGD",
+           let suggestedCurrency = learningContext.currencySuggestion,
+           !suggestedCurrency.isEmpty,
+           seededOCR?.suggestedCurrency == nil {
+            currency = suggestedCurrency
+        }
+
+        if !includeWarranty,
+           let months = learningContext.warrantySuggestionMonths,
+           months > 0,
+           let expiryDate = Calendar.current.date(byAdding: .month, value: months, to: purchaseDate) {
+            includeWarranty = true
+            warrantyExpiryDate = expiryDate
+        }
     }
 
     // MARK: - Item selection
@@ -450,6 +482,13 @@ struct DraftRecordView: View {
             let months = Calendar.current.dateComponents([.month], from: purchaseDate, to: warrantyExpiryDate).month
             return months != originalMonths ? months : originalMonths
         }()
+
+        CorrectionLogger.onLearningFeedback = { payload in
+            Task { @MainActor in
+                let service = MerchantLearningService(modelContext: modelContext)
+                service.captureFeedback(payload)
+            }
+        }
 
         CorrectionLogger.logCorrections(
             structured: structuredResult,
