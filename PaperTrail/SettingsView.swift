@@ -69,31 +69,40 @@ struct SettingsView: View {
 
     var body: some View {
         List {
+            // Serif title row
+            Text("Settings")
+                .font(PTFont.serif(34, weight: 600))
+                .foregroundStyle(PT.txt)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .padding(.top, 4)
+
             // Account
-            Section("Account") {
+            Section {
                 if authManager.isSignedIn {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Image(systemName: "person.crop.circle.fill")
                                 .font(.title2)
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(PT.gold)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(authManager.displayName)
-                                    .font(.headline)
+                                    .font(PTFont.serif(17, weight: 600))
+                                    .foregroundStyle(PT.txt)
                                 if let email = authManager.userEmail, !email.isEmpty {
                                     Text(email)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(PT.txt3)
                                 } else if let userID = authManager.userID {
                                     Text("Apple ID linked · \(userID.prefix(8))…")
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(PT.txt3)
                                 }
                             }
                         }
                         Text("Signed in with Apple")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PT.txt3)
                     }
                     .padding(.vertical, 4)
 
@@ -106,72 +115,56 @@ struct SettingsView: View {
                     } onCompletion: { result in
                         authManager.handleSignInResult(result)
                     }
-                    .signInWithAppleButtonStyle(.black)
+                    .signInWithAppleButtonStyle(.white)
                     .frame(height: 44)
 
                     Text("Sign in to sync across devices and share records.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PT.txt3)
                 }
+            } header: {
+                SectionLabel(text: "Account", tone: PT.gold)
             }
 
             // Sync
-            Section("Sync") {
-                LabeledContent("iCloud", value: "Automatic")
-                LabeledContent("Backend", value: activeSyncBackend)
-                LabeledContent("Status", value: authManager.isSignedIn ? "Active" : "Sign in required")
-                LabeledContent("Sentry", value: sentryStatus)
-                LabeledContent("CK account", value: cloudKitAccountStatus)
-                LabeledContent("CK container", value: cloudKitContainerIdentifier)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Preflight")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(cloudKitContainerStatus)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                }
-                .padding(.vertical, 4)
+            Section {
+                row("iCloud", "Automatic")
+                row("Backend", activeSyncBackend)
+                row("Status", authManager.isSignedIn ? "Active" : "Sign in required")
+                row("Sentry", sentryStatus)
+                row("CK account", cloudKitAccountStatus)
+                row("CK container", cloudKitContainerIdentifier)
 
                 if activeSyncBackend == "Local fallback" {
                     Text("CloudKit failed during startup, so PaperTrail is currently using local-only storage on this device.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
-
-                    if !cloudKitInitError.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Startup error")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(cloudKitInitError)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                        }
-                        .padding(.vertical, 4)
-                    }
+                        .foregroundStyle(PT.amber)
                 }
+            } header: {
+                SectionLabel(text: "Sync", tone: PT.gold)
             }
 
             // Storage
-            Section("Storage") {
-                LabeledContent("Records", value: "\(records.count)")
-                LabeledContent("Attachments", value: "\(attachments.count)")
-                LabeledContent("Image storage", value: totalImageSize)
-                LabeledContent("Persistence", value: "SwiftData + CloudKit (single store)")
+            Section {
+                row("Records", "\(records.count)")
+                row("Attachments", "\(attachments.count)")
+                row("Image storage", totalImageSize)
+                row("Persistence", "SwiftData + CloudKit")
+            } header: {
+                SectionLabel(text: "Storage", tone: PT.gold)
             }
 
             // Image Sync
-            Section("Image Sync") {
-                LabeledContent("Proof images", value: imageSyncSummary)
-                LabeledContent("On this device", value: localAvailabilitySummary)
+            Section {
+                row("Proof images", imageSyncSummary)
+                row("On this device", localAvailabilitySummary)
 
                 if !cloudImageSync.activeTransfers.isEmpty {
                     HStack {
-                        ProgressView()
+                        ProgressView().tint(PT.gold)
                         Text("Syncing \(cloudImageSync.activeTransfers.count) image(s)…")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PT.txt3)
                     }
                 }
 
@@ -184,62 +177,121 @@ struct SettingsView: View {
                             await cloudImageSync.syncMissingImages(attachments: syncInfos)
                         }
                     }
+                    .foregroundStyle(PT.gold)
                 }
 
                 if !cloudImageSync.transferErrors.isEmpty {
                     Label("\(cloudImageSync.transferErrors.count) image sync issue(s)", systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(PT.amber)
                 }
+            } header: {
+                SectionLabel(text: "Image Sync", tone: PT.gold)
             }
 
             // Warranties
-            Section("Warranties") {
-                LabeledContent("Active warranties", value: "\(activeWarrantyCount)")
-                LabeledContent("Notifications", value: records.filter(\.warrantyNotificationScheduled).count > 0 ? "Scheduled" : "None")
+            Section {
+                row("Active warranties", "\(activeWarrantyCount)")
+                row("Notifications", records.filter(\.warrantyNotificationScheduled).count > 0 ? "Scheduled" : "None")
+            } header: {
+                SectionLabel(text: "Warranties", tone: PT.gold)
             }
 
             // Categories
-            Section("Categories") {
+            Section {
                 Text(categorySummary)
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(PT.txt2)
+            } header: {
+                SectionLabel(text: "Categories", tone: PT.gold)
             }
 
-            // Foundation Models Diagnostics
-            Section("Foundation Models Diagnostics") {
-                Button {
-                    Task { await runFMDiagnostic() }
-                } label: {
-                    HStack {
-                        Text("Test Foundation Models")
-                        Spacer()
-                        if fmDiagRunning {
-                            ProgressView()
+            // Advanced / Diagnostics — calm by default
+            Section {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("CloudKit preflight")
+                            .font(.caption)
+                            .foregroundStyle(PT.txt3)
+                        Text(cloudKitContainerStatus)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(PT.txt2)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 4)
+
+                    if activeSyncBackend == "Local fallback", !cloudKitInitError.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Startup error")
+                                .font(.caption)
+                                .foregroundStyle(PT.txt3)
+                            Text(cloudKitInitError)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(PT.amber)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    Button {
+                        Task { await runFMDiagnostic() }
+                    } label: {
+                        HStack {
+                            Text("Test Foundation Models")
+                            Spacer()
+                            if fmDiagRunning { ProgressView().tint(PT.gold) }
                         }
                     }
-                }
-                .disabled(fmDiagRunning)
+                    .foregroundStyle(PT.gold)
+                    .disabled(fmDiagRunning)
 
-                if !fmDiagResult.isEmpty {
-                    Text(fmDiagResult)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    if !fmDiagResult.isEmpty {
+                        Text(fmDiagResult)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(PT.txt2)
+                            .textSelection(.enabled)
+                    }
+                } label: {
+                    Text("Advanced & Diagnostics")
+                        .font(.subheadline)
+                        .foregroundStyle(PT.txt)
                 }
+                .tint(PT.gold)
+            } header: {
+                SectionLabel(text: "Advanced", tone: PT.gold)
             }
 
             // About
-            Section("About") {
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
-            }
-
-            Section("Milestone") {
-                LabeledContent("Current", value: "Milestone 3")
-                LabeledContent("Focus", value: "CloudKit sync, Apple auth, sharing")
+            Section {
+                row("Version", Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                row("Build", Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+                row("Milestone", "Milestone 3")
+                row("Focus", "CloudKit sync, Apple auth, sharing")
+            } header: {
+                SectionLabel(text: "About", tone: PT.gold)
             }
         }
-        .navigationTitle("Settings")
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .ptScreen()
+        .listRowBackground(PT.inkCardDark)
+        .foregroundStyle(PT.txt)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    // MARK: - Row helper (mono value, parchment label)
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(PT.txt2)
+            Spacer()
+            Text(value)
+                .font(PTFont.mono(11.5))
+                .foregroundStyle(PT.txt)
+                .multilineTextAlignment(.trailing)
+        }
     }
 
     // MARK: - Foundation Models Diagnostic
@@ -314,6 +366,8 @@ struct SettingsView: View {
     NavigationStack {
         SettingsView()
     }
+    .tint(PT.gold)
+    .preferredColorScheme(.dark)
     .environment(AuthenticationManager())
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)

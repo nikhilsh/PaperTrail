@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct DraftRecordView: View {
     @Environment(\.modelContext) private var modelContext
@@ -25,6 +26,7 @@ struct DraftRecordView: View {
     @State private var category: String = ""
     @State private var tagsText: String = ""
     @State private var showExtractionLogSheet = false
+    @State private var showRawText = false
 
     /// Line items extracted from the document, for user selection.
     private let lineItems: [LineItem]
@@ -115,198 +117,54 @@ struct DraftRecordView: View {
         return sr.warrantyDurationMonths.confidence
     }
 
+    private var detectedFieldCount: Int {
+        [productName, merchantName, amountText, category].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+            + (seededOCR?.suggestedPurchaseDate != nil ? 1 : 0)
+            + (includeWarranty ? 1 : 0)
+    }
+
+    // MARK: - Body
+
     var body: some View {
-        Form {
-            // Document kind + OCR text section
-            if let seededOCR, !seededOCR.recognizedText.isEmpty {
-                Section("Extracted text") {
-                    // Document kind badge
-                    if let kind = seededOCR.documentKind, kind != .unknown {
-                        HStack(spacing: 6) {
-                            Image(systemName: iconForDocumentKind(kind))
-                                .font(.caption)
-                            Text(kind.label)
-                                .font(.caption.weight(.medium))
-                            if let sr = structuredResult,
-                               sr.documentKind.confidence.needsReview {
-                                ExtractionBadgeView(confidence: sr.documentKind.confidence)
-                            }
-                        }
-                        .foregroundStyle(.blue)
-                        .padding(.bottom, 2)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                reviewHeader
 
-                    Text(seededOCR.recognizedText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(8)
-
-                    if let source = seededOCR.extractionSource {
-                        HStack(spacing: 6) {
-                            Image(systemName: source == .foundationModel ? "cpu" : "text.magnifyingglass")
-                                .font(.caption2)
-                            Text(source == .foundationModel
-                                ? "Extracted with Apple Intelligence"
-                                : "Extracted with pattern matching")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-
-                        // Show diagnostic detail when Foundation Models didn't run.
-                        if let diag = seededOCR.structuredResult?.diagnostics,
-                           !diag.foundationModelRan {
-                            HStack(spacing: 4) {
-                                Image(systemName: "info.circle")
-                                    .font(.caption2)
-                                if let reason = diag.foundationModelSkipReason {
-                                    Text("AI unavailable: \(reason)")
-                                        .font(.caption2)
-                                } else {
-                                    Text("AI extraction did not run on this document")
-                                        .font(.caption2)
-                                }
-                            }
-                            .foregroundStyle(.orange)
-                        }
-
-                        // Share extraction log button — available when structured result exists.
-                        if seededOCR.structuredResult != nil {
-                            Button {
-                                showExtractionLogSheet = true
-                            } label: {
-                                Label("Share extraction log", systemImage: "square.and.arrow.up")
-                                    .font(.caption2)
-                            }
-                            .padding(.top, 2)
-                        }
-                    }
+                if !lineItems.isEmpty {
+                    lineItemCard
                 }
-            }
 
-            if !seededAttachments.isEmpty {
-                Section("Scanned pages") {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(seededAttachments) { attachment in
-                                if let image = attachment.image {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 80, height: 100)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                fieldsCard
 
-            // Line item picker — shown when multiple items were extracted
-            if !lineItems.isEmpty {
-                Section("Items on this receipt") {
-                    ForEach(lineItems) { item in
-                        Button {
-                            selectItem(item)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.name)
-                                        .font(item.kind.isRecordWorthy ? .body.bold() : .body)
-                                    Text(item.kind.label)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let amount = item.amount {
-                                    Text(String(format: "%.2f", amount))
-                                        .font(.body.monospacedDigit())
-                                }
-                                if selectedItemId == item.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.blue)
-                                }
-                            }
-                        }
-                        .tint(.primary)
-                        .disabled(item.kind == .fee)
-                    }
-                }
-            }
+                organizationCard
 
-            Section("Details") {
-                ExtractedTextField(
-                    title: "Product name",
-                    text: $productName,
-                    confidence: confidence(for: \.productName)
-                )
-                ExtractedTextField(
-                    title: "Store",
-                    text: $merchantName,
-                    confidence: confidence(for: \.merchantName)
-                )
-                HStack {
-                    DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
-                    if let conf = dateConfidence, conf.needsReview {
-                        ExtractionBadgeView(confidence: conf)
-                    }
+                if let seededOCR, !seededOCR.recognizedText.isEmpty {
+                    extractedTextCard(seededOCR)
                 }
-            }
 
-            Section("Amount") {
-                HStack {
-                    ExtractedTextField(
-                        title: "Amount",
-                        text: $amountText,
-                        confidence: amountConfidence
-                    )
-                    .keyboardType(.decimalPad)
-                    Picker("Currency", selection: $currency) {
-                        Text("SGD").tag("SGD")
-                        Text("USD").tag("USD")
-                        Text("MYR").tag("MYR")
-                        Text("EUR").tag("EUR")
-                        Text("GBP").tag("GBP")
-                        Text("JPY").tag("JPY")
-                    }
-                    .pickerStyle(.menu)
+                Button { saveRecord() } label: {
+                    Text("Save to Library")
                 }
-            }
-
-            Section("Warranty") {
-                HStack {
-                    Toggle("Add warranty expiry", isOn: $includeWarranty)
-                    if let conf = warrantyConfidence, conf.needsReview {
-                        ExtractionBadgeView(confidence: conf)
-                    }
-                }
-                if includeWarranty {
-                    DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
-                }
-            }
-
-            Section("Organization") {
-                ExtractedTextField(
-                    title: "Category (e.g. Electronics, Kitchen)",
-                    text: $category,
-                    confidence: confidence(for: \.category)
-                )
-                TextField("Tags (comma separated)", text: $tagsText)
-            }
-
-            Section("Notes") {
-                TextField("Notes", text: $notes, axis: .vertical)
-                    .lineLimit(4, reservesSpace: true)
-            }
-        }
-        .navigationTitle("New Record")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Save") {
-                    saveRecord()
-                }
-                .fontWeight(.semibold)
+                .buttonStyle(PTGoldButtonStyle())
                 .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .opacity(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, PT.Metric.screenPad)
+            .padding(.bottom, 80)
+        }
+        .ptScreen()
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Retake")
+                    }
+                    .font(.system(size: 15))
+                    .foregroundStyle(PT.txt2)
+                }
             }
         }
         .sheet(isPresented: $showExtractionLogSheet) {
@@ -320,6 +178,214 @@ struct DraftRecordView: View {
             learningContext = service.learningContext(for: structuredResult)
             applyLearningContextIfHelpful()
         }
+    }
+
+    // MARK: Review header
+
+    private var reviewHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Review")
+                .font(PTFont.serif(34, weight: 600))
+                .foregroundStyle(PT.txt)
+                .padding(.top, 8)
+
+            HStack(spacing: 10) {
+                if let image = seededAttachments.first?.image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 54, height: 72)
+                        .clipShape(DogEarShape(radius: 8, ear: 12))
+                        .overlay(DogEarShape(radius: 8, ear: 12).stroke(PT.hair, lineWidth: 1))
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    let merchant = merchantName.isEmpty ? (seededOCR?.suggestedMerchantName ?? "receipt") : merchantName
+                    Chip(symbol: "checkmark.circle", text: "Scanned · \(merchant)", tone: PT.sage)
+                    Text("\(detectedFieldCount) fields detected")
+                        .font(PTFont.mono(10))
+                        .foregroundStyle(PT.txt3)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: Fields card
+
+    private var fieldsCard: some View {
+        VStack(spacing: 0) {
+            PTReviewField(title: "Product", text: $productName, confidence: confidence(for: \.productName))
+            paperDivider
+            PTReviewField(title: "Merchant", text: $merchantName, confidence: confidence(for: \.merchantName))
+            paperDivider
+            PTReviewDateRow(title: "Purchase date", date: $purchaseDate, confidence: dateConfidence)
+            paperDivider
+            HStack(alignment: .bottom, spacing: 12) {
+                PTReviewField(title: "Price", text: $amountText, keyboard: .decimalPad, mono: true, confidence: amountConfidence)
+                Picker("Currency", selection: $currency) {
+                    Text("SGD").tag("SGD"); Text("USD").tag("USD"); Text("MYR").tag("MYR")
+                    Text("EUR").tag("EUR"); Text("GBP").tag("GBP"); Text("JPY").tag("JPY")
+                }
+                .pickerStyle(.menu)
+                .tint(PT.onPaper2)
+                .padding(.bottom, 8)
+            }
+            paperDivider
+            warrantyRow
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(goldFold: true)
+    }
+
+    private var warrantyRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Toggle(isOn: $includeWarranty) {
+                    Text("Warranty")
+                        .ptMonoLabel(9, tracking: 1.4)
+                        .foregroundStyle(PT.onPaper3)
+                }
+                .tint(PT.sage)
+                if let conf = warrantyConfidence, conf.needsReview {
+                    ConfidenceTag(confidence: conf)
+                }
+            }
+            if includeWarranty {
+                DatePicker("", selection: $warrantyExpiryDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .tint(PT.goldDeep)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+
+    // MARK: Organization
+
+    private var organizationCard: some View {
+        VStack(spacing: 0) {
+            PTReviewField(title: "Category", text: $category, confidence: confidence(for: \.category))
+            paperDivider
+            PTReviewField(title: "Tags (comma separated)", text: $tagsText, confidence: nil)
+            paperDivider
+            PTReviewField(title: "Notes", text: $notes, confidence: nil)
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(goldFold: false)
+    }
+
+    // MARK: Line item picker
+
+    private var lineItemCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(text: "Items on this receipt", tone: PT.txt3)
+            VStack(spacing: 0) {
+                ForEach(lineItems) { item in
+                    Button { selectItem(item) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: selectedItemId == item.id ? "largecircle.fill.circle" : "circle")
+                                .font(.system(size: 16))
+                                .foregroundStyle(selectedItemId == item.id ? PT.gold : PT.txt3)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.name)
+                                    .font(item.kind.isRecordWorthy ? PTFont.serif(15, weight: 600) : PTFont.serif(15, weight: 500))
+                                    .foregroundStyle(PT.txt)
+                                    .lineLimit(1)
+                                Text(item.kind.label)
+                                    .font(PTFont.mono(9))
+                                    .foregroundStyle(PT.txt3)
+                            }
+                            Spacer(minLength: 8)
+                            if let amount = item.amount {
+                                Text(String(format: "%.2f", amount))
+                                    .font(PTFont.mono(12, medium: true))
+                                    .foregroundStyle(PT.txt2)
+                            }
+                        }
+                        .padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(item.kind == .fee)
+                    .opacity(item.kind == .fee ? 0.5 : 1)
+
+                    if item.id != lineItems.last?.id {
+                        Rectangle().fill(PT.hair).frame(height: 1)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+        }
+    }
+
+    // MARK: Extracted text (diagnostics)
+
+    @ViewBuilder
+    private func extractedTextCard(_ ocr: OCRExtractionResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { withAnimation { showRawText.toggle() } } label: {
+                HStack {
+                    SectionLabel(text: "Extracted text", tone: PT.txt3)
+                    if let kind = ocr.documentKind, kind != .unknown {
+                        Text(kind.label)
+                            .font(PTFont.mono(9))
+                            .foregroundStyle(PT.gold)
+                    }
+                    Spacer()
+                    Image(systemName: showRawText ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PT.txt3)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if showRawText {
+                Text(ocr.recognizedText)
+                    .font(PTFont.mono(10))
+                    .foregroundStyle(PT.txt2)
+                    .lineLimit(12)
+                    .textSelection(.enabled)
+            }
+
+            if let source = ocr.extractionSource {
+                HStack(spacing: 6) {
+                    Image(systemName: source == .foundationModel ? "cpu" : "text.magnifyingglass")
+                        .font(.system(size: 10))
+                    Text(source == .foundationModel ? "Extracted with Apple Intelligence" : "Extracted with pattern matching")
+                        .font(PTFont.mono(9.5))
+                }
+                .foregroundStyle(PT.txt3)
+
+                if let diag = ocr.structuredResult?.diagnostics, !diag.foundationModelRan {
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle").font(.system(size: 10))
+                        Text(diag.foundationModelSkipReason.map { "AI unavailable: \($0)" } ?? "AI extraction did not run on this document")
+                            .font(PTFont.mono(9.5))
+                    }
+                    .foregroundStyle(PT.amber)
+                }
+
+                if ocr.structuredResult != nil {
+                    Button { showExtractionLogSheet = true } label: {
+                        Label("Share extraction log", systemImage: "square.and.arrow.up")
+                            .font(PTFont.mono(9.5))
+                            .foregroundStyle(PT.txt3)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0xE7DCC4, alpha: 0.03), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+    }
+
+    private var paperDivider: some View {
+        Rectangle().fill(PT.onPaperHair).frame(height: 1)
     }
 
     private func applyLearningContextIfHelpful() {
@@ -541,10 +607,95 @@ struct DraftRecordView: View {
     }
 }
 
+// MARK: - Themed review field components
+
+/// Confidence affordance: sage "Auto" for high-confidence, amber "Check this" otherwise.
+struct ConfidenceTag: View {
+    let confidence: ExtractionConfidence?
+
+    var body: some View {
+        if let confidence {
+            if confidence == .high {
+                tag(dot: PT.sage, text: "Auto", tone: PT.sageDeep)
+            } else if confidence.needsReview {
+                tag(dot: PT.amber, text: "Check this", tone: Color(hex: 0x9A6B1F))
+            }
+        }
+    }
+
+    private func tag(dot: Color, text: String, tone: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(dot).frame(width: 5, height: 5)
+            Text(text)
+                .font(PTFont.mono(9, medium: true))
+                .tracking(0.6)
+                .textCase(.uppercase)
+        }
+        .foregroundStyle(tone)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(dot.opacity(0.14), in: Capsule())
+    }
+}
+
+/// A labelled editable field rendered on a cream filing card, with a confidence tag.
+struct PTReviewField: View {
+    let title: String
+    @Binding var text: String
+    var keyboard: UIKeyboardType = .default
+    var mono: Bool = false
+    let confidence: ExtractionConfidence?
+
+    private var needsReview: Bool { confidence?.needsReview ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                    .ptMonoLabel(9, tracking: 1.4)
+                    .foregroundStyle(PT.onPaper3)
+                Spacer()
+                ConfidenceTag(confidence: confidence)
+            }
+            TextField("", text: $text, prompt: Text("—").foregroundStyle(PT.onPaper3))
+                .font(mono ? PTFont.mono(15, medium: true) : PTFont.serif(17, weight: 500))
+                .foregroundStyle(needsReview ? Color(hex: 0x9A6B1F) : PT.onPaper)
+                .tint(PT.goldDeep)
+                .keyboardType(keyboard)
+        }
+        .padding(.vertical, 12)
+    }
+}
+
+/// A labelled date row on a cream filing card.
+struct PTReviewDateRow: View {
+    let title: String
+    @Binding var date: Date
+    let confidence: ExtractionConfidence?
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .ptMonoLabel(9, tracking: 1.4)
+                .foregroundStyle(PT.onPaper3)
+            if let confidence, confidence.needsReview {
+                ConfidenceTag(confidence: confidence)
+            }
+            Spacer()
+            DatePicker("", selection: $date, displayedComponents: .date)
+                .labelsHidden()
+                .tint(PT.goldDeep)
+        }
+        .padding(.vertical, 12)
+    }
+}
+
 #Preview {
     NavigationStack {
         DraftRecordView(seedType: .receipt)
     }
+    .tint(PT.gold)
+    .preferredColorScheme(.dark)
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

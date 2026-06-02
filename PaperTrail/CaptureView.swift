@@ -3,6 +3,7 @@ import SwiftData
 import PhotosUI
 
 struct CaptureView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var showScanner = false
     @State private var showPhotoPicker = false
     @State private var scanType: AttachmentType = .receipt
@@ -14,71 +15,54 @@ struct CaptureView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Add proof of purchase")
-                    .font(.title2.bold())
-
-                Text("Capture now, search later.")
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 22) {
+                framingCard
 
                 VStack(spacing: 12) {
                     Button {
                         scanType = .receipt
                         showScanner = true
                     } label: {
-                        CaptureActionRow(
-                            title: "Scan receipt",
-                            subtitle: "Use the camera to scan a printed receipt.",
-                            systemImage: "doc.viewfinder"
-                        )
+                        Label("Capture receipt", systemImage: "camera.fill")
                     }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        scanType = .warranty
-                        showScanner = true
-                    } label: {
-                        CaptureActionRow(
-                            title: "Add warranty card",
-                            subtitle: "Scan a warranty card or proof document.",
-                            systemImage: "shield.lefthalf.filled"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PTGoldButtonStyle())
 
                     Button {
                         scanType = .other
                         showPhotoPicker = true
                     } label: {
-                        CaptureActionRow(
-                            title: "Import photo",
-                            subtitle: "Pick an existing image from your library.",
-                            systemImage: "photo.on.rectangle"
-                        )
+                        Label("Choose from Photos", systemImage: "photo.on.rectangle")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PTOutlineButtonStyle())
                 }
+                .padding(.horizontal, 4)
 
-                if isProcessing {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Running OCR…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 8)
-                }
-
-                Text("PaperTrail scans your document, extracts text with OCR, and lets you confirm key fields before saving.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                Text("PaperTrail reads your receipt on-device, pulls out the\nkey fields, and lets you confirm them before saving.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(PT.txt3)
+                    .multilineTextAlignment(.center)
             }
-            .padding(16)
+            .padding(.horizontal, PT.Metric.screenPad)
+            .padding(.top, 12)
+            .padding(.bottom, 60)
         }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("Capture")
+        .ptScreen()
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Text("New record").ptWordmark()
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(PT.txt2)
+                }
+            }
+        }
+        .overlay {
+            if isProcessing { scanningOverlay }
+        }
         .fullScreenCover(isPresented: $showScanner) {
             DocumentScannerView(
                 onScanComplete: { images in
@@ -104,6 +88,53 @@ struct CaptureView: View {
         }
     }
 
+    // MARK: Ready — framing card
+
+    private var framingCard: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                    .foregroundStyle(PT.onPaper3.opacity(0.5))
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 54, weight: .ultraLight))
+                    .foregroundStyle(PT.goldDeep)
+            }
+            .frame(height: 200)
+
+            VStack(spacing: 4) {
+                Text("Frame your receipt")
+                    .font(PTFont.serif(20, weight: 600))
+                    .foregroundStyle(PT.onPaper)
+                Text("Lay it flat, good light, edges in view.")
+                    .font(PTFont.mono(10.5))
+                    .foregroundStyle(PT.onPaper3)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .paperCard(goldFold: true)
+    }
+
+    // MARK: Scanning overlay
+
+    private var scanningOverlay: some View {
+        ZStack {
+            PT.inkCanvas.opacity(0.92).ignoresSafeArea()
+            VStack(spacing: 18) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(PT.gold)
+                Text("Reading your receipt…")
+                    .font(PTFont.serif(20, weight: 500))
+                    .foregroundStyle(PT.txt)
+                Text("On-device OCR + Apple Intelligence")
+                    .ptMonoLabel(9, tracking: 1.6)
+                    .foregroundStyle(PT.txt3)
+            }
+        }
+    }
+
     private func processScan(images: [UIImage], type: AttachmentType) async {
         isProcessing = true
         let result = await scanningService.process(images: images, type: type)
@@ -125,7 +156,7 @@ struct CaptureView: View {
 
 // MARK: - Supporting types
 
-private struct DraftPayload: Identifiable, Hashable {
+struct DraftPayload: Identifiable, Hashable {
     let id = UUID()
     let type: AttachmentType
     let attachments: [Attachment]
@@ -135,42 +166,12 @@ private struct DraftPayload: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-private struct CaptureActionRow: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(.blue)
-                .frame(width: 36, height: 36)
-                .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(16)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
-
 #Preview {
     NavigationStack {
         CaptureView()
     }
+    .tint(PT.gold)
+    .preferredColorScheme(.dark)
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }
