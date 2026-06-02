@@ -107,6 +107,10 @@ struct PaperTrailApp: App {
     init() {
         configureSentry()
 
+        // Register the bundled OFL fonts (Newsreader, IBM Plex Mono) before any
+        // view renders so the design-system type is available on first paint.
+        PTFont.registerIfNeeded()
+
         // Single-store approach: both PurchaseRecord and Attachment live in the same
         // CloudKit-backed store. Attachment holds only lightweight metadata (filename,
         // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.

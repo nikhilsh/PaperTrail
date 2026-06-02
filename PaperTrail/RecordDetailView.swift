@@ -7,203 +7,71 @@ struct RecordDetailView: View {
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Query private var allAttachments: [Attachment]
     @Bindable var record: PurchaseRecord
+
     @State private var showDeleteConfirmation = false
     @State private var selectedImageFilename: SelectedFilename?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
+    @State private var showScanner = false
+    @State private var isAddingProof = false
+
+    private let scanningService = ScanningService()
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
     }
 
-    private var warrantyColor: Color {
-        switch record.warrantyStatus {
-        case .active: .green
-        case .expiringSoon: .orange
-        case .expired: .red
-        case .unknown: .secondary
-        }
-    }
+    private var warranty: PTWarranty { PTWarranty(record: record) }
 
     var body: some View {
-        List {
-            // Header
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(record.productName)
-                        .font(.title3.bold())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                heroCard
 
-                    if let merchantName = record.merchantName {
-                        Label(merchantName, systemImage: "storefront")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let amount = record.formattedAmount {
-                        Text(amount)
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            // Warranty & Support
-            Section("Warranty & Support") {
-                HStack {
-                    Text("Warranty status")
-                    Spacer()
-                    Text(record.warrantyStatus.label)
-                        .foregroundStyle(warrantyColor)
-                        .fontWeight(.medium)
+                if record.warrantyExpiryDate != nil {
+                    warrantyBlock
                 }
 
-                if let exp = record.warrantyExpiryDate {
-                    LabeledContent("Warranty until") {
-                        Text(exp, format: .dateTime.day().month().year())
-                    }
+                proofSection
+
+                supportCard
+
+                if let notes = record.notes, !notes.isEmpty {
+                    notesCard(notes)
                 }
 
-                if let info = record.supportInfo {
-                    LabeledContent("Service contact", value: info.phoneNumber)
-                    LabeledContent("Source", value: info.confidence == .verified ? "Verified" : "Best guess")
-
-                    if let note = info.note {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("No support contact saved yet.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            // Purchase details
-            Section("Purchase") {
-                if let purchaseDate = record.purchaseDate {
-                    LabeledContent("Purchased") {
-                        Text(purchaseDate, format: .dateTime.day().month().year())
-                    }
-                }
-
-                if let amount = record.formattedAmount {
-                    LabeledContent("Amount", value: amount)
-                }
-            }
-
-            // Organization
-            if record.category != nil || !record.tags.isEmpty {
-                Section("Organization") {
-                    if let category = record.category {
-                        LabeledContent("Category", value: category)
-                    }
-
-                    if !record.tags.isEmpty {
-                        HStack {
-                            Text("Tags")
-                            Spacer()
-                            ForEach(record.tags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Color.blue.opacity(0.1), in: Capsule())
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Notes
-            if let notes = record.notes, !notes.isEmpty {
-                Section("Notes") {
-                    Text(notes)
-                }
-            }
-
-            // Attachments
-            Section("Attachments") {
-                if attachments.isEmpty {
-                    Text("No attachments")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(attachments) { attachment in
-                                Button {
-                                    if attachment.image != nil {
-                                        selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
-                                    } else {
-                                        // Try downloading from CloudKit when tapped
-                                        Task {
-                                            let success = await cloudImageSync.download(
-                                                attachmentID: attachment.id,
-                                                localFilename: attachment.localFilename
-                                            )
-                                            if success {
-                                                selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    AttachmentThumbnail(attachment: attachment)
-                                        .overlay(alignment: .bottomTrailing) {
-                                            CloudImageStatusOverlay(
-                                                attachmentID: attachment.id,
-                                                hasLocalImage: attachment.image != nil,
-                                                syncManager: cloudImageSync
-                                            )
-                                        }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .task {
-                        // Auto-download missing images when this view appears
-                        let missing = attachments.filter { $0.image == nil }
-                        for att in missing {
-                            await cloudImageSync.download(
-                                attachmentID: att.id,
-                                localFilename: att.localFilename
-                            )
-                        }
-                    }
-
-                    ForEach(attachments) { attachment in
-                        if let ocrText = attachment.ocrText, !ocrText.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(attachment.type.rawValue.capitalized)
-                                    .font(.caption.weight(.semibold))
-                                Text(ocrText)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(4)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Delete
-            Section {
-                Button("Delete Record", role: .destructive) {
+                Button("Delete record", role: .destructive) {
                     showDeleteConfirmation = true
                 }
+                .font(PTFont.mono(11, medium: true))
+                .tracking(1)
+                .textCase(.uppercase)
+                .foregroundStyle(PT.terra)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
             }
+            .padding(.horizontal, PT.Metric.detailPad)
+            .padding(.bottom, 120)
         }
-        .navigationTitle("Record")
-        .navigationBarTitleDisplayMode(.inline)
+        .ptScreen()
+        .navigationBarBackButtonHidden()
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                    }
+                    .font(.system(size: 15))
+                    .foregroundStyle(PT.txt2)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    Button {
-                        Task { await exportRecord() }
-                    } label: {
+                HStack(spacing: 14) {
+                    Button { Task { await exportRecord() } } label: {
                         if isExporting {
-                            ProgressView()
+                            ProgressView().tint(PT.txt)
                         } else {
                             Image(systemName: "square.and.arrow.up")
                         }
@@ -213,9 +81,11 @@ struct RecordDetailView: View {
                     NavigationLink {
                         EditRecordView(record: record)
                     } label: {
-                        Text("Edit")
+                        Image(systemName: "pencil")
                     }
                 }
+                .font(.system(size: 16))
+                .foregroundStyle(PT.txt2)
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -223,15 +93,273 @@ struct RecordDetailView: View {
                 ShareSheetView(activityItems: [shareURL])
             }
         }
+        .fullScreenCover(isPresented: $showScanner) {
+            DocumentScannerView(
+                onScanComplete: { images in
+                    showScanner = false
+                    Task { await addProof(images: images) }
+                },
+                onCancel: { showScanner = false }
+            )
+            .ignoresSafeArea()
+        }
         .confirmationDialog("Delete this record?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
-                deleteRecord()
-            }
+            Button("Delete", role: .destructive) { deleteRecord() }
         } message: {
             Text("This will permanently remove the record and its attachments.")
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
             ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
+        }
+    }
+
+    // MARK: Hero card
+
+    private var heroCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                GlyphTile(symbol: warranty.glyph, size: 52, onPaper: true)
+                Spacer()
+                if record.warrantyExpiryDate != nil {
+                    StampBadge(text: warranty.stampText, tone: warranty.status.tone)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(record.productName)
+                    .font(PTFont.serif(26, weight: 600))
+                    .foregroundStyle(PT.onPaper)
+                    .lineLimit(3)
+                if let meta = modelRoomLine {
+                    Text(meta)
+                        .font(PTFont.mono(11))
+                        .tracking(0.6)
+                        .foregroundStyle(PT.onPaper3)
+                }
+            }
+
+            Rectangle().fill(PT.onPaperHair).frame(height: 1)
+
+            HStack(alignment: .top, spacing: 0) {
+                heroStat(label: "Paid", value: record.formattedAmount ?? "—", mono: true)
+                heroStat(label: "From", value: record.merchantName ?? "—", mono: false)
+                heroStat(label: "Bought", value: record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—", mono: true)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(goldFold: true)
+    }
+
+    private var modelRoomLine: String? {
+        var parts: [String] = []
+        if let category = record.category, !category.isEmpty { parts.append(category) }
+        if !record.tags.isEmpty { parts.append(record.tags.joined(separator: " · ")) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func heroStat(label: String, value: String, mono: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .ptMonoLabel(8.5, tracking: 1.5)
+                .foregroundStyle(PT.onPaper3)
+            Text(value)
+                .font(mono ? PTFont.mono(13, medium: true) : PTFont.serif(15, weight: 500))
+                .foregroundStyle(PT.onPaper)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Warranty block
+
+    private var warrantyBlock: some View {
+        NavigationLink {
+            WarrantyAnswerView(record: record)
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SectionLabel(text: "Warranty", tone: warranty.status.tone)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PT.txt3)
+                }
+                Text(warranty.pillText)
+                    .font(PTFont.serif(20, weight: 600))
+                    .foregroundStyle(PT.txt)
+                WarrantyProgressBar(progress: warranty.progressRemaining, tone: warranty.status.tone, onPaper: false)
+                HStack {
+                    Text(record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                        .font(PTFont.mono(10))
+                        .foregroundStyle(PT.txt3)
+                    Spacer()
+                    Text(record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                        .font(PTFont.mono(10))
+                        .foregroundStyle(PT.txt3)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(warranty.status.tone.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(warranty.status.tone.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Proof
+
+    private var proofSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel(text: "Proof on file", tone: PT.txt3)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(attachments) { attachment in
+                        Button {
+                            openAttachment(attachment)
+                        } label: {
+                            ProofThumbnail(attachment: attachment)
+                                .overlay(alignment: .bottomTrailing) {
+                                    CloudImageStatusOverlay(
+                                        attachmentID: attachment.id,
+                                        hasLocalImage: attachment.image != nil,
+                                        syncManager: cloudImageSync
+                                    )
+                                }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button { showScanner = true } label: {
+                        addProofTile
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .task {
+                let missing = attachments.filter { $0.image == nil }
+                for att in missing {
+                    await cloudImageSync.download(attachmentID: att.id, localFilename: att.localFilename)
+                }
+            }
+        }
+    }
+
+    private var addProofTile: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .foregroundStyle(PT.txt3)
+            VStack(spacing: 6) {
+                if isAddingProof {
+                    ProgressView().tint(PT.txt2)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .regular))
+                    Text("Add")
+                        .ptMonoLabel(8.5, tracking: 1.2)
+                }
+            }
+            .foregroundStyle(PT.txt2)
+        }
+        .frame(width: 78, height: 104)
+    }
+
+    // MARK: Support card
+
+    private var supportCard: some View {
+        NavigationLink {
+            SupportView(record: record)
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SectionLabel(text: "If it breaks", tone: PT.onPaper3)
+                    Spacer()
+                }
+                if let support = record.supportInfo {
+                    Text(support.providerName)
+                        .font(PTFont.serif(18, weight: 600))
+                        .foregroundStyle(PT.onPaper)
+                    Text(support.phoneNumber)
+                        .font(PTFont.mono(13, medium: true))
+                        .foregroundStyle(PT.onPaper2)
+                    if support.confidence == .verified {
+                        label(symbol: "checkmark.seal.fill", text: "Verified from your receipt", tone: PT.sageDeep)
+                    } else {
+                        label(symbol: "questionmark.circle", text: "Best guess · looked up, not from your receipt.", tone: Color(hex: 0x9A7A33))
+                    }
+                } else {
+                    Text("Get help finding support and proof for this item.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(PT.onPaper2)
+                }
+                HStack {
+                    Spacer()
+                    Text("Get help  →")
+                        .font(PTFont.mono(11, medium: true))
+                        .tracking(1)
+                        .textCase(.uppercase)
+                        .foregroundStyle(PT.onPaper)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 16)
+                        .background(Color(hex: 0x211C12, alpha: 0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperCard(goldFold: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func label(symbol: String, text: String, tone: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 11))
+            Text(text).font(PTFont.mono(10))
+        }
+        .foregroundStyle(tone)
+    }
+
+    private func notesCard(_ notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(text: "Notes", tone: PT.txt3)
+            Text(notes)
+                .font(.system(size: 14))
+                .foregroundStyle(PT.txt)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+    }
+
+    // MARK: Actions
+
+    private func openAttachment(_ attachment: Attachment) {
+        if attachment.image != nil {
+            selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+        } else {
+            Task {
+                let success = await cloudImageSync.download(attachmentID: attachment.id, localFilename: attachment.localFilename)
+                if success {
+                    selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                }
+            }
+        }
+    }
+
+    private func addProof(images: [UIImage]) async {
+        isAddingProof = true
+        defer { isAddingProof = false }
+        let result = await scanningService.process(images: images, type: .other)
+        for attachment in result.attachments {
+            attachment.recordID = record.id
+            modelContext.insert(attachment)
+        }
+        record.updatedAt = .now
+        let toUpload = result.attachments.map { AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename) }
+        for info in toUpload {
+            await cloudImageSync.upload(attachmentID: info.id, localFilename: info.localFilename)
         }
     }
 
@@ -243,7 +371,7 @@ struct RecordDetailView: View {
             shareURL = url
             showShareSheet = true
         } catch {
-            print("Export failed: \(error)")
+            AppLogger.error("Record export failed: \(error)", category: "sharing")
         }
     }
 
@@ -256,13 +384,11 @@ struct RecordDetailView: View {
         NotificationManager.shared.removeWarrantyReminders(for: record)
         modelContext.delete(record)
 
-        // Clean up CloudKit image assets in background
         Task {
             for id in attachmentIDs {
                 await cloudImageSync.delete(attachmentID: id)
             }
         }
-
         dismiss()
     }
 }
@@ -278,9 +404,9 @@ struct SelectedFilename: Identifiable {
     }
 }
 
-// MARK: - Subviews
+// MARK: - Proof thumbnail (3:4 dog-ear)
 
-private struct AttachmentThumbnail: View {
+private struct ProofThumbnail: View {
     let attachment: Attachment
 
     var body: some View {
@@ -290,17 +416,17 @@ private struct AttachmentThumbnail: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Image(systemName: "doc.questionmark")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+                ZStack {
+                    PT.inkRaised
+                    Image(systemName: "icloud.and.arrow.down")
+                        .font(.system(size: 18))
+                        .foregroundStyle(PT.txt3)
+                }
             }
         }
-        .frame(width: 70, height: 90)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(.separator), lineWidth: 0.5)
-        )
+        .frame(width: 78, height: 104)
+        .clipShape(DogEarShape(radius: 10, ear: 14))
+        .overlay(DogEarShape(radius: 10, ear: 14).stroke(PT.hair, lineWidth: 1))
     }
 }
 
