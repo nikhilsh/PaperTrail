@@ -146,6 +146,16 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      - name: Read app version
+        run: |
+          APP_PLIST="$ARCHIVE_PATH/Products/Applications/PaperTrail.app/Info.plist"
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PLIST")
+          echo "APP_SHORT_VERSION=$SHORT" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$BUILD" >> "$GITHUB_ENV"
+          printf '{"shortVersion":"%s","build":"%s"}\n' "$SHORT" "$BUILD" > "$GITHUB_WORKSPACE/app-version.json"
+          echo "App version: $SHORT ($BUILD)"
+
       - name: Install sentry-cli
         run: |
           curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.40.0" sh
@@ -207,12 +217,17 @@ jobs:
           if gh release view adhoc-latest >/dev/null 2>&1; then
             gh release upload adhoc-latest \
               build/export/PaperTrail.ipa \
+              app-version.json \
               --clobber
+            gh release edit adhoc-latest \
+              --title "PaperTrail v${APP_SHORT_VERSION} (${APP_BUILD})" \
+              --notes "Latest Ad Hoc build — v${APP_SHORT_VERSION} (build ${APP_BUILD})."
           else
             gh release create adhoc-latest \
               build/export/PaperTrail.ipa \
-              --title "PaperTrail Ad Hoc Latest" \
-              --notes "Latest Ad Hoc build for PaperTrail." \
+              app-version.json \
+              --title "PaperTrail v${APP_SHORT_VERSION} (${APP_BUILD})" \
+              --notes "Latest Ad Hoc build — v${APP_SHORT_VERSION} (build ${APP_BUILD})." \
               --prerelease
           fi
 

@@ -45,7 +45,19 @@ async function fetchRelease() {
 
     const assets = r.assets || [];
     const ipa = assets.find((a) => a.name === IPA_NAME);
-    return { tagName: r.tag_name, releaseUrl: r.html_url, publishedAt: r.published_at, ipa };
+
+    // The release build publishes app-version.json carrying the real marketing
+    // version + build number (the tag itself is just "adhoc-latest").
+    let appVersion = null;
+    const versionAsset = assets.find((a) => a.name === "app-version.json");
+    if (versionAsset) {
+        try {
+            const vr = await fetch(versionAsset.browser_download_url, { headers });
+            if (vr.ok) appVersion = await vr.json();
+        } catch { /* fall back to tag-derived label */ }
+    }
+
+    return { tagName: r.tag_name, releaseUrl: r.html_url, publishedAt: r.published_at, ipa, appVersion };
 }
 
 function manifestPlist(ipaUrl, tag) {
@@ -93,14 +105,23 @@ async function build() {
     const size = mb(r.ipa.size);
     const ipaUrl = r.ipa.browser_download_url;
     const manifestUrl = `itms-services://?action=download-manifest&url=${siteOrigin}/ios/manifest.plist`;
-    const iosMeta = ["iOS 16+", size, updated && `updated ${updated}`].filter(Boolean).join(" · ");
 
-    // A rolling tag like "adhoc-latest" isn't a version — show "Beta".
-    const label = /^v?\d/.test(version) ? `v${version.replace(/^v/, "")}` : "Beta";
+    // Prefer the real marketing version + build from app-version.json; fall back
+    // to the tag, then "Beta" for a rolling tag like "adhoc-latest".
+    const av = r.appVersion;
+    const versionLabel = av?.shortVersion
+        ? `v${av.shortVersion} (build ${av.build})`
+        : (/^v?\d/.test(version) ? `v${version.replace(/^v/, "")}` : "Beta");
+    const label = av?.shortVersion ? `v${av.shortVersion} (${av.build})` : versionLabel;
+
+    const iosMeta = [versionLabel, "iOS 16+", size, updated && `updated ${updated}`]
+        .filter(Boolean).join(" · ");
 
     const releaseData = {
-        version,
+        version: av?.shortVersion || version,
+        build: av?.build || null,
         label,
+        versionLabel,
         channel: "beta",
         updated,
         releaseUrl: r.releaseUrl,
