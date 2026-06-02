@@ -139,10 +139,10 @@
       <h1>Every receipt,<br><em>filed for good.</em></h1>
       <p class="lede">Snap a receipt. PaperTrail reads it on-device, files it, and watches the warranty so nothing quietly lapses.</p>
       <div class="cta">
-        <a class="btn btn-gold" id="install-cta" href="itms-services://?action=download-manifest&url=https://papertrail.kaopeh.com/ios/manifest.plist">⤓&nbsp; Install on iPhone</a>
+        <a class="btn btn-gold" id="install-cta" href="{{INSTALL_HREF}}">⤓&nbsp; Install on iPhone</a>
         <a class="btn btn-ghost" href="#screens">See the screens</a>
       </div>
-      <div class="meta" id="ios-meta">iOS 16+ · 2.6 MB · updated 2026-03-19</div>
+      <div class="meta" id="ios-meta">{{IOS_META}}</div>
       <div class="note">
         <div>
           <span class="k">Ad Hoc build</span>
@@ -198,12 +198,12 @@
     <img class="app" src="assets/app-icon-1024.png" alt="PaperTrail" />
     <div class="eyebrow">Get the beta</div>
     <h2>Install PaperTrail</h2>
-    <p class="sub" style="margin-inline:auto;">Open this page on your iPhone or iPad, then tap install. <span data-version>Beta</span> is signed for Ad Hoc distribution.</p>
+    <p class="sub" style="margin-inline:auto;">Open this page on your iPhone or iPad, then tap install. <span data-version>This build</span> is signed for Ad Hoc distribution.</p>
     <div class="cta" style="justify-content:center;">
-      <a class="btn btn-gold" id="install-cta-2" href="itms-services://?action=download-manifest&url=https://papertrail.kaopeh.com/ios/manifest.plist">⤓&nbsp; Install on iPhone</a>
-      <a class="btn btn-ghost" id="ipa-link" href="https://github.com/nikhilsh/PaperTrail/releases/download/adhoc-latest/PaperTrail.ipa">Direct .ipa</a>
+      <a class="btn btn-gold" id="install-cta-2" href="{{INSTALL_HREF}}">⤓&nbsp; Install on iPhone</a>
+      <a class="btn btn-ghost" id="ipa-link" href="{{IPA_HREF}}">Direct .ipa</a>
     </div>
-    <div class="meta" id="ios-meta-2">iOS 16+ · 2.6 MB · updated 2026-03-19</div>
+    <div class="meta" id="ios-meta-2">{{IOS_META}}</div>
     <div class="steps">
       <div class="step"><span class="n">1</span><p>Make sure your device UDID is registered in the provisioning profile.</p></div>
       <div class="step"><span class="n">2</span><p>Tap <strong>Install on iPhone</strong> and confirm the prompt to add it to your Home Screen.</p></div>
@@ -214,28 +214,16 @@
 
 <footer>
   <div class="wrap foot">
-    <span class="bid">nikhilsh.PaperTrail · <span data-version>Beta</span></span>
+    <span class="bid">nikhilsh.PaperTrail · <span data-version>beta</span></span>
     <div style="display:flex; gap:22px;">
-      <a id="release-link" href="https://github.com/nikhilsh/PaperTrail/releases/tag/adhoc-latest">GitHub release ↗</a>
-      <a href="https://github.com/nikhilsh/PaperTrail/releases/download/adhoc-latest/PaperTrail.ipa">Download .ipa</a>
+      <a id="release-link" href="{{RELEASE_HREF}}">GitHub release ↗</a>
+      <a href="{{IPA_HREF}}">Download .ipa</a>
     </div>
   </div>
 </footer>
 
 <script type="application/json" id="release-data">
-{
-  "version": "adhoc-latest",
-  "label": "Beta",
-  "channel": "beta",
-  "updated": "2026-03-19",
-  "releaseUrl": "https://github.com/nikhilsh/PaperTrail/releases/tag/adhoc-latest",
-  "ios": {
-    "manifestUrl": "itms-services://?action=download-manifest&url=https://papertrail.kaopeh.com/ios/manifest.plist",
-    "ipaUrl": "https://github.com/nikhilsh/PaperTrail/releases/download/adhoc-latest/PaperTrail.ipa",
-    "minOS": "iOS 16+",
-    "size": "2.6 MB"
-  }
-}
+{}
 </script>
 <script>
   // Progressive enhancement: if version.json is reachable, freshen the badges
