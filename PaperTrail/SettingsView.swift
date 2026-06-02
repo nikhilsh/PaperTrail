@@ -20,6 +20,8 @@ struct SettingsView: View {
     private let sentryHost = AppLogger.sentryHost ?? "Not configured"
     @State private var fmDiagResult = ""
     @State private var fmDiagRunning = false
+    @State private var showNameEditor = false
+    @State private var nameDraft = ""
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -80,31 +82,45 @@ struct SettingsView: View {
             // Account
             Section {
                 if authManager.isSignedIn {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(PT.gold)
-                            VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(PT.gold)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if authManager.hasName {
                                 Text(authManager.displayName)
-                                    .font(PTFont.serif(17, weight: 600))
+                                    .font(PTFont.serif(18, weight: 600))
                                     .foregroundStyle(PT.txt)
-                                if let email = authManager.userEmail, !email.isEmpty {
-                                    Text(email)
+                                Text("Signed in with Apple")
+                                    .font(.caption)
+                                    .foregroundStyle(PT.txt3)
+                            } else {
+                                Text("Signed in with Apple")
+                                    .font(PTFont.serif(16, weight: 600))
+                                    .foregroundStyle(PT.txt)
+                                Button { startEditingName() } label: {
+                                    Text("＋ Add your name")
                                         .font(.caption)
-                                        .foregroundStyle(PT.txt3)
-                                } else if let userID = authManager.userID {
-                                    Text("Apple ID linked · \(userID.prefix(8))…")
-                                        .font(.caption)
-                                        .foregroundStyle(PT.txt3)
+                                        .foregroundStyle(PT.gold)
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
-                        Text("Signed in with Apple")
-                            .font(.caption)
-                            .foregroundStyle(PT.txt3)
+                        Spacer()
+                        if authManager.hasName {
+                            Button { startEditingName() } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(PT.txt3)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(.vertical, 4)
+
+                    if let email = authManager.userEmail, !email.isEmpty {
+                        row("Email", email)
+                    }
 
                     Button("Sign Out", role: .destructive) {
                         authManager.signOut()
@@ -279,6 +295,18 @@ struct SettingsView: View {
         .listRowBackground(PT.inkCardDark)
         .foregroundStyle(PT.txt)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Your name", isPresented: $showNameEditor) {
+            TextField("Name", text: $nameDraft)
+            Button("Save") { authManager.setDisplayName(nameDraft) }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Apple only shares your name the first time you sign in, so set one here to show in the app.")
+        }
+    }
+
+    private func startEditingName() {
+        nameDraft = authManager.resolvedName ?? ""
+        showNameEditor = true
     }
 
     // MARK: - Row helper (mono value, parchment label)
