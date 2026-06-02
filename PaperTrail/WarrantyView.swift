@@ -94,51 +94,48 @@ private struct AttentionCard: View {
         return warranty.remainingShort   // e.g. "28 days left"
     }
 
+    /// "9 months left" / "Lapsed 4 months ago" — the human warranty line.
+    private var leftLine: String {
+        guard let expiry = record.warrantyExpiryDate else { return "No warranty" }
+        if record.warrantyStatus == .expired {
+            return "Lapsed \(PTWarranty.relativePast(expiry))"
+        }
+        return warranty.remainingShort
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                GlyphTile(symbol: warranty.glyph, size: 44, onPaper: true)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 11) {
+                GlyphTile(symbol: warranty.glyph, size: 36, onPaper: true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(record.productName)
-                        .font(PTFont.serif(18, weight: 600))
+                        .font(PTFont.serif(16, weight: 600))
                         .foregroundStyle(PT.onPaper)
                         .lineLimit(2)
-                    if let merchant = record.merchantName, !merchant.isEmpty {
-                        Text(merchant)
-                            .font(PTFont.mono(10.5))
-                            .foregroundStyle(PT.onPaper3)
-                    }
-                }
-                Spacer(minLength: 8)
-                StampBadge(text: stampText, tone: stampTone)
-            }
-
-            WarrantyProgressBar(progress: warranty.progressRemaining, tone: warranty.status.tone)
-
-            HStack {
-                if let expiry = record.warrantyExpiryDate {
-                    Text(record.warrantyStatus == .expired
-                         ? "Lapsed \(PTDate.dayMonthYear.string(from: expiry))"
-                         : "Until \(PTDate.dayMonthYear.string(from: expiry))")
+                    Text(leftLine)
                         .font(PTFont.mono(10.5))
                         .foregroundStyle(PT.onPaper2)
                 }
-                Spacer()
-                if record.warrantyStatus == .expired {
-                    NavigationLink {
-                        SupportView(record: record)
-                    } label: {
-                        Text("Get support")
-                    }
-                    .buttonStyle(PTDarkButtonStyle())
-                } else {
-                    NavigationLink {
-                        WarrantyAnswerView(record: record)
-                    } label: {
-                        Text("View warranty")
-                    }
-                    .buttonStyle(PTDarkButtonStyle())
+                Spacer(minLength: 8)
+                StampBadge(text: stampText, tone: stampTone, compact: true)
+            }
+
+            WarrantyProgressBar(progress: warranty.progressElapsed, tone: warranty.status.tone)
+
+            if record.warrantyStatus == .expired {
+                NavigationLink {
+                    SupportView(record: record)
+                } label: {
+                    Text("Get support")
                 }
+                .buttonStyle(PTDarkButtonStyle(fullWidth: true))
+            } else {
+                NavigationLink {
+                    WarrantyAnswerView(record: record)
+                } label: {
+                    Text("View warranty")
+                }
+                .buttonStyle(PTDarkButtonStyle(fullWidth: true))
             }
         }
         .padding(16)

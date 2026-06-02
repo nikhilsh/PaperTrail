@@ -7,11 +7,17 @@ struct PFoldMark: View {
     var size: CGFloat = 72
 
     var body: some View {
-        Text("P")
-            .font(PTFont.serif(size * 0.52, weight: 600))
-            .foregroundStyle(PT.onPaper)
-            .frame(width: size, height: size * 1.18)
-            .paperCard(goldFold: true, ear: size * 0.3)
+        ZStack(alignment: .bottom) {
+            Text("P")
+                .font(PTFont.serif(size * 0.54, weight: 600))
+                .foregroundStyle(PT.onPaper)
+                .frame(maxHeight: .infinity)
+            // the icon's gold-rule underline motif, made literal
+            GoldRule(width: size * 0.46)
+                .padding(.bottom, size * 0.2)
+        }
+        .frame(width: size, height: size * 1.18)
+        .paperCard(goldFold: true, ear: size * 0.3)
     }
 }
 
@@ -28,14 +34,15 @@ struct EmptyLibraryView: View {
             Spacer()
 
             PFoldMark(size: 78)
+                .rotationEffect(.degrees(-4))
                 .padding(.bottom, 26)
 
             Text("PaperTrail").ptWordmark()
                 .padding(.bottom, 18)
 
-            (Text("Start your ") + Text("paper trail.").italic())
-                .font(PTFont.serif(30, weight: 600))
-                .foregroundStyle(PT.txt)
+            (Text("Start your\n").foregroundStyle(PT.txt)
+             + Text("paper trail.").italic().foregroundStyle(PT.goldHi))
+                .font(PTFont.serif(32, weight: 600))
                 .multilineTextAlignment(.center)
 
             Text("Scan a receipt once. Find the proof, the warranty,\nand who to call — the day something breaks.")

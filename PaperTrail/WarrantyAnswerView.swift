@@ -10,13 +10,24 @@ struct WarrantyAnswerView: View {
     private var warranty: PTWarranty { PTWarranty(record: record) }
     private var attachments: [Attachment] { allAttachments.filter { $0.recordID == record.id } }
 
-    /// Lead word + emphasis word + tail, with the emphasis tinted by status.
+    /// Lead word + emphasis word + tail. Emphasis is gold for covered/expiring,
+    /// light-terra for lapsed (per brief: "emphasis word in gold or terra").
     private var verdict: (lead: String, emphasis: String, tone: Color) {
         switch record.warrantyStatus {
-        case .active:        return ("Yes — you're ", "covered.", PT.gold)
-        case .expiringSoon:  return ("Yes — but it's ", "expiring.", PT.amber)
-        case .expired:       return ("No — it's ", "lapsed.", PT.terra)
+        case .active:        return ("Yes — you're ", "covered.", PT.goldHi)
+        case .expiringSoon:  return ("Yes — but it's ", "expiring.", PT.goldHi)
+        case .expired:       return ("No — it's ", "lapsed.", Color(hex: 0xEAB69C))
         case .unknown:       return ("No warranty ", "on file.", PT.txt3)
+        }
+    }
+
+    /// Stamp verdict — covered/expiring read as "Under warranty" (sage), expired
+    /// as "Out of warranty" (terra), matching the prototype.
+    private var stamp: (text: String, tone: Color) {
+        switch record.warrantyStatus {
+        case .expired:  return ("Out of warranty", PT.terra)
+        case .unknown:  return ("No warranty", PT.txt3)
+        default:        return ("Under warranty", PT.sageDeep)
         }
     }
 
@@ -35,7 +46,7 @@ struct WarrantyAnswerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
 
-                StampBadge(text: warranty.stampText, tone: verdict.tone)
+                StampBadge(text: stamp.text, tone: stamp.tone)
 
                 timelineCard
 
@@ -84,7 +95,7 @@ struct WarrantyAnswerView: View {
             // Timeline: purchase ── Today ── expiry
             VStack(spacing: 6) {
                 GeometryReader { geo in
-                    let elapsed = 1 - warranty.progressRemaining
+                    let elapsed = warranty.progressElapsed
                     ZStack(alignment: .leading) {
                         Capsule().fill(PT.onPaperHair).frame(height: 5)
                         Capsule()

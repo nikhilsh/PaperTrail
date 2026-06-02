@@ -16,7 +16,19 @@ struct CaptureView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                framingCard
+                Text("New record")
+                    .font(PTFont.serif(30, weight: 600))
+                    .foregroundStyle(PT.txt)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+
+                cameraFrame
+
+                Text("Drop a receipt in the frame — we read the rest.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(PT.txt2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
 
                 VStack(spacing: 12) {
                     Button {
@@ -50,7 +62,7 @@ struct CaptureView: View {
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Text("New record").ptWordmark()
+                Text("PaperTrail").ptWordmark()
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { dismiss() } label: {
@@ -88,32 +100,26 @@ struct CaptureView: View {
         }
     }
 
-    // MARK: Ready — framing card
+    // MARK: Ready — dark camera frame with gold corner brackets
 
-    private var framingCard: some View {
-        VStack(spacing: 18) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-                    .foregroundStyle(PT.onPaper3.opacity(0.5))
-                Image(systemName: "viewfinder")
-                    .font(.system(size: 54, weight: .ultraLight))
-                    .foregroundStyle(PT.goldDeep)
+    private var cameraFrame: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(hex: 0x06060A))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(PT.hair, lineWidth: 1))
+            VStack(spacing: 12) {
+                Image(systemName: "doc.viewfinder")
+                    .font(.system(size: 46, weight: .ultraLight))
+                    .foregroundStyle(PT.txt3)
+                Text("Receipt in frame")
+                    .ptMonoLabel(9, tracking: 1.6)
+                    .foregroundStyle(PT.txt3)
             }
-            .frame(height: 200)
-
-            VStack(spacing: 4) {
-                Text("Frame your receipt")
-                    .font(PTFont.serif(20, weight: 600))
-                    .foregroundStyle(PT.onPaper)
-                Text("Lay it flat, good light, edges in view.")
-                    .font(PTFont.mono(10.5))
-                    .foregroundStyle(PT.onPaper3)
-            }
+            CornerBrackets(color: PT.gold, length: 26, thickness: 2, inset: 12)
         }
-        .padding(18)
+        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+        .frame(maxWidth: 280)
         .frame(maxWidth: .infinity)
-        .paperCard(goldFold: true)
     }
 
     // MARK: Scanning overlay

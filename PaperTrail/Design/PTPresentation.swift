@@ -56,6 +56,11 @@ struct PTWarranty {
     /// Fraction of the warranty window still remaining (0…1). 0 when expired/unknown.
     let progressRemaining: Double
 
+    /// Fraction of the warranty window already elapsed (0…1). This is what the
+    /// progress bars fill by (a "time consumed" meter that grows toward expiry),
+    /// matching the design prototype's `pct`.
+    var progressElapsed: Double { 1 - progressRemaining }
+
     /// Compact remaining-time phrase, e.g. "9 mo left", "28 days", "Expired".
     let remainingShort: String
 

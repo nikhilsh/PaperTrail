@@ -92,6 +92,41 @@ extension View {
     }
 }
 
+// MARK: - Camera corner brackets
+
+/// Four L-shaped corner brackets (the viewfinder motif on the capture frame).
+struct CornerBrackets: View {
+    var color: Color = PT.gold
+    var length: CGFloat = 26
+    var thickness: CGFloat = 2
+    var inset: CGFloat = 12
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            Path { p in
+                // top-left
+                p.move(to: CGPoint(x: inset, y: inset + length))
+                p.addLine(to: CGPoint(x: inset, y: inset))
+                p.addLine(to: CGPoint(x: inset + length, y: inset))
+                // top-right
+                p.move(to: CGPoint(x: w - inset - length, y: inset))
+                p.addLine(to: CGPoint(x: w - inset, y: inset))
+                p.addLine(to: CGPoint(x: w - inset, y: inset + length))
+                // bottom-left
+                p.move(to: CGPoint(x: inset, y: h - inset - length))
+                p.addLine(to: CGPoint(x: inset, y: h - inset))
+                p.addLine(to: CGPoint(x: inset + length, y: h - inset))
+                // bottom-right
+                p.move(to: CGPoint(x: w - inset - length, y: h - inset))
+                p.addLine(to: CGPoint(x: w - inset, y: h - inset))
+                p.addLine(to: CGPoint(x: w - inset, y: h - inset - length))
+            }
+            .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .round, lineJoin: .round))
+        }
+    }
+}
+
 // MARK: - Gold rule
 
 /// The 2pt foil underline accent.
@@ -165,15 +200,17 @@ struct StatusPill: View {
 struct StampBadge: View {
     let text: String
     var tone: Color = PT.goldDeep
+    /// Smaller variant for use inside dense cards (e.g. the Warranty dashboard).
+    var compact: Bool = false
 
     var body: some View {
         Text(text)
-            .font(PTFont.mono(12, medium: true))
-            .tracking(2.2)
+            .font(PTFont.mono(compact ? 9 : 12, medium: true))
+            .tracking(compact ? 1.6 : 2.2)
             .textCase(.uppercase)
             .foregroundStyle(tone)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, compact ? 8 : 14)
+            .padding(.vertical, compact ? 5 : 8)
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(tone, lineWidth: 2))
             .rotationEffect(.degrees(-3))
     }
@@ -359,13 +396,16 @@ struct PTOutlineButtonStyle: ButtonStyle {
 
 /// Small dark action button used inside cream cards ("Get support", "Call", "Get help").
 struct PTDarkButtonStyle: ButtonStyle {
+    var fullWidth: Bool = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(PTFont.mono(10, medium: true))
+            .font(PTFont.mono(10.5, medium: true))
             .tracking(1.0)
             .textCase(.uppercase)
             .foregroundStyle(Color(hex: 0xF2EAD7))
-            .padding(.vertical, 10)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .padding(.vertical, fullWidth ? 12 : 10)
             .padding(.horizontal, 16)
             .background(PT.inkStamp, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .opacity(configuration.isPressed ? 0.85 : 1)

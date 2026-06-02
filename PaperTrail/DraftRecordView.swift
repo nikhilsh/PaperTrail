@@ -28,6 +28,11 @@ struct DraftRecordView: View {
     @State private var showExtractionLogSheet = false
     @State private var showRawText = false
 
+    /// Additional proof pages scanned via "Add another page" before saving.
+    @State private var extraAttachments: [Attachment] = []
+    @State private var showAddScanner = false
+    private let scanningService = ScanningService()
+
     /// Line items extracted from the document, for user selection.
     private let lineItems: [LineItem]
     /// The currently selected line item ID (user picks the main item for the record).
@@ -142,12 +147,19 @@ struct DraftRecordView: View {
                     extractedTextCard(seededOCR)
                 }
 
-                Button { saveRecord() } label: {
-                    Text("Save to Library")
+                VStack(spacing: 10) {
+                    Button { saveRecord() } label: {
+                        Text("Save to Library")
+                    }
+                    .buttonStyle(PTGoldButtonStyle())
+                    .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+
+                    Button { showAddScanner = true } label: {
+                        Label(extraAttachments.isEmpty ? "Add another page" : "Add another page (\(extraAttachments.count) added)", systemImage: "plus")
+                    }
+                    .buttonStyle(PTOutlineButtonStyle())
                 }
-                .buttonStyle(PTGoldButtonStyle())
-                .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
                 .padding(.top, 4)
             }
             .padding(.horizontal, PT.Metric.screenPad)
@@ -171,6 +183,19 @@ struct DraftRecordView: View {
             if let logText = generateExtractionLog() {
                 ShareSheetView(activityItems: [logText])
             }
+        }
+        .fullScreenCover(isPresented: $showAddScanner) {
+            DocumentScannerView(
+                onScanComplete: { images in
+                    showAddScanner = false
+                    Task {
+                        let result = await scanningService.process(images: images, type: seedType)
+                        extraAttachments.append(contentsOf: result.attachments)
+                    }
+                },
+                onCancel: { showAddScanner = false }
+            )
+            .ignoresSafeArea()
         }
         .task {
             guard learningContext == nil, let structuredResult else { return }
@@ -582,7 +607,8 @@ struct DraftRecordView: View {
 
         modelContext.insert(record)
 
-        for attachment in seededAttachments {
+        let allAttachments = seededAttachments + extraAttachments
+        for attachment in allAttachments {
             attachment.recordID = record.id
             modelContext.insert(attachment)
         }
@@ -594,7 +620,7 @@ struct DraftRecordView: View {
         }
 
         // Upload attachment images to CloudKit in the background
-        let attachmentsToUpload = seededAttachments.map {
+        let attachmentsToUpload = allAttachments.map {
             AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
         }
         Task {

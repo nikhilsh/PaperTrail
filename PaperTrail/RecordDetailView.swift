@@ -186,15 +186,15 @@ struct RecordDetailView: View {
                         .foregroundStyle(PT.txt3)
                 }
                 Text(warranty.pillText)
-                    .font(PTFont.serif(20, weight: 600))
+                    .font(PTFont.serif(20, weight: 600, italic: true))
                     .foregroundStyle(PT.txt)
-                WarrantyProgressBar(progress: warranty.progressRemaining, tone: warranty.status.tone, onPaper: false)
+                WarrantyProgressBar(progress: warranty.progressElapsed, tone: warranty.status.tone, onPaper: false)
                 HStack {
-                    Text(record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                    Text("\(record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—") — purchased")
                         .font(PTFont.mono(10))
                         .foregroundStyle(PT.txt3)
                     Spacer()
-                    Text(record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                    Text("\(record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—") — \(record.warrantyStatus == .expired ? "expired" : "expires")")
                         .font(PTFont.mono(10))
                         .foregroundStyle(PT.txt3)
                 }
@@ -211,29 +211,50 @@ struct RecordDetailView: View {
 
     private var proofSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionLabel(text: "Proof on file", tone: PT.txt3)
+            HStack {
+                SectionLabel(text: "Proof on file", tone: PT.txt3)
+                Spacer()
+                if !attachments.isEmpty {
+                    Text("\(attachments.count) document\(attachments.count == 1 ? "" : "s")")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PT.txt3)
+                }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     ForEach(attachments) { attachment in
-                        Button {
-                            openAttachment(attachment)
-                        } label: {
-                            ProofThumbnail(attachment: attachment)
-                                .overlay(alignment: .bottomTrailing) {
-                                    CloudImageStatusOverlay(
-                                        attachmentID: attachment.id,
-                                        hasLocalImage: attachment.image != nil,
-                                        syncManager: cloudImageSync
-                                    )
-                                }
+                        VStack(spacing: 8) {
+                            Button {
+                                openAttachment(attachment)
+                            } label: {
+                                ProofThumbnail(attachment: attachment)
+                                    .overlay(alignment: .bottomTrailing) {
+                                        CloudImageStatusOverlay(
+                                            attachmentID: attachment.id,
+                                            hasLocalImage: attachment.image != nil,
+                                            syncManager: cloudImageSync
+                                        )
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            HStack(spacing: 5) {
+                                Image(systemName: proofGlyph(attachment.type))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(PT.gold)
+                                Text(proofLabel(attachment.type))
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(PT.txt2)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
 
-                    Button { showScanner = true } label: {
-                        addProofTile
+                    VStack(spacing: 8) {
+                        Button { showScanner = true } label: {
+                            addProofTile
+                        }
+                        .buttonStyle(.plain)
+                        Text(" ").font(.system(size: 10.5))
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .task {
@@ -242,6 +263,24 @@ struct RecordDetailView: View {
                     await cloudImageSync.download(attachmentID: att.id, localFilename: att.localFilename)
                 }
             }
+        }
+    }
+
+    private func proofGlyph(_ type: AttachmentType) -> String {
+        switch type {
+        case .receipt: "receipt"
+        case .warranty: "shield.lefthalf.filled"
+        case .invoice: "doc.text"
+        case .other: "doc"
+        }
+    }
+
+    private func proofLabel(_ type: AttachmentType) -> String {
+        switch type {
+        case .receipt: "Receipt"
+        case .warranty: "Warranty card"
+        case .invoice: "Invoice"
+        case .other: "Document"
         }
     }
 
