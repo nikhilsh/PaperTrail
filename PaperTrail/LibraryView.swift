@@ -101,14 +101,6 @@ struct LibraryView: View {
         HStack {
             Text("PaperTrail").ptWordmark()
             Spacer()
-            Button {
-                router.selectedTab = .settings
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 17))
-                    .foregroundStyle(PT.txt2)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.top, 8)
     }
