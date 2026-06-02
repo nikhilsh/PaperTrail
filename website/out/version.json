@@ -1,0 +1,13 @@
+{
+  "version": "adhoc-latest",
+  "label": "Beta",
+  "channel": "beta",
+  "updated": "2026-03-19",
+  "releaseUrl": "https://github.com/nikhilsh/PaperTrail/releases/tag/adhoc-latest",
+  "ios": {
+    "manifestUrl": "itms-services://?action=download-manifest&url=https://papertrail.kaopeh.com/ios/manifest.plist",
+    "ipaUrl": "https://github.com/nikhilsh/PaperTrail/releases/download/adhoc-latest/PaperTrail.ipa",
+    "minOS": "iOS 16+",
+    "size": "2.6 MB"
+  }
+}

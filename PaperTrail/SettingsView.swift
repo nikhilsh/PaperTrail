@@ -273,6 +273,8 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        // Clear the floating custom tab bar so the last rows can scroll into view.
+        .contentMargins(.bottom, 110, for: .scrollContent)
         .ptScreen()
         .listRowBackground(PT.inkCardDark)
         .foregroundStyle(PT.txt)

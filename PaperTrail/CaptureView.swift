@@ -61,9 +61,6 @@ struct CaptureView: View {
         .ptScreen()
         .navigationBarBackButtonHidden()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Text("PaperTrail").ptWordmark()
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
