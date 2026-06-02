@@ -51,12 +51,17 @@ jobs:
 
       - name: Unit tests (PaperTrailTests, simulator)
         run: |
-          # macos runners don't guarantee a fixed device name; introspect an
-          # available iOS simulator UDID and feed it to xcodebuild directly.
-          DEVICE_UDID=$(xcrun simctl list devices available --json \
-            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
-                          ids=[v['udid'] for k,vs in d.items() if 'iOS' in k for v in vs if v.get('isAvailable')]; \
-                          print(ids[0] if ids else '')")
+          # macos runners don't guarantee a fixed device name. Pick the available
+          # simulator on the HIGHEST iOS runtime — the app's iOS 26 deployment
+          # target makes older-runtime sims ineligible for the scheme. (jq ignores
+          # leading whitespace, so it's safe to indent inside this YAML block.)
+          DEVICE_UDID=$(xcrun simctl list devices available --json | jq -r '
+            [ .devices | to_entries[]
+              | select(.key | test("iOS-[0-9]+-[0-9]+"))
+              | (.key | capture("iOS-(?<a>[0-9]+)-(?<b>[0-9]+)")) as $m
+              | (($m.a | tonumber) * 1000 + ($m.b | tonumber)) as $ver
+              | .value[] | select(.isAvailable) | {ver: $ver, udid: .udid}
+            ] | (max_by(.ver).udid // "")')
           if [ -z "$DEVICE_UDID" ]; then
             echo "no iOS simulator available — listing for debug:" >&2
             xcrun simctl list devices available >&2
