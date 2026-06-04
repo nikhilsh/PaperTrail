@@ -583,15 +583,20 @@ struct DraftRecordView: View {
 
     /// Called when the user taps a line item to select it as the main record item.
     private func toggleItem(_ item: LineItem) {
+        let previousPrimaryID = recordWorthySelectedItems.first?.id
         if selectedItemIds.contains(item.id) {
             selectedItemIds.remove(item.id)
         } else {
             selectedItemIds.insert(item.id)
         }
-        // Keep the main form bound to the primary (first record-worthy selected).
-        if let primary = recordWorthySelectedItems.first {
-            productName = primary.name
-            amountText = primary.amount.map { String(format: "%.2f", $0) } ?? ""
+        // Only rebind the main form when the PRIMARY item actually changes — never
+        // clobber the user's typed product/price just because they selected another
+        // item (the previous bug: every toggle reset the form to the primary's raw
+        // amount, which is blank after a hallucinated price is grounded out).
+        let newPrimary = recordWorthySelectedItems.first
+        if newPrimary?.id != previousPrimaryID, let newPrimary {
+            productName = newPrimary.name
+            amountText = newPrimary.amount.map { String(format: "%.2f", $0) } ?? ""
         }
         // Auto-toggle warranty if any selected line item is a warranty.
         if selectedItems.contains(where: { $0.kind == .warranty }) && !includeWarranty {

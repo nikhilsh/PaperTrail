@@ -112,6 +112,25 @@ struct DocumentStructureOCRService: Sendable {
 
             logger.info("Structured OCR: \(tables.count, privacy: .public) tables, total=\(detectedTotal != nil, privacy: .public), items=\(lineItems.count, privacy: .public)")
 
+            // TEMP DIAGNOSTIC (remove once auto-fill is fixed): when structured OCR
+            // runs but finds no usable table total, transmit the counts so we can
+            // tell "recognizer found 0 tables" from "found tables but parsing missed
+            // the cells". Breadcrumbs don't transmit without an error event, so use
+            // AppLogger.error (it captures a Sentry message).
+            if detectedTotal == nil {
+                let cellCount = tables.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.count } }
+                AppLogger.error(
+                    "Structured OCR no total: tables=\(tables.count) cells=\(cellCount) items=\(lineItems.count)",
+                    category: "extraction.ocr.structured_empty",
+                    tags: [
+                        "table_count": String(tables.count),
+                        "cell_count": String(cellCount),
+                        "table_items": String(lineItems.count),
+                        "transcript_len": String(transcript.count),
+                    ]
+                )
+            }
+
             let structure = DocumentStructure(
                 tables: tables,
                 detectedTotal: detectedTotal,
