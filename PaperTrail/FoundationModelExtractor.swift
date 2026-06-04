@@ -478,7 +478,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
             For the purchase date, use the date from a clearly LABELED field such as "Order Date", "Invoice Date", "Tax Invoice Date", "Transaction Date", "Date of Purchase", or "Date". \
             Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
             Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
-            Interpret numeric dates as day-first (DD/MM/YYYY), common in Singapore and APAC. \
+            Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
             A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
             For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
             If you cannot determine the purchase date confidently, leave it null rather than guessing.\
@@ -682,7 +682,10 @@ struct FoundationModelExtractionService: FieldExtractionService {
     /// 2-digit "23" from becoming year 0023. Always passed through
     /// `normalizePurchaseDate` for the final plausibility gate. `internal` so it
     /// is unit-testable.
-    static func parsePurchaseDateString(_ dateStr: String?) -> Date? {
+    static func parsePurchaseDateString(
+        _ dateStr: String?,
+        convention: LocaleDateConvention = .current
+    ) -> Date? {
         guard let dateStr else { return nil }
         let trimmed = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -692,14 +695,22 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         let raw: Date? = {
             if let d = isoFormatter.date(from: trimmed) { return d }
-            let fallbackFormats = [
+
+            // Unambiguous formats first (ISO numeric + textual months, where the
+            // day/year can't be confused), then ambiguous numeric formats ordered
+            // by the region's convention so "03/05/2025" resolves the right way.
+            var formats = [
                 "yyyy-MM-dd",
-                "dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy",
                 "d MMM yyyy", "dd MMM yyyy", "dd-MMM-yyyy",
                 "d MMM yy", "dd MMM yy", "dd-MMM-yy",
-                "MM/dd/yyyy",
             ]
-            for fmt in fallbackFormats {
+            if convention.prefersMonthBeforeDay {
+                formats += ["MM/dd/yyyy", "MM-dd-yyyy", "MM.dd.yyyy", "dd/MM/yyyy"]
+            } else {
+                formats += ["dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "MM/dd/yyyy"]
+            }
+
+            for fmt in formats {
                 let f = DateFormatter()
                 f.locale = Locale(identifier: "en_US_POSIX")
                 f.isLenient = false

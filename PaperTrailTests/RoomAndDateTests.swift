@@ -92,4 +92,33 @@ struct RoomAndDateTests {
         #expect(FoundationModelExtractionService.parsePurchaseDateString("not a date") == nil)
         #expect(FoundationModelExtractionService.parsePurchaseDateString("") == nil)
     }
+
+    // MARK: - Locale-aware date convention
+
+    @Test func deviceConventionDerivedFromLocale() {
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_US")).order == .monthFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_GB")).order == .dayFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_SG")).order == .dayFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "ja_JP")).order == .yearFirst)
+    }
+
+    @Test func ambiguousDateResolvedByConvention() throws {
+        // 03/05/2025 is genuinely ambiguous and must follow the region.
+        let monthFirst = try #require(
+            FoundationModelExtractionService.parsePurchaseDateString("03/05/2025", convention: LocaleDateConvention(order: .monthFirst)))
+        #expect(ymd(monthFirst) == (2025, 3, 5))   // US: 5 March
+
+        let dayFirst = try #require(
+            FoundationModelExtractionService.parsePurchaseDateString("03/05/2025", convention: LocaleDateConvention(order: .dayFirst)))
+        #expect(ymd(dayFirst) == (2025, 5, 3))      // SG/UK: 3 May
+    }
+
+    @Test func unambiguousDateIgnoresConvention() throws {
+        // 25/12/2025 can only be day-first (no 25th month) — both conventions agree.
+        for order in [LocaleDateConvention.Order.monthFirst, .dayFirst] {
+            let d = try #require(
+                FoundationModelExtractionService.parsePurchaseDateString("25/12/2025", convention: LocaleDateConvention(order: order)))
+            #expect(ymd(d) == (2025, 12, 25))
+        }
+    }
 }
