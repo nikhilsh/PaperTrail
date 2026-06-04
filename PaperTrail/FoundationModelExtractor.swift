@@ -240,7 +240,7 @@ struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The merchant or store name.")
     var merchantName: String?
 
-    @Guide(description: "The purchase date in ISO 8601 format (YYYY-MM-DD).")
+    @Guide(description: "The purchase date from a LABELED field (Order/Invoice/Transaction/Purchase Date), in ISO 8601 YYYY-MM-DD with a 4-digit year. Day-first source dates; a 2-digit year YY means 20YY. Not the page-corner print timestamp. Null if unclear.")
     var purchaseDate: String?
 
     @Guide(description: "The total amount paid as a decimal number, e.g. 129.99. Do not include currency symbols.")
@@ -475,8 +475,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Be precise: prefer exact values from the text over guesses. \
             If a field is not clearly present, leave it null. \
             Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
-            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            For the purchase date, use the date from a clearly LABELED field such as "Order Date", "Invoice Date", "Tax Invoice Date", "Transaction Date", "Date of Purchase", or "Date". \
+            Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
+            Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
+            Interpret numeric dates as day-first (DD/MM/YYYY), common in Singapore and APAC. \
+            A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
+            For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
+            If you cannot determine the purchase date confidently, leave it null rather than guessing.\
             \(adaptiveHints)
             """
 
@@ -590,28 +595,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     #if canImport(FoundationModels)
     private func mapSchemaToResult(_ schema: ReceiptExtractionSchema) -> StructuredExtractionResult {
-        let parsedDate: Date? = {
-            guard let dateStr = schema.purchaseDate else { return nil }
-
-            let raw: Date? = {
-                // Try ISO 8601 first
-                let isoFormatter = ISO8601DateFormatter()
-                isoFormatter.formatOptions = [.withFullDate]
-                if let d = isoFormatter.date(from: dateStr) { return d }
-
-                // Fallback: try common formats the model might produce
-                let fallbackFormats = ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy"]
-                for fmt in fallbackFormats {
-                    let f = DateFormatter()
-                    f.dateFormat = fmt
-                    f.locale = Locale(identifier: "en_SG")
-                    if let d = f.date(from: dateStr) { return d }
-                }
-                return nil
-            }()
-
-            return Self.normalizePurchaseDate(raw)
-        }()
+        let parsedDate: Date? = Self.parsePurchaseDateString(schema.purchaseDate)
 
         let documentKind: ExtractedField<DocumentKind> = {
             guard let kindStr = schema.documentKind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
@@ -689,6 +673,44 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return ExtractedField(value: value.trimmingCharacters(in: .whitespacesAndNewlines), confidence: .high)
     }
     #endif
+
+    /// Parse a model-produced purchase-date string into a sane `Date`, or nil.
+    ///
+    /// Tries ISO 8601 first (what we ask for), then explicit **day-first** and
+    /// **textual-month** formats so e.g. "23-Nov-25" parses as 2025-11-23 instead
+    /// of having its day and year swapped. `isLenient = false` prevents a bare
+    /// 2-digit "23" from becoming year 0023. Always passed through
+    /// `normalizePurchaseDate` for the final plausibility gate. `internal` so it
+    /// is unit-testable.
+    static func parsePurchaseDateString(_ dateStr: String?) -> Date? {
+        guard let dateStr else { return nil }
+        let trimmed = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withFullDate]
+
+        let raw: Date? = {
+            if let d = isoFormatter.date(from: trimmed) { return d }
+            let fallbackFormats = [
+                "yyyy-MM-dd",
+                "dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy",
+                "d MMM yyyy", "dd MMM yyyy", "dd-MMM-yyyy",
+                "d MMM yy", "dd MMM yy", "dd-MMM-yy",
+                "MM/dd/yyyy",
+            ]
+            for fmt in fallbackFormats {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.isLenient = false
+                f.dateFormat = fmt
+                if let d = f.date(from: trimmed) { return d }
+            }
+            return nil
+        }()
+
+        return normalizePurchaseDate(raw)
+    }
 
     /// Repair and sanity-check a parsed purchase date.
     ///

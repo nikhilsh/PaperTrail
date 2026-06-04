@@ -62,4 +62,34 @@ struct RoomAndDateTests {
         // Blank entries dropped.
         #expect(!result.contains(where: { $0.trimmingCharacters(in: .whitespaces).isEmpty }))
     }
+
+    // MARK: - Purchase date string parsing
+
+    private func ymd(_ date: Date) -> (Int, Int, Int) {
+        let c = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+        return (c.year!, c.month!, c.day!)
+    }
+
+    @Test func parsesIsoDate() throws {
+        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("2025-11-23"))
+        #expect(ymd(d) == (2025, 11, 23))
+    }
+
+    @Test func parsesTextualDateWithoutSwappingDayAndYear() throws {
+        // The real-world bug: "23-Nov-25" prefilled as "25 Nov 23". It must be
+        // day 23 / Nov / 2025 — day and year not swapped, year not 0023.
+        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("23-Nov-25"))
+        #expect(ymd(d) == (2025, 11, 23))
+    }
+
+    @Test func parsesDayFirstNumericDate() throws {
+        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("15/01/2026"))
+        #expect(ymd(d) == (2026, 1, 15))
+    }
+
+    @Test func rejectsUnparseableOrNilDate() {
+        #expect(FoundationModelExtractionService.parsePurchaseDateString(nil) == nil)
+        #expect(FoundationModelExtractionService.parsePurchaseDateString("not a date") == nil)
+        #expect(FoundationModelExtractionService.parsePurchaseDateString("") == nil)
+    }
 }
