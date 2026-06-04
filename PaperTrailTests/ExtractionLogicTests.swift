@@ -113,6 +113,19 @@ struct ExtractionLogicTests {
         #expect(MerchantLearningService.normalizeUEN("ab-1") == nil)
     }
 
+    // MARK: - Amount grounding (anti-hallucination)
+
+    @Test func groundsAmountsAgainstOCRText() {
+        // Real receipt numbers vs the model's hallucinated ones.
+        let text = "BRANDT GAS HOB 859.70 859.00\nBUILT IN OVEN 919.00\nINDUCTION HOB 759.00\nREBATE -700.00\nTotal SGD 1,837.00"
+        #expect(ExtractionPipeline.amountAppears(859.00, in: text))
+        #expect(ExtractionPipeline.amountAppears(919.0, in: text))
+        #expect(ExtractionPipeline.amountAppears(1837.00, in: text))   // comma-grouped, normalized
+        #expect(!ExtractionPipeline.amountAppears(2599.90, in: text))  // hallucinated
+        #expect(!ExtractionPipeline.amountAppears(499.90, in: text))
+        #expect(!ExtractionPipeline.amountAppears(249.90, in: text))
+    }
+
     // MARK: - Hint strength: correction count × recency decay (MerchantProfile)
 
     @Test func hintStrengthRewardsCorrectionsAndPenalizesStaleness() {

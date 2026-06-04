@@ -230,7 +230,7 @@ struct LineItemSchema: Sendable {
     @Guide(description: "Item name/description as shown on the receipt.")
     var name: String?
 
-    @Guide(description: "Price as decimal number, null if bundled or no separate price.")
+    @Guide(description: "The exact line total printed for this item, as a decimal number. Use ONLY a number that actually appears on this line; if it is bundled, free, or you cannot read the price, use null. Never estimate or invent a price.")
     var amount: Double?
 
     @Guide(description: "Quantity purchased, default 1.")
@@ -263,7 +263,7 @@ struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The purchase date from a LABELED field (Order/Invoice/Transaction/Purchase Date), in ISO 8601 YYYY-MM-DD with a 4-digit year. Day-first source dates; a 2-digit year YY means 20YY. Not the page-corner print timestamp. Null if unclear.")
     var purchaseDate: String?
 
-    @Guide(description: "The total amount paid as a decimal number, e.g. 129.99. Do not include currency symbols.")
+    @Guide(description: "The exact grand total paid, as a decimal number that actually appears on the receipt (e.g. the 'Total' line). No currency symbols. Use null if you cannot read it — never estimate or invent it.")
     var amount: Double?
 
     @Guide(description: "The ISO 4217 currency code, e.g. SGD, USD, MYR.")
