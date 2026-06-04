@@ -86,6 +86,21 @@ extension MerchantProfile {
             documentKindsRaw = newValue.map(\.rawValue).joined(separator: ",")
         }
     }
+
+    /// Trust score for this profile's hints, in `[0, 1]`.
+    ///
+    /// Combines two signals:
+    ///   • **correction count** — a merchant corrected many times is more
+    ///     authoritative (saturates at ~10 corrections),
+    ///   • **recency** — exponential decay (~6-month time constant) so stale
+    ///     profiles fade rather than mislead after a store changes its layout.
+    var hintStrength: Double {
+        let countFactor = min(1.0, Double(max(0, correctionCount)) / 10.0)
+        let days = max(0.0, Date.now.timeIntervalSince(lastUsedAt) / 86_400.0)
+        let recency = exp(-days / 180.0)
+        // Weight evidence (count) more than recency, but let staleness pull it down.
+        return min(1.0, countFactor * 0.7 + recency * 0.3)
+    }
 }
 
 struct MerchantLearningContext: Sendable {
@@ -98,6 +113,50 @@ struct MerchantLearningContext: Sendable {
     let amountHint: String?
     let dateHint: String?
     let productHint: String?
+
+    /// How much to trust this profile's hints, in `[0, 1]`. Derived from the
+    /// number of corrections (a merchant corrected 10× is near-authoritative)
+    /// decayed by recency (stores change layout; old corrections weigh less).
+    /// Consumers phrase the model prompt more or less forcefully and decide
+    /// whether to auto-apply suggestions. See `MerchantProfile.hintStrength`.
+    var confidence: Double = 0
+
+    /// Whether the hints are strong enough to auto-apply without the user asking.
+    var isAuthoritative: Bool { confidence >= 0.6 }
+}
+
+// MARK: - Item-level category memory
+
+/// Learns `product → category` independent of where it was bought, so "AirPods"
+/// maps to Electronics whether purchased at the Apple Store or a corner shop.
+/// Complements `MerchantProfile` (which learns `merchant → category`).
+@Model
+final class ProductCategoryMemory {
+    var id: UUID = UUID()
+    var normalizedProduct: String = ""
+    var displayProduct: String = ""
+    var category: String = ""
+    var count: Int = 0
+    var lastUsedAt: Date = Date()
+    var createdAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        normalizedProduct: String,
+        displayProduct: String,
+        category: String,
+        count: Int = 1,
+        lastUsedAt: Date = Date(),
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.normalizedProduct = normalizedProduct
+        self.displayProduct = displayProduct
+        self.category = category
+        self.count = count
+        self.lastUsedAt = lastUsedAt
+        self.createdAt = createdAt
+    }
 }
 
 struct LearningFeedbackPayload: Sendable {
@@ -137,7 +196,8 @@ struct MerchantLearningService {
                 warrantySuggestionMonths: profile.commonWarrantyMonths,
                 amountHint: profile.amountHint,
                 dateHint: profile.dateHint,
-                productHint: profile.productHint
+                productHint: profile.productHint,
+                confidence: profile.hintStrength
             )
         }
 
@@ -145,12 +205,19 @@ struct MerchantLearningService {
     }
 
     func captureFeedback(_ payload: LearningFeedbackPayload) {
+        // Emit per-field correction metrics first — these matter even when the
+        // merchant name is blank (we still learn how often each field is edited).
+        emitCorrectionMetrics(payload)
+
         guard !payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let normalized = Self.normalizeMerchantName(payload.finalMerchantName)
         guard !normalized.isEmpty else { return }
 
-        let profile = findProfile(matchingNormalized: normalized) ?? MerchantProfile(
+        // Use fuzzy matching so OCR variants of the same store ("Harvey Norman"
+        // vs "HARVEY NORMAN (Suntec)") aggregate into one profile instead of
+        // fragmenting the learning loop.
+        let profile = findProfile(matching: payload.finalMerchantName) ?? MerchantProfile(
             normalizedName: normalized,
             displayName: payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
         )
@@ -196,12 +263,30 @@ struct MerchantLearningService {
         profile.dateHint = inferDateHint(from: payload.finalPurchaseDate)
         profile.productHint = inferProductHint(from: payload.finalProductName)
         profile.notes = buildNotes(from: payload)
+
+        // Item-level learning: remember product → category independent of merchant.
+        let category = payload.finalCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !category.isEmpty {
+            recordProductCategory(product: payload.finalProductName, category: category)
+            for item in payload.structured?.lineItems ?? [] where item.kind.isRecordWorthy {
+                recordProductCategory(product: item.name, category: category)
+            }
+        }
     }
+
+    /// Similarity threshold for treating two merchant strings as the same store.
+    /// Sentence embeddings score near-duplicates very high; 0.82 avoids merging
+    /// genuinely different merchants while catching OCR/casing variants.
+    private static let fuzzyMerchantThreshold = 0.82
+
+    /// Similarity threshold for matching an unseen product to a learned one.
+    private static let fuzzyProductThreshold = 0.85
 
     private func findProfile(matching merchantName: String) -> MerchantProfile? {
         let normalized = Self.normalizeMerchantName(merchantName)
         guard !normalized.isEmpty else { return nil }
-        return findProfile(matchingNormalized: normalized)
+        if let exact = findProfile(matchingNormalized: normalized) { return exact }
+        return findProfileFuzzy(matching: merchantName)
     }
 
     private func findProfile(matchingNormalized normalized: String) -> MerchantProfile? {
@@ -211,6 +296,89 @@ struct MerchantLearningService {
             if profile.normalizedName == normalized { return true }
             return profile.aliases.contains { Self.normalizeMerchantName($0) == normalized }
         }
+    }
+
+    /// Embedding-based fallback: match by *meaning* when exact normalization
+    /// misses. Returns the most similar profile above the threshold, if any.
+    private func findProfileFuzzy(matching merchantName: String) -> MerchantProfile? {
+        let query = merchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 3, SemanticMatcher.shared.isAvailable else { return nil }
+
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor), !profiles.isEmpty else { return nil }
+
+        var best: (profile: MerchantProfile, score: Double)?
+        for profile in profiles {
+            let candidates = [profile.displayName] + profile.aliases
+            for candidate in candidates {
+                guard let score = SemanticMatcher.shared.similarity(query, candidate) else { continue }
+                if score >= Self.fuzzyMerchantThreshold, best == nil || score > best!.score {
+                    best = (profile, score)
+                }
+            }
+        }
+        return best?.profile
+    }
+
+    // MARK: - Item-level product → category
+
+    /// Upsert a learned `product → category` association.
+    private func recordProductCategory(product: String, category: String) {
+        let normalized = Self.normalizeProductName(product)
+        guard normalized.count >= 3 else { return }
+
+        let descriptor = FetchDescriptor<ProductCategoryMemory>()
+        let existing = (try? modelContext.fetch(descriptor)) ?? []
+
+        if let memory = existing.first(where: { $0.normalizedProduct == normalized }) {
+            if memory.category.caseInsensitiveCompare(category) == .orderedSame {
+                memory.count += 1
+            } else {
+                // Category changed — latest correction wins, evidence resets.
+                memory.category = category
+                memory.count = 1
+            }
+            memory.displayProduct = product.trimmingCharacters(in: .whitespacesAndNewlines)
+            memory.lastUsedAt = .now
+        } else {
+            modelContext.insert(ProductCategoryMemory(
+                normalizedProduct: normalized,
+                displayProduct: product.trimmingCharacters(in: .whitespacesAndNewlines),
+                category: category
+            ))
+        }
+    }
+
+    /// Suggest a category for a product from item-level memory. Tries an exact
+    /// normalized-token match first, then an embedding fuzzy match.
+    func productCategorySuggestion(for product: String) -> String? {
+        let normalized = Self.normalizeProductName(product)
+        guard normalized.count >= 3 else { return nil }
+
+        let descriptor = FetchDescriptor<ProductCategoryMemory>()
+        guard let memories = try? modelContext.fetch(descriptor), !memories.isEmpty else { return nil }
+
+        if let exact = memories.first(where: { $0.normalizedProduct == normalized }) {
+            return exact.category
+        }
+
+        guard SemanticMatcher.shared.isAvailable else { return nil }
+        let query = product.trimmingCharacters(in: .whitespacesAndNewlines)
+        var best: (category: String, score: Double)?
+        for memory in memories {
+            guard let score = SemanticMatcher.shared.similarity(query, memory.displayProduct) else { continue }
+            if score >= Self.fuzzyProductThreshold, best == nil || score > best!.score {
+                best = (memory.category, score)
+            }
+        }
+        return best?.category
+    }
+
+    /// All learned merchant display names — used to seed OCR `customWords`.
+    func learnedMerchantNames() -> [String] {
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor) else { return [] }
+        return profiles.map(\.displayName).filter { $0.count >= 2 }
     }
 
     private func inferAmountHint(from payload: LearningFeedbackPayload) -> String? {
@@ -273,5 +441,50 @@ struct MerchantLearningService {
             .joined(separator: " ")
 
         return filtered.isEmpty ? collapsed : filtered
+    }
+
+    /// Normalize a product name for item-level memory keys: lowercased,
+    /// alphanumerics only, collapsed whitespace. Keeps model numbers intact.
+    static func normalizeProductName(_ name: String) -> String {
+        let lowered = name.lowercased()
+        let allowed = lowered.map { char -> Character in
+            (char.isLetter || char.isNumber || char.isWhitespace) ? char : " "
+        }
+        return String(allowed)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    // MARK: - Correction metrics
+
+    /// Compare what extraction suggested against what the user saved, and emit
+    /// per-field correction outcomes (privacy-safe: field names + outcomes only).
+    private func emitCorrectionMetrics(_ payload: LearningFeedbackPayload) {
+        let sr = payload.structured
+        var outcomes: [String: ExtractionMetrics.FieldOutcome] = [:]
+
+        func outcome(extracted: String?, final: String) -> ExtractionMetrics.FieldOutcome {
+            let e = extracted?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let f = final.trimmingCharacters(in: .whitespacesAndNewlines)
+            if e.isEmpty { return f.isEmpty ? .empty : .filledBlank }
+            return e.caseInsensitiveCompare(f) == .orderedSame ? .kept : .corrected
+        }
+
+        outcomes["product"] = outcome(extracted: sr?.productName.value, final: payload.finalProductName)
+        outcomes["merchant"] = outcome(extracted: sr?.merchantName.value, final: payload.finalMerchantName)
+        outcomes["currency"] = outcome(extracted: sr?.currency.value, final: payload.finalCurrency)
+        outcomes["category"] = outcome(extracted: sr?.category.value, final: payload.finalCategory)
+
+        // Amount: numeric comparison with a cent of tolerance.
+        outcomes["amount"] = {
+            guard let final = payload.finalAmount else {
+                return sr?.amount.value == nil ? .empty : .corrected
+            }
+            guard let extracted = sr?.amount.value else { return .filledBlank }
+            return abs(extracted - final) < 0.01 ? .kept : .corrected
+        }()
+
+        ExtractionMetrics.recordCorrectionOutcomes(outcomes, source: sr?.source)
     }
 }

@@ -416,10 +416,18 @@ struct DraftRecordView: View {
     private func applyLearningContextIfHelpful() {
         guard let learningContext else { return }
 
-        if category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let suggestedCategory = learningContext.categorySuggestion,
-           !suggestedCategory.isEmpty {
-            category = suggestedCategory
+        if category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Prefer the merchant's learned category; fall back to item-level
+            // product → category memory ("AirPods" → Electronics) for products
+            // bought somewhere new.
+            if let suggestedCategory = learningContext.categorySuggestion, !suggestedCategory.isEmpty {
+                category = suggestedCategory
+            } else if !productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let service = MerchantLearningService(modelContext: modelContext)
+                if let learned = service.productCategorySuggestion(for: productName) {
+                    category = learned
+                }
+            }
         }
 
         if currency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || currency == "SGD",
@@ -429,7 +437,11 @@ struct DraftRecordView: View {
             currency = suggestedCurrency
         }
 
+        // Warranty auto-apply changes the saved expiry date, so only do it when
+        // the profile is trustworthy enough (avoids one stray correction flipping
+        // warranty on for every future scan from that merchant).
         if !includeWarranty,
+           learningContext.confidence >= 0.3,
            let months = learningContext.warrantySuggestionMonths,
            months > 0,
            let expiryDate = Calendar.current.date(byAdding: .month, value: months, to: purchaseDate) {

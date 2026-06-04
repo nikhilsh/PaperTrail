@@ -31,6 +31,71 @@ struct ExtractionPipeline: Sendable {
         self.heuristicService = heuristicService
     }
 
+    /// Extract structured fields from an OCR *document* (text + optional structure).
+    ///
+    /// Runs the text-based extractors, then overlays structural signals from
+    /// iOS 26's document recognizer: a structurally-read grand total beats the
+    /// `pickLargerAmount` guess, and table-derived line items fill in when the
+    /// extractors found none.
+    func extract(from document: OCRDocument, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
+        var result = await extract(from: document.text, learningContext: learningContext)
+
+        ExtractionMetrics.recordPipelineOutcome(
+            source: result.source,
+            usedStructuredOCR: document.structure != nil,
+            foundationModelAvailable: result.diagnostics?.foundationModelAvailable ?? false,
+            fmFieldCount: result.diagnostics?.foundationModelFieldCount ?? 0,
+            heuristicFieldCount: result.diagnostics?.heuristicFieldCount ?? 0,
+            hadStructuralTotal: document.structure?.hasStructuralTotal ?? false,
+            lineItemCount: result.lineItems.count
+        )
+
+        if let structure = document.structure {
+            result = applyStructure(structure, to: result)
+        }
+
+        // Last-resort, on-device category suggestion for products neither the
+        // model nor the learning loop categorized.
+        result = applyCategoryFallback(to: result)
+        return result
+    }
+
+    /// When no category was extracted, suggest one from the product name via
+    /// on-device embeddings. Low confidence — surfaced as a hint, not a fact.
+    private func applyCategoryFallback(
+        to result: StructuredExtractionResult
+    ) -> StructuredExtractionResult {
+        guard result.category.value == nil else { return result }
+        let basis = result.productName.value
+            ?? result.lineItems.first(where: { $0.kind.isRecordWorthy })?.name
+        guard let basis, let category = CategoryClassifier.classify(basis) else { return result }
+        var out = result
+        out.category = ExtractedField(value: category, confidence: .low)
+        return out
+    }
+
+    /// Overlay structural OCR signals onto a text-derived result.
+    private func applyStructure(
+        _ structure: DocumentStructure,
+        to result: StructuredExtractionResult
+    ) -> StructuredExtractionResult {
+        var out = result
+
+        // A structurally-read total is authoritative — retire the guesswork.
+        if let total = structure.detectedTotal {
+            let previous = out.amount.value
+            out.amount = ExtractedField(value: total, confidence: .high)
+            ExtractionMetrics.recordStructuralTotalOverride(previous: previous, structural: total)
+        }
+
+        // Use table-derived line items when the text extractors produced none.
+        if out.lineItems.isEmpty && !structure.tableLineItems.isEmpty {
+            out.lineItems = structure.tableLineItems
+        }
+
+        return out
+    }
+
     /// Extract structured fields from OCR text.
     ///
     /// Returns a merged result: Foundation Model values take priority, heuristic values fill gaps.
