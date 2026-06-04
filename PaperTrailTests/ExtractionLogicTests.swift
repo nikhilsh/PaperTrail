@@ -104,6 +104,15 @@ struct ExtractionLogicTests {
         #expect(MerchantLearningService.normalizeProductName("  Dyson   V15  ") == "dyson v15")
     }
 
+    @MainActor
+    @Test func normalizesUENForExactKeying() {
+        // Dashes/spaces dropped, uppercased → punctuation variants collapse to one key.
+        #expect(MerchantLearningService.normalizeUEN("M2-0116439-7") == "M201164397")
+        #expect(MerchantLearningService.normalizeUEN("m2 0116439 7") == "M201164397")
+        // Too short to be a reliable identity → nil.
+        #expect(MerchantLearningService.normalizeUEN("ab-1") == nil)
+    }
+
     // MARK: - Hint strength: correction count × recency decay (MerchantProfile)
 
     @Test func hintStrengthRewardsCorrectionsAndPenalizesStaleness() {
