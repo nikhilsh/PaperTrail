@@ -152,6 +152,8 @@ struct DraftRecordView: View {
 
                 fieldsCard
 
+                additionalItemCards
+
                 organizationCard
 
                 if let seededOCR, !seededOCR.recognizedText.isEmpty {
@@ -275,6 +277,34 @@ struct DraftRecordView: View {
         .paperCard(goldFold: true)
     }
 
+    /// One editable card per *additional* selected item (the primary is edited in
+    /// `fieldsCard`). Each becomes its own record, sharing the merchant/date/room/
+    /// currency/warranty above; per-item category is editable later in Edit.
+    @ViewBuilder
+    private var additionalItemCards: some View {
+        ForEach(Array(recordWorthySelectedItems.dropFirst())) { item in
+            VStack(spacing: 0) {
+                HStack {
+                    SectionLabel(text: "Additional item", tone: PT.gold)
+                    Spacer()
+                    Button { toggleItem(item) } label: {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 15))
+                            .foregroundStyle(PT.txt3)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 12)
+                PTReviewField(title: "Product", text: itemNameBinding(item), confidence: nil)
+                paperDivider
+                PTReviewField(title: "Price", text: itemPriceBinding(item), keyboard: .decimalPad, mono: true, confidence: nil)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperCard(goldFold: false)
+        }
+    }
+
     private var warrantyRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -335,6 +365,12 @@ struct DraftRecordView: View {
         lineItems.filter { selectedItemIds.contains($0.id) }
     }
 
+    /// Selected items that become records. The first (primary) is edited in the
+    /// main form card; the rest each get their own card below.
+    private var recordWorthySelectedItems: [LineItem] {
+        selectedItems.filter { $0.kind.isRecordWorthy }
+    }
+
     private func defaultPriceText(_ item: LineItem) -> String {
         item.amount.map { String(format: "%.2f", $0) } ?? ""
     }
@@ -367,7 +403,7 @@ struct DraftRecordView: View {
             VStack(spacing: 0) {
                 ForEach(lineItems) { item in
                     let isSelected = selectedItemIds.contains(item.id)
-                    let isPrimary = selectedItems.first?.id == item.id
+                    let isPrimary = recordWorthySelectedItems.first?.id == item.id
                     Button { toggleItem(item) } label: {
                         HStack(spacing: 10) {
                             Image(systemName: isSelected ? "checkmark.square.fill" : "square")
@@ -382,7 +418,7 @@ struct DraftRecordView: View {
                                     Text(item.kind.label)
                                         .font(PTFont.mono(9))
                                         .foregroundStyle(PT.txt3)
-                                    if isPrimary && selectedItemIds.count > 1 {
+                                    if isPrimary && recordWorthySelectedItems.count > 1 {
                                         Text("EDITING")
                                             .font(PTFont.mono(8))
                                             .foregroundStyle(PT.gold)
@@ -403,27 +439,6 @@ struct DraftRecordView: View {
                     .disabled(item.kind == .fee)
                     .opacity(item.kind == .fee ? 0.5 : 1)
 
-                    // Non-primary selected items are edited inline (name + price);
-                    // the primary is edited in the form above.
-                    if isSelected && !isPrimary {
-                        HStack(spacing: 8) {
-                            TextField("Item name", text: itemNameBinding(item))
-                                .font(PTFont.serif(14, weight: 500))
-                                .foregroundStyle(PT.txt)
-                                .tint(PT.goldDeep)
-                            TextField("Price", text: itemPriceBinding(item))
-                                .font(PTFont.mono(12, medium: true))
-                                .foregroundStyle(PT.txt2)
-                                .tint(PT.goldDeep)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 84)
-                        }
-                        .padding(.leading, 26)
-                        .padding(.trailing, 2)
-                        .padding(.bottom, 11)
-                    }
-
                     if item.id != lineItems.last?.id {
                         Rectangle().fill(PT.hair).frame(height: 1)
                     }
@@ -433,8 +448,8 @@ struct DraftRecordView: View {
             .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
 
-            if selectedItemIds.count > 1 {
-                Text("Saving \(selectedItemIds.count) items as separate records — each its own warranty & category. The “Editing” item uses the fields above; edit the others’ name & price inline here.")
+            if recordWorthySelectedItems.count > 1 {
+                Text("Saving \(recordWorthySelectedItems.count) items as separate records — the “Editing” item uses the card below; each other selected item gets its own card to edit.")
                     .font(PTFont.mono(9))
                     .foregroundStyle(PT.txt3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -555,12 +570,10 @@ struct DraftRecordView: View {
         } else {
             selectedItemIds.insert(item.id)
         }
-        // Keep the editable form bound to the primary (first selected in display order).
-        if let primary = selectedItems.first {
+        // Keep the main form bound to the primary (first record-worthy selected).
+        if let primary = recordWorthySelectedItems.first {
             productName = primary.name
-            if let amount = primary.amount {
-                amountText = String(format: "%.2f", amount)
-            }
+            amountText = primary.amount.map { String(format: "%.2f", $0) } ?? ""
         }
         // Auto-toggle warranty if any selected line item is a warranty.
         if selectedItems.contains(where: { $0.kind == .warranty }) && !includeWarranty {
