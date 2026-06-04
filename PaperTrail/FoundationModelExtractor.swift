@@ -240,7 +240,7 @@ struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The merchant or store name.")
     var merchantName: String?
 
-    @Guide(description: "The purchase date in ISO 8601 format (YYYY-MM-DD).")
+    @Guide(description: "The purchase date from a LABELED field (Order/Invoice/Transaction/Purchase Date), in ISO 8601 YYYY-MM-DD with a 4-digit year. Day-first source dates; a 2-digit year YY means 20YY. Not the page-corner print timestamp. Null if unclear.")
     var purchaseDate: String?
 
     @Guide(description: "The total amount paid as a decimal number, e.g. 129.99. Do not include currency symbols.")
@@ -475,8 +475,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Be precise: prefer exact values from the text over guesses. \
             If a field is not clearly present, leave it null. \
             Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
-            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            For the purchase date, use the date from a clearly LABELED field such as "Order Date", "Invoice Date", "Tax Invoice Date", "Transaction Date", "Date of Purchase", or "Date". \
+            Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
+            Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
+            Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
+            A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
+            For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
+            If you cannot determine the purchase date confidently, leave it null rather than guessing.\
             \(adaptiveHints)
             """
 
@@ -590,28 +595,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     #if canImport(FoundationModels)
     private func mapSchemaToResult(_ schema: ReceiptExtractionSchema) -> StructuredExtractionResult {
-        let parsedDate: Date? = {
-            guard let dateStr = schema.purchaseDate else { return nil }
-
-            let raw: Date? = {
-                // Try ISO 8601 first
-                let isoFormatter = ISO8601DateFormatter()
-                isoFormatter.formatOptions = [.withFullDate]
-                if let d = isoFormatter.date(from: dateStr) { return d }
-
-                // Fallback: try common formats the model might produce
-                let fallbackFormats = ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy"]
-                for fmt in fallbackFormats {
-                    let f = DateFormatter()
-                    f.dateFormat = fmt
-                    f.locale = Locale(identifier: "en_SG")
-                    if let d = f.date(from: dateStr) { return d }
-                }
-                return nil
-            }()
-
-            return Self.normalizePurchaseDate(raw)
-        }()
+        let parsedDate: Date? = Self.parsePurchaseDateString(schema.purchaseDate)
 
         let documentKind: ExtractedField<DocumentKind> = {
             guard let kindStr = schema.documentKind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
@@ -689,6 +673,93 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return ExtractedField(value: value.trimmingCharacters(in: .whitespacesAndNewlines), confidence: .high)
     }
     #endif
+
+    /// Parse a model-produced purchase-date string into a sane `Date`, or nil.
+    ///
+    /// Tries ISO 8601 first (what we ask for), then explicit **day-first** and
+    /// **textual-month** formats so e.g. "23-Nov-25" parses as 2025-11-23 instead
+    /// of having its day and year swapped. `isLenient = false` prevents a bare
+    /// 2-digit "23" from becoming year 0023. Always passed through
+    /// `normalizePurchaseDate` for the final plausibility gate. `internal` so it
+    /// is unit-testable.
+    static func parsePurchaseDateString(
+        _ dateStr: String?,
+        convention: LocaleDateConvention = .current
+    ) -> Date? {
+        guard let dateStr else { return nil }
+        let trimmed = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let raw: Date? = {
+            // Textual-month dates ("23-Nov-25", "November 23, 2025") first — they
+            // assign day/year by token role so the two can't swap. This must run
+            // BEFORE ISO8601, which leniently misreads "23-Nov-25" as year 0023.
+            if let d = parseTextualDate(trimmed) { return d }
+
+            // Strict ISO 8601 (the format we ask the model for), but only when the
+            // string actually starts with a 4-digit year — ISO8601DateFormatter
+            // otherwise leniently misreads "23-..." as year 0023.
+            if trimmed.prefix(4).allSatisfy(\.isNumber),
+               trimmed.count >= 5, trimmed[trimmed.index(trimmed.startIndex, offsetBy: 4)] == "-" {
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withFullDate]
+                if let d = isoFormatter.date(from: trimmed) { return d }
+            }
+
+            // Purely numeric dates: unambiguous ISO-ish first, then ambiguous
+            // formats ordered by the region's convention so "03/05/2025" resolves
+            // the right way. `isLenient = false` avoids stray 2-digit "23" → 0023.
+            var formats = ["yyyy-MM-dd", "yyyy/MM/dd"]
+            if convention.prefersMonthBeforeDay {
+                formats += ["MM/dd/yyyy", "MM-dd-yyyy", "MM.dd.yyyy", "MM/dd/yy",
+                            "dd/MM/yyyy", "dd/MM/yy"]
+            } else {
+                formats += ["dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "dd/MM/yy",
+                            "MM/dd/yyyy", "MM/dd/yy"]
+            }
+
+            for fmt in formats {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.isLenient = false
+                f.dateFormat = fmt
+                if let d = f.date(from: trimmed) { return d }
+            }
+            return nil
+        }()
+
+        return normalizePurchaseDate(raw)
+    }
+
+    private static let monthNameIndex: [String: Int] = [
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    ]
+
+    /// Parse a textual-month date by token roles, so day and year can never be
+    /// swapped regardless of order: "23-Nov-25", "23 Nov 2025", "November 23,
+    /// 2025", "Nov 23 2025" all work. Rule: split into 3 tokens (one alphabetic
+    /// month + two numbers); the LAST numeric token is the year, the other is the
+    /// day. Nil if it isn't a 3-part textual-month date.
+    static func parseTextualDate(_ s: String) -> Date? {
+        let separators: Set<Character> = [" ", "-", ".", "/", ","]
+        let tokens = s.split(whereSeparator: { separators.contains($0) }).map(String.init)
+        guard tokens.count == 3 else { return nil }
+
+        let monthIdxs = tokens.indices.filter { tokens[$0].contains(where: \.isLetter) }
+        let numberIdxs = tokens.indices.filter { !tokens[$0].isEmpty && tokens[$0].allSatisfy(\.isNumber) }
+        guard monthIdxs.count == 1, numberIdxs.count == 2 else { return nil }
+
+        guard let month = monthNameIndex[String(tokens[monthIdxs[0]].lowercased().prefix(3))],
+              let dayIdx = numberIdxs.min(), let yearIdx = numberIdxs.max(),
+              let day = Int(tokens[dayIdx]), let rawYear = Int(tokens[yearIdx]) else { return nil }
+
+        var comps = DateComponents()
+        comps.day = day
+        comps.month = month
+        comps.year = rawYear < 100 ? 2000 + rawYear : rawYear
+        return Calendar(identifier: .gregorian).date(from: comps)
+    }
 
     /// Repair and sanity-check a parsed purchase date.
     ///

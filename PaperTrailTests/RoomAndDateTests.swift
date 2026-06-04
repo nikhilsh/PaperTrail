@@ -62,4 +62,68 @@ struct RoomAndDateTests {
         // Blank entries dropped.
         #expect(!result.contains(where: { $0.trimmingCharacters(in: .whitespaces).isEmpty }))
     }
+
+    // MARK: - Purchase date string parsing
+
+    private func ymd(_ date: Date) -> (Int, Int, Int) {
+        let c = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+        return (c.year!, c.month!, c.day!)
+    }
+
+    @Test func parsesIsoDate() throws {
+        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("2025-11-23"))
+        #expect(ymd(d) == (2025, 11, 23))
+    }
+
+    @Test func parsesTextualDateWithoutSwappingDayAndYear() throws {
+        // The real-world bug: "23-Nov-25" prefilled as "25 Nov 23". It must be
+        // day 23 / Nov / 2025 — day and year not swapped, year not 0023.
+        let got = ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("23-Nov-25")))
+        #expect(got == (2025, 11, 23))
+        // Spaced and full-month variants.
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("23 November 2025"))) == (2025, 11, 23))
+        // Month-first textual (US style).
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("November 23, 2025"))) == (2025, 11, 23))
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("Nov 23 2025"))) == (2025, 11, 23))
+    }
+
+    @Test func parsesDayFirstNumericDate() throws {
+        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("15/01/2026"))
+        #expect(ymd(d) == (2026, 1, 15))
+    }
+
+    @Test func rejectsUnparseableOrNilDate() {
+        #expect(FoundationModelExtractionService.parsePurchaseDateString(nil) == nil)
+        #expect(FoundationModelExtractionService.parsePurchaseDateString("not a date") == nil)
+        #expect(FoundationModelExtractionService.parsePurchaseDateString("") == nil)
+    }
+
+    // MARK: - Locale-aware date convention
+
+    @Test func deviceConventionDerivedFromLocale() {
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_US")).order == .monthFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_GB")).order == .dayFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "en_SG")).order == .dayFirst)
+        #expect(LocaleDateConvention(locale: Locale(identifier: "ja_JP")).order == .yearFirst)
+    }
+
+    @Test func ambiguousDateResolvedByConvention() throws {
+        // 03/05/2025 is genuinely ambiguous and must follow the region.
+        let monthFirst = try #require(
+            FoundationModelExtractionService.parsePurchaseDateString("03/05/2025", convention: LocaleDateConvention(order: .monthFirst)))
+        #expect(ymd(monthFirst) == (2025, 3, 5))   // US: 5 March
+
+        let dayFirst = try #require(
+            FoundationModelExtractionService.parsePurchaseDateString("03/05/2025", convention: LocaleDateConvention(order: .dayFirst)))
+        #expect(ymd(dayFirst) == (2025, 5, 3))      // SG/UK: 3 May
+    }
+
+    @Test func unambiguousDateIgnoresConvention() throws {
+        // 25/12/2025 can only be day-first (no 25th month) — both conventions agree.
+        for order in [LocaleDateConvention.Order.monthFirst, .dayFirst] {
+            let d = try #require(
+                FoundationModelExtractionService.parsePurchaseDateString("25/12/2025", convention: LocaleDateConvention(order: order)))
+            #expect(ymd(d) == (2025, 12, 25))
+        }
+    }
 }
