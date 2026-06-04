@@ -12,6 +12,9 @@ final class PurchaseRecord {
     var amount: Double?
     var currency: String?
     var category: String?
+    /// The room/location the item lives in (e.g. "Living Room"). Distinct from
+    /// `category` (what the item is). Free-form so custom rooms persist; see RoomOptions.
+    var room: String?
     var tagsRaw: String = ""
 
     // Support info (embedded, not a separate model)
@@ -40,6 +43,7 @@ final class PurchaseRecord {
         amount: Double? = nil,
         currency: String? = nil,
         category: String? = nil,
+        room: String? = nil,
         tags: [String] = [],
         supportProviderName: String? = nil,
         supportPhoneNumber: String? = nil,
@@ -58,6 +62,7 @@ final class PurchaseRecord {
         self.amount = amount
         self.currency = currency
         self.category = category
+        self.room = room
         self.tagsRaw = tags.joined(separator: ",")
         self.supportProviderName = supportProviderName
         self.supportPhoneNumber = supportPhoneNumber

@@ -24,7 +24,11 @@ struct DraftRecordView: View {
     @State private var amountText: String
     @State private var currency: String
     @State private var category: String = ""
+    @State private var room: String = ""
     @State private var tagsText: String = ""
+
+    /// Existing records, used only to surface previously-used rooms in the picker.
+    @Query private var allRecords: [PurchaseRecord]
     @State private var showExtractionLogSheet = false
     @State private var showRawText = false
 
@@ -85,6 +89,7 @@ struct DraftRecordView: View {
         _amountText = State(initialValue: initialAmount)
         _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
         _category = State(initialValue: seededOCR?.suggestedCategory ?? "")
+        _room = State(initialValue: "")
 
         // If Foundation Models extracted a warranty duration, pre-fill the warranty toggle and date.
         // Also auto-enable warranty if any line item is classified as a warranty.
@@ -292,6 +297,8 @@ struct DraftRecordView: View {
         VStack(spacing: 0) {
             PTReviewField(title: "Category", text: $category, confidence: confidence(for: \.category))
             paperDivider
+            roomField
+            paperDivider
             PTReviewField(title: "Tags (comma separated)", text: $tagsText, confidence: nil)
             paperDivider
             PTReviewField(title: "Notes", text: $notes, confidence: nil)
@@ -299,6 +306,20 @@ struct DraftRecordView: View {
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .paperCard(goldFold: false)
+    }
+
+    /// Room selector styled to match the cream filing-card fields.
+    private var roomField: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Room")
+                .ptMonoLabel(9, tracking: 1.4)
+                .foregroundStyle(PT.onPaper3)
+            RoomPicker(room: $room, suggestions: RoomOptions.suggestions(existing: allRecords.compactMap(\.room)))
+                .font(PTFont.serif(17, weight: 500))
+                .tint(PT.goldDeep)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
     }
 
     // MARK: Line item picker
@@ -615,6 +636,7 @@ struct DraftRecordView: View {
             amount: parsedAmount,
             currency: currency,
             category: category.isEmpty ? nil : category,
+            room: room.isEmpty ? nil : room,
             tags: parsedTags
         )
 

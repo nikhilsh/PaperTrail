@@ -593,20 +593,24 @@ struct FoundationModelExtractionService: FieldExtractionService {
         let parsedDate: Date? = {
             guard let dateStr = schema.purchaseDate else { return nil }
 
-            // Try ISO 8601 first
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withFullDate]
-            if let d = isoFormatter.date(from: dateStr) { return d }
+            let raw: Date? = {
+                // Try ISO 8601 first
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withFullDate]
+                if let d = isoFormatter.date(from: dateStr) { return d }
 
-            // Fallback: try common formats the model might produce
-            let fallbackFormats = ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy"]
-            for fmt in fallbackFormats {
-                let f = DateFormatter()
-                f.dateFormat = fmt
-                f.locale = Locale(identifier: "en_SG")
-                if let d = f.date(from: dateStr) { return d }
-            }
-            return nil
+                // Fallback: try common formats the model might produce
+                let fallbackFormats = ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy"]
+                for fmt in fallbackFormats {
+                    let f = DateFormatter()
+                    f.dateFormat = fmt
+                    f.locale = Locale(identifier: "en_SG")
+                    if let d = f.date(from: dateStr) { return d }
+                }
+                return nil
+            }()
+
+            return Self.normalizePurchaseDate(raw)
         }()
 
         let documentKind: ExtractedField<DocumentKind> = {
@@ -685,6 +689,28 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return ExtractedField(value: value.trimmingCharacters(in: .whitespacesAndNewlines), confidence: .high)
     }
     #endif
+
+    /// Repair and sanity-check a parsed purchase date.
+    ///
+    /// `DateFormatter`'s `yyyy` token leniently parses a 2-digit year like "23"
+    /// as year **0023**, which then prefilled the form with an absurd date. Here
+    /// we lift 2-digit years into the 2000s and reject anything implausible
+    /// (before 2015, or in the future) — "prefer blank over bad". `internal` so
+    /// it is unit-testable.
+    static func normalizePurchaseDate(_ date: Date?) -> Date? {
+        guard let date else { return nil }
+        let calendar = Calendar(identifier: .gregorian)
+        var comps = calendar.dateComponents([.year, .month, .day], from: date)
+        if let year = comps.year, year < 100 {
+            comps.year = 2000 + year
+        }
+        guard let fixed = calendar.date(from: comps) else { return nil }
+        let year = calendar.component(.year, from: fixed)
+        if year < 2015 || fixed > Date.now.addingTimeInterval(86_400) {
+            return nil
+        }
+        return fixed
+    }
 
     /// Returns the hardware model identifier (e.g. "iPhone17,1") instead of the generic "iPhone" from UIDevice.
     private static func deviceModelIdentifier() -> String {
