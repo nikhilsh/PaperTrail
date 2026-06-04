@@ -57,7 +57,43 @@ struct ExtractionPipeline: Sendable {
         // Last-resort, on-device category suggestion for products neither the
         // model nor the learning loop categorized.
         result = applyCategoryFallback(to: result)
+
+        // Drop hallucinated prices: the model sometimes invents plausible-looking
+        // per-item amounts that aren't on the receipt. Keep an amount only if its
+        // digits actually appear in the OCR text — prefer blank over a made-up number.
+        result = groundAmounts(result, text: document.text)
         return result
+    }
+
+    /// Null out any extracted amount whose digits don't appear in the OCR text.
+    private func groundAmounts(
+        _ result: StructuredExtractionResult,
+        text: String
+    ) -> StructuredExtractionResult {
+        guard !text.isEmpty else { return result }
+        var out = result
+
+        if let amount = out.amount.value, !Self.amountAppears(amount, in: text) {
+            out.amount = .absent
+        }
+
+        out.lineItems = out.lineItems.map { item in
+            let amount = item.amount.flatMap { Self.amountAppears($0, in: text) ? $0 : nil }
+            let unitPrice = item.unitPrice.flatMap { Self.amountAppears($0, in: text) ? $0 : nil }
+            guard amount != item.amount || unitPrice != item.unitPrice else { return item }
+            return LineItem(name: item.name, amount: amount, quantity: item.quantity,
+                            kind: item.kind, category: item.category, sku: item.sku, unitPrice: unitPrice)
+        }
+        return out
+    }
+
+    /// Whether an amount's digits appear in the OCR text (commas ignored), e.g.
+    /// 919.0 matches "919.00" or "919"; a hallucinated 2599.9 matches neither.
+    static func amountAppears(_ amount: Double, in text: String) -> Bool {
+        let normalized = text.replacingOccurrences(of: ",", with: "")
+        let intPart = String(abs(Int(amount)))
+        let twoDecimals = String(format: "%.2f", abs(amount))
+        return normalized.contains(twoDecimals) || normalized.contains(intPart)
     }
 
     /// When no category was extracted, suggest one from the product name via
