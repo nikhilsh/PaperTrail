@@ -4,6 +4,7 @@ import PhotosUI
 
 struct CaptureView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var showScanner = false
     @State private var showPhotoPicker = false
     @State private var scanType: AttachmentType = .receipt
@@ -140,7 +141,8 @@ struct CaptureView: View {
 
     private func processScan(images: [UIImage], type: AttachmentType) async {
         isProcessing = true
-        let result = await scanningService.process(images: images, type: type)
+        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+        let result = await scanningService.process(images: images, type: type, learnedMerchants: learned)
         isProcessing = false
         draftPayload = DraftPayload(type: type, attachments: result.attachments, ocr: result.ocr)
     }
@@ -152,7 +154,8 @@ struct CaptureView: View {
         guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else { return }
 
-        let result = await scanningService.process(images: [image], type: scanType)
+        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+        let result = await scanningService.process(images: [image], type: scanType, learnedMerchants: learned)
         draftPayload = DraftPayload(type: scanType, attachments: result.attachments, ocr: result.ocr)
     }
 }

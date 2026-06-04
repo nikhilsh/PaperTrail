@@ -390,7 +390,8 @@ struct RecordDetailView: View {
     private func addProof(images: [UIImage]) async {
         isAddingProof = true
         defer { isAddingProof = false }
-        let result = await scanningService.process(images: images, type: .other)
+        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+        let result = await scanningService.process(images: images, type: .other, learnedMerchants: learned)
         for attachment in result.attachments {
             attachment.recordID = record.id
             modelContext.insert(attachment)
