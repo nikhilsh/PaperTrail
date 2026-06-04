@@ -126,6 +126,21 @@ struct ExtractionLogicTests {
         #expect(!ExtractionPipeline.amountAppears(249.90, in: text))
     }
 
+    // MARK: - Heuristic line-item metadata rejection
+
+    @Test func rejectsOrderMetadataAsLineItems() {
+        let h = HeuristicFieldExtractor()
+        // Real garbage seen on a Gain City order confirmation.
+        #expect(h.isMetadataLineItem("Order Date"))
+        #expect(h.isMetadataLineItem("Delivery Time"))
+        #expect(h.isMetadataLineItem("Manual Order No."))
+        #expect(h.isMetadataLineItem("SO-B0000142558"))      // order code
+        #expect(h.isMetadataLineItem("KENNETH TAN/9295"))    // salesperson/code
+        // Real products are NOT rejected.
+        #expect(!h.isMetadataLineItem("LG 2 DOOR FRIDGE GT-F4502PF"))
+        #expect(!h.isMetadataLineItem("BRANDT INDUCTION HOB"))
+    }
+
     // MARK: - Hint strength: correction count × recency decay (MerchantProfile)
 
     @Test func hintStrengthRewardsCorrectionsAndPenalizesStaleness() {

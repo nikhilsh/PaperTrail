@@ -29,7 +29,9 @@ enum ExtractionMetrics {
         fmFieldCount: Int,
         heuristicFieldCount: Int,
         hadStructuralTotal: Bool,
-        lineItemCount: Int
+        lineItemCount: Int,
+        structuredTableCount: Int = 0,
+        structuredTableLineItemCount: Int = 0
     ) {
         let crumb = Breadcrumb()
         crumb.category = "extraction.metrics"
@@ -43,6 +45,9 @@ enum ExtractionMetrics {
             "heuristic_field_count": heuristicFieldCount,
             "had_structural_total": hadStructuralTotal,
             "line_item_count": lineItemCount,
+            // Diagnostics: did RecognizeDocumentsRequest actually find tables?
+            "structured_table_count": structuredTableCount,
+            "structured_table_items": structuredTableLineItemCount,
         ]
         SentrySDK.addBreadcrumb(crumb)
         logger.info("metrics.pipeline source=\(source.rawValue, privacy: .public) structuredOCR=\(usedStructuredOCR, privacy: .public) structuralTotal=\(hadStructuralTotal, privacy: .public)")

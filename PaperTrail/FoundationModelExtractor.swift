@@ -408,6 +408,16 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return desc.contains("locale") || desc.contains("language") || desc.contains("unsupported")
     }
 
+    /// The on-device model has a small context window; long receipts overflow it.
+    /// These are retryable by feeding *less* text (the later, shorter attempts).
+    private func isContextWindowError(_ error: Error) -> Bool {
+        let desc = error.localizedDescription.lowercased()
+        return desc.contains("context window") || desc.contains("context length")
+            || desc.contains("context size") || desc.contains("too large")
+            || (desc.contains("context") && desc.contains("exceed"))
+            || (desc.contains("token") && desc.contains("exceed"))
+    }
+
     func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
         let availability = SystemLanguageModel.default.availability
@@ -518,14 +528,16 @@ struct FoundationModelExtractionService: FieldExtractionService {
         // Attempt 1: cleaned OCR text (standard filter)
         // Attempt 2: aggressively cleaned text (on locale error)
         // Attempt 3: first 500 chars of aggressively cleaned text (on locale error)
-        let cleanedText = cleanOCRTextForModel(ocrText)
-        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true)
-        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 500)
+        // Progressively smaller inputs: large receipts overflow the on-device
+        // model's context window, so each retry feeds less text.
+        let cleanedText = cleanOCRTextForModel(ocrText, maxLength: 2200)
+        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 1200)
+        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 600)
 
         let attempts: [(label: String, input: String)] = [
-            ("attempt 1: cleaned OCR", cleanedText),
-            ("attempt 2: aggressive filter", aggressiveText),
-            ("attempt 3: minimal (500 chars)", minimalText),
+            ("attempt 1: cleaned OCR (2200)", cleanedText),
+            ("attempt 2: aggressive (1200)", aggressiveText),
+            ("attempt 3: minimal (600)", minimalText),
         ]
 
         var lastError: Error?
@@ -572,13 +584,15 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 Self.logger.warning("FM \(attempt.label, privacy: .public) failed: \(errorDesc, privacy: .public)")
                 lastError = error
 
-                // Only retry on locale/language errors — other errors should fail immediately
-                guard isLocaleError(error) else {
-                    Self.logger.error("FM non-locale error, not retrying: \(errorDesc, privacy: .public)")
+                // Retry on locale errors (anchor language) and context-window
+                // overflows (feed less text on the next, shorter attempt). Other
+                // errors fail immediately.
+                guard isLocaleError(error) || isContextWindowError(error) else {
+                    Self.logger.error("FM non-retryable error, not retrying: \(errorDesc, privacy: .public)")
                     break
                 }
 
-                // Continue to next attempt for locale errors
+                // Continue to the next (shorter) attempt.
             }
         }
 
@@ -1871,7 +1885,44 @@ struct HeuristicFieldExtractor {
             }
         }
 
-        return items
+        // Reject "items" that are really order metadata (Order Date, Delivery
+        // Time, Salesperson, the SO-/ref code, etc.) — a common heuristic
+        // false-positive on order-confirmation layouts.
+        return items.filter { !isMetadataLineItem($0.name) }
+    }
+
+    /// True if a candidate line-item name is actually a receipt metadata label,
+    /// an order/reference code, or a salesperson line rather than a product.
+    /// `internal` so it is unit-testable.
+    func isMetadataLineItem(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        let labels = [
+            "order date", "delivery date", "delivery time", "manual order", "order no",
+            "order number", "sales order", "salesperson", "sales person", "payment term",
+            "payment method", "customer", "ref no", "reference", "invoice no", "invoice date",
+            "gst reg", "uen", "tax invoice", "subtotal", "sub total", "grand total", "total",
+            "balance", "amount due", "amount payable", "outstanding", "paid amount",
+            "rebate", "deposit", "redemption", "remarks", "signature",
+        ]
+        if labels.contains(where: { lower == $0 || lower.hasPrefix($0) }) { return true }
+
+        // Pure order/reference code, e.g. "SO-B0000142558": single token, has a
+        // dash, and is mostly digits.
+        if !trimmed.contains(" "), trimmed.contains("-"), trimmed.filter(\.isNumber).count >= 5 {
+            return true
+        }
+
+        // Person-with-code line, e.g. "KENNETH TAN/9295": "<name with space>/<digits>".
+        if trimmed.contains("/") {
+            let parts = trimmed.split(separator: "/")
+            if parts.count == 2, parts[0].contains(" "), parts[1].allSatisfy(\.isNumber) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /// Parse lines within a detected table section for line items.

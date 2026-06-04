@@ -47,7 +47,9 @@ struct ExtractionPipeline: Sendable {
             fmFieldCount: result.diagnostics?.foundationModelFieldCount ?? 0,
             heuristicFieldCount: result.diagnostics?.heuristicFieldCount ?? 0,
             hadStructuralTotal: document.structure?.hasStructuralTotal ?? false,
-            lineItemCount: result.lineItems.count
+            lineItemCount: result.lineItems.count,
+            structuredTableCount: document.structure?.tables.count ?? 0,
+            structuredTableLineItemCount: document.structure?.tableLineItems.count ?? 0
         )
 
         if let structure = document.structure {
