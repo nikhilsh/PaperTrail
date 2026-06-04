@@ -6,23 +6,47 @@ protocol OCRService: Sendable {
     func extract(from image: UIImage) async throws -> OCRExtractionResult
 }
 
-/// Performs Vision OCR to get raw text, then runs the extraction pipeline
-/// (Foundation Models → heuristic fallback) to extract structured fields.
+/// Performs Vision OCR to get text (structured when possible), then runs the
+/// extraction pipeline (Foundation Models → heuristic fallback) to extract
+/// structured fields.
+///
+/// OCR strategy (best-first, all on-device):
+/// 1. iOS 26 `RecognizeDocumentsRequest` → structured `OCRDocument` (tables,
+///    reading order, structural total). See `DocumentStructureOCRService`.
+/// 2. Fall back to `VNRecognizeTextRequest` (flat text) seeded with a custom
+///    brand/merchant vocabulary so model numbers and store names aren't
+///    "corrected" into nonsense.
 struct VisionOCRService: OCRService {
     private let pipeline = ExtractionPipeline()
+    private let structuredService = DocumentStructureOCRService()
+
+    /// Extra recognizer vocabulary. Defaults to the shared brand/merchant
+    /// lexicon; callers with DB access can inject learned merchant names.
+    private let customWords: [String]
+
+    init(customWords: [String] = OCRVocabulary.customWords()) {
+        self.customWords = customWords
+    }
 
     func extract(from image: UIImage) async throws -> OCRExtractionResult {
         guard let cgImage = image.cgImage else {
             return .empty
         }
 
-        let recognizedText = try await performRecognition(on: cgImage)
+        // 1. Prefer structured document recognition (iOS 26+); fall back to flat text.
+        let document: OCRDocument
+        if let structured = await structuredService.recognize(cgImage) {
+            document = structured
+        } else {
+            let text = try await performRecognition(on: cgImage)
+            document = .plain(text)
+        }
 
-        // Run the structured extraction pipeline on the raw OCR text.
-        let structured = await pipeline.extract(from: recognizedText)
+        // 2. Run the structured extraction pipeline on the OCR document.
+        let structured = await pipeline.extract(from: document)
 
-        // Bridge back to the OCRExtractionResult format the rest of the app expects.
-        return structured.toOCRExtractionResult(recognizedText: recognizedText)
+        // 3. Bridge back to the OCRExtractionResult format the rest of the app expects.
+        return structured.toOCRExtractionResult(recognizedText: document.text)
     }
 
     private func performRecognition(on cgImage: CGImage) async throws -> String {
@@ -38,6 +62,11 @@ struct VisionOCRService: OCRService {
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
+            // Bias recognition toward known brand/model/merchant tokens so language
+            // correction doesn't mangle them (e.g. "Dyson" → "Dylan").
+            if !customWords.isEmpty {
+                request.customWords = customWords
+            }
 
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             do {

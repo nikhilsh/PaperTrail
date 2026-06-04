@@ -90,13 +90,16 @@ struct LineItem: Sendable, Hashable, Identifiable {
     let amount: Double?
     let quantity: Int?
     let kind: LineItemKind
+    /// Per-item category (from the model's per-line-item classification), if any.
+    let category: String?
 
-    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown) {
+    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown, category: String? = nil) {
         self.id = UUID()
         self.name = name
         self.amount = amount
         self.quantity = quantity
         self.kind = kind
+        self.category = category
     }
 
     enum LineItemKind: String, Sendable, Hashable, CaseIterable {
@@ -204,6 +207,10 @@ enum ExtractionSource: String, Sendable, Hashable {
 ///
 /// Field names are kept short and JSON-friendly for the model's constrained output.
 #if canImport(FoundationModels)
+// NOTE (XCODE-VERIFY): `@Guide(.anyOf([...]))` constrains the model's output to
+// an exact value set via constrained decoding (it cannot invent "Gadgets").
+// This reflects the FoundationModels API as of WWDC25 286; if the build fails on
+// the `.anyOf` form, fall back to `@Guide(description:)` listing the values.
 @Generable
 struct LineItemSchema: Sendable {
     @Guide(description: "Item name/description as shown on the receipt.")
@@ -215,13 +222,16 @@ struct LineItemSchema: Sendable {
     @Guide(description: "Quantity purchased, default 1.")
     var quantity: Int?
 
-    @Guide(description: "Type of item: product, accessory, warranty, service, or fee.")
+    @Guide(description: "Type of item.", .anyOf(["product", "accessory", "warranty", "service", "fee"]))
     var kind: String?
+
+    @Guide(description: "Category for this specific item.", .anyOf(["Electronics", "Appliance", "Kitchen", "Furniture", "Clothing", "Sports", "Health", "Home", "Other"]))
+    var category: String?
 }
 
 @Generable
 struct ReceiptExtractionSchema: Sendable {
-    @Guide(description: "The type of document: one of receipt, invoice, warranty_card, order_confirmation, packing_slip, support_document, manual, unknown.")
+    @Guide(description: "The type of document.", .anyOf(["receipt", "invoice", "warranty_card", "order_confirmation", "packing_slip", "support_document", "manual", "unknown"]))
     var documentKind: String?
 
     @Guide(description: "The product or device name purchased. If multiple items, pick the most expensive or prominent one.")
@@ -239,7 +249,7 @@ struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The ISO 4217 currency code, e.g. SGD, USD, MYR.")
     var currency: String?
 
-    @Guide(description: "A category for the product: one of Electronics, Appliance, Kitchen, Furniture, Clothing, Sports, Health, Home, Other.")
+    @Guide(description: "A category for the overall purchase.", .anyOf(["Electronics", "Appliance", "Kitchen", "Furniture", "Clothing", "Sports", "Health", "Home", "Other"]))
     var category: String?
 
     @Guide(description: "Warranty duration in months if mentioned on the receipt or warranty card, e.g. 12 or 24. Null if not found.")
@@ -447,7 +457,16 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 hints.append(productHint)
             }
             guard !hints.isEmpty else { return "" }
-            return "\nMerchant-specific hints:\n" + hints.joined(separator: "\n")
+            // Phrase the hints by how much we trust this profile: a merchant
+            // corrected many times recently is near-authoritative; a single old
+            // correction is only a gentle nudge (see MerchantProfile.hintStrength).
+            let header: String
+            switch context.confidence {
+            case 0.6...:   header = "Strongly trust these merchant-specific hints (consistently corrected before):"
+            case 0.3..<0.6: header = "Merchant-specific hints (use unless the text clearly disagrees):"
+            default:       header = "Tentative merchant-specific hints (low confidence — defer to the text):"
+            }
+            return "\n" + header + "\n" + hints.joined(separator: "\n")
         } ?? ""
 
         let instructions = """
@@ -624,11 +643,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
             guard let name = itemSchema.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !name.isEmpty else { return nil }
             let kind = LineItem.LineItemKind(rawValue: itemSchema.kind?.lowercased() ?? "") ?? .unknown
+            let itemCategory = itemSchema.category?.trimmingCharacters(in: .whitespacesAndNewlines)
             return LineItem(
                 name: name,
                 amount: itemSchema.amount,
                 quantity: itemSchema.quantity ?? 1,
-                kind: kind
+                kind: kind,
+                category: (itemCategory?.isEmpty == false) ? itemCategory : nil
             )
         }
 
@@ -910,12 +931,8 @@ struct HeuristicFieldExtractor {
     ]
 
     /// Well-known short brand names that should be accepted despite being short/single-word.
-    private static let knownShortBrands: Set<String> = [
-        "3M", "HP", "LG", "BQ", "JBL", "UE",
-        "IKEA", "Sony", "Acer", "Asus", "Dell",
-        "Bose", "Dyson", "Nike", "Zara", "H&M",
-        "MUJI", "Braun", "Miele", "Smeg", "Bosch",
-    ]
+    /// Sourced from the shared `OCRVocabulary` so the lexicon stays in sync with `customWords`.
+    private static let knownShortBrands: Set<String> = OCRVocabulary.shortBrands
 
     /// Detects OCR junk: very short fragments, lines that are mostly punctuation/symbols,
     /// parenthetical fragments, single common English words, or text that doesn't form coherent words.
@@ -1015,17 +1032,8 @@ struct HeuristicFieldExtractor {
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)
 
     /// Well-known consumer electronics/appliance brands for product detection.
-    private static let knownBrands: Set<String> = [
-        "samsung", "apple", "sony", "lg", "dyson", "panasonic", "philips",
-        "bosch", "siemens", "miele", "braun", "asus", "acer", "dell", "hp",
-        "lenovo", "microsoft", "google", "bose", "jbl", "harman",
-        "whirlpool", "electrolux", "hitachi", "toshiba", "sharp",
-        "daikin", "mitsubishi", "fujitsu", "nikon", "canon", "olympus",
-        "garmin", "fitbit", "xiaomi", "huawei", "oppo", "vivo",
-        "nintendo", "playstation", "xbox", "razer", "logitech",
-        "breville", "delonghi", "kitchenaid", "cuisinart", "tefal",
-        "ikea", "muji", "osim", "ogawa",
-    ]
+    /// Sourced from the shared `OCRVocabulary` so the lexicon stays in sync with `customWords`.
+    private static let knownBrands: Set<String> = OCRVocabulary.brands
 
     /// Extract product name with brand/model detection.
     ///
