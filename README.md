@@ -24,10 +24,11 @@ Build a disciplined v1 that proves the core loop:
 4. make retrieval/support actions easy later
 
 ## Docs
-- `SPEC.md` — product and technical spec
-- `ARCHITECTURE.md` — implementation direction
-- `MILESTONES.md` — staged build plan
-- `BACKLOG.md` — near-term tasks
-- `DECISIONS.md` — important decisions and rationale
-- `OCR_NOTES.md` — OCR direction and constraints
-- `OTA_DISTRIBUTION.md` — GitHub Actions + Ad Hoc OTA setup notes
+All reference and planning docs live in [`docs/`](docs/README.md). Highlights:
+- [`docs/SPEC.md`](docs/SPEC.md) — product and technical spec
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — implementation direction
+- [`docs/EXTRACTION_ARCHITECTURE.md`](docs/EXTRACTION_ARCHITECTURE.md) — OCR → extraction pipeline
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — important decisions and rationale
+- [`docs/OTA_DISTRIBUTION.md`](docs/OTA_DISTRIBUTION.md) — GitHub Actions + Ad Hoc OTA setup notes
+
+Agent operating principles are in [`CLAUDE.md`](CLAUDE.md).
