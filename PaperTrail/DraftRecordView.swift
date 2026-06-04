@@ -43,6 +43,10 @@ struct DraftRecordView: View {
     /// Line items the user wants to save. Each becomes its own record; the first
     /// (in display order) is the "primary" whose fields are editable in the form.
     @State private var selectedItemIds: Set<UUID> = []
+    /// Per-item inline edits for the non-primary selected items (name / price text),
+    /// keyed by line-item id. Absent keys fall back to the item's extracted values.
+    @State private var itemNameEdits: [UUID: String] = [:]
+    @State private var itemPriceEdits: [UUID: String] = [:]
 
     init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
@@ -331,6 +335,32 @@ struct DraftRecordView: View {
         lineItems.filter { selectedItemIds.contains($0.id) }
     }
 
+    private func defaultPriceText(_ item: LineItem) -> String {
+        item.amount.map { String(format: "%.2f", $0) } ?? ""
+    }
+
+    private func itemNameBinding(_ item: LineItem) -> Binding<String> {
+        Binding(get: { itemNameEdits[item.id] ?? item.name },
+                set: { itemNameEdits[item.id] = $0 })
+    }
+
+    private func itemPriceBinding(_ item: LineItem) -> Binding<String> {
+        Binding(get: { itemPriceEdits[item.id] ?? defaultPriceText(item) },
+                set: { itemPriceEdits[item.id] = $0 })
+    }
+
+    /// Final name/price for a non-primary item, applying any inline edits.
+    private func editedName(for item: LineItem) -> String {
+        let edited = (itemNameEdits[item.id] ?? item.name).trimmingCharacters(in: .whitespacesAndNewlines)
+        return edited.isEmpty ? item.name : edited
+    }
+
+    private func editedAmount(for item: LineItem) -> Double? {
+        guard let text = itemPriceEdits[item.id] else { return item.amount }
+        let cleaned = text.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        return cleaned.isEmpty ? nil : (Double(cleaned) ?? item.amount)
+    }
+
     private var lineItemCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "Items on this receipt", tone: PT.txt3)
@@ -373,6 +403,27 @@ struct DraftRecordView: View {
                     .disabled(item.kind == .fee)
                     .opacity(item.kind == .fee ? 0.5 : 1)
 
+                    // Non-primary selected items are edited inline (name + price);
+                    // the primary is edited in the form above.
+                    if isSelected && !isPrimary {
+                        HStack(spacing: 8) {
+                            TextField("Item name", text: itemNameBinding(item))
+                                .font(PTFont.serif(14, weight: 500))
+                                .foregroundStyle(PT.txt)
+                                .tint(PT.goldDeep)
+                            TextField("Price", text: itemPriceBinding(item))
+                                .font(PTFont.mono(12, medium: true))
+                                .foregroundStyle(PT.txt2)
+                                .tint(PT.goldDeep)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 84)
+                        }
+                        .padding(.leading, 26)
+                        .padding(.trailing, 2)
+                        .padding(.bottom, 11)
+                    }
+
                     if item.id != lineItems.last?.id {
                         Rectangle().fill(PT.hair).frame(height: 1)
                     }
@@ -383,7 +434,7 @@ struct DraftRecordView: View {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
 
             if selectedItemIds.count > 1 {
-                Text("Saving \(selectedItemIds.count) items as separate records — each keeps its own warranty, category, and amount. The “Editing” item uses the fields above; the rest use the receipt values.")
+                Text("Saving \(selectedItemIds.count) items as separate records — each its own warranty & category. The “Editing” item uses the fields above; edit the others’ name & price inline here.")
                     .font(PTFont.mono(9))
                     .foregroundStyle(PT.txt3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -681,7 +732,7 @@ struct DraftRecordView: View {
             for (index, item) in recordWorthySelected.enumerated() {
                 records.append(index == 0
                     ? makeRecord(productName: productName, amount: parsedAmount, category: category)
-                    : makeRecord(productName: item.name, amount: item.amount, category: item.category ?? category))
+                    : makeRecord(productName: editedName(for: item), amount: editedAmount(for: item), category: item.category ?? category))
             }
         } else {
             records.append(makeRecord(productName: productName, amount: parsedAmount, category: category))
