@@ -3,14 +3,24 @@ import UIKit
 
 /// Saves scanned images to disk and creates Attachment records.
 struct ScanningService {
-    private let ocrService: any OCRService
+    /// Explicitly injected OCR service (used by tests). When nil, a
+    /// vocabulary-aware `VisionOCRService` is built per call so learned merchant
+    /// names can be promoted into the recognizer's `customWords`.
+    private let injectedOCRService: (any OCRService)?
 
-    init(ocrService: any OCRService = VisionOCRService()) {
-        self.ocrService = ocrService
+    init(ocrService: (any OCRService)? = nil) {
+        self.injectedOCRService = ocrService
     }
 
     /// Process scanned images: save to disk, run OCR, return attachments and combined OCR result.
-    func process(images: [UIImage], type: AttachmentType) async -> (attachments: [Attachment], ocr: OCRExtractionResult) {
+    ///
+    /// - Parameter learnedMerchants: merchant display names from the learning
+    ///   loop. Promoted into Vision `customWords` so previously-seen store names
+    ///   are recognized more reliably (closes the loop between learning and OCR).
+    func process(images: [UIImage], type: AttachmentType, learnedMerchants: [String] = []) async -> (attachments: [Attachment], ocr: OCRExtractionResult) {
+        let ocrService = injectedOCRService
+            ?? VisionOCRService(customWords: OCRVocabulary.customWords(learnedMerchants: learnedMerchants))
+
         var attachments: [Attachment] = []
         var allText: [String] = []
         var bestProduct: String?

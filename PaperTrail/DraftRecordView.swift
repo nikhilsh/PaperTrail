@@ -189,7 +189,8 @@ struct DraftRecordView: View {
                 onScanComplete: { images in
                     showAddScanner = false
                     Task {
-                        let result = await scanningService.process(images: images, type: seedType)
+                        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+                        let result = await scanningService.process(images: images, type: seedType, learnedMerchants: learned)
                         extraAttachments.append(contentsOf: result.attachments)
                     }
                 },
