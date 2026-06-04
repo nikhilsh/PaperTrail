@@ -40,7 +40,9 @@ struct DraftRecordView: View {
     /// Line items extracted from the document, for user selection.
     private let lineItems: [LineItem]
     /// The currently selected line item ID (user picks the main item for the record).
-    @State private var selectedItemId: UUID?
+    /// Line items the user wants to save. Each becomes its own record; the first
+    /// (in display order) is the "primary" whose fields are editable in the form.
+    @State private var selectedItemIds: Set<UUID> = []
 
     init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
         self.seedType = seedType
@@ -69,7 +71,7 @@ struct DraftRecordView: View {
                 .max(by: { ($0.amount ?? 0) < ($1.amount ?? 0) })
         }()
 
-        _selectedItemId = State(initialValue: autoSelected?.id)
+        _selectedItemIds = State(initialValue: autoSelected.map { Set([$0.id]) } ?? [])
 
         // Pre-fill from auto-selected item if available, otherwise from OCR suggestions
         let initialProductName = autoSelected?.name ?? seededOCR?.suggestedProductName ?? ""
@@ -324,24 +326,38 @@ struct DraftRecordView: View {
 
     // MARK: Line item picker
 
+    /// Items selected to save, in display order; the first is the editable primary.
+    private var selectedItems: [LineItem] {
+        lineItems.filter { selectedItemIds.contains($0.id) }
+    }
+
     private var lineItemCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "Items on this receipt", tone: PT.txt3)
             VStack(spacing: 0) {
                 ForEach(lineItems) { item in
-                    Button { selectItem(item) } label: {
+                    let isSelected = selectedItemIds.contains(item.id)
+                    let isPrimary = selectedItems.first?.id == item.id
+                    Button { toggleItem(item) } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: selectedItemId == item.id ? "largecircle.fill.circle" : "circle")
+                            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                                 .font(.system(size: 16))
-                                .foregroundStyle(selectedItemId == item.id ? PT.gold : PT.txt3)
+                                .foregroundStyle(isSelected ? PT.gold : PT.txt3)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(item.name)
                                     .font(item.kind.isRecordWorthy ? PTFont.serif(15, weight: 600) : PTFont.serif(15, weight: 500))
                                     .foregroundStyle(PT.txt)
                                     .lineLimit(1)
-                                Text(item.kind.label)
-                                    .font(PTFont.mono(9))
-                                    .foregroundStyle(PT.txt3)
+                                HStack(spacing: 5) {
+                                    Text(item.kind.label)
+                                        .font(PTFont.mono(9))
+                                        .foregroundStyle(PT.txt3)
+                                    if isPrimary && selectedItemIds.count > 1 {
+                                        Text("EDITING")
+                                            .font(PTFont.mono(8))
+                                            .foregroundStyle(PT.gold)
+                                    }
+                                }
                             }
                             Spacer(minLength: 8)
                             if let amount = item.amount {
@@ -365,6 +381,13 @@ struct DraftRecordView: View {
             .padding(.horizontal, 14)
             .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+
+            if selectedItemIds.count > 1 {
+                Text("Saving \(selectedItemIds.count) items as separate records — each keeps its own warranty, category, and amount. The “Editing” item uses the fields above; the rest use the receipt values.")
+                    .font(PTFont.mono(9))
+                    .foregroundStyle(PT.txt3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -475,15 +498,21 @@ struct DraftRecordView: View {
     // MARK: - Item selection
 
     /// Called when the user taps a line item to select it as the main record item.
-    private func selectItem(_ item: LineItem) {
-        selectedItemId = item.id
-        productName = item.name
-        if let amount = item.amount {
-            amountText = String(format: "%.2f", amount)
+    private func toggleItem(_ item: LineItem) {
+        if selectedItemIds.contains(item.id) {
+            selectedItemIds.remove(item.id)
+        } else {
+            selectedItemIds.insert(item.id)
         }
-        // Auto-toggle warranty if any line item is a warranty
-        let hasWarrantyLineItem = lineItems.contains(where: { $0.kind == .warranty })
-        if hasWarrantyLineItem && !includeWarranty {
+        // Keep the editable form bound to the primary (first selected in display order).
+        if let primary = selectedItems.first {
+            productName = primary.name
+            if let amount = primary.amount {
+                amountText = String(format: "%.2f", amount)
+            }
+        }
+        // Auto-toggle warranty if any selected line item is a warranty.
+        if selectedItems.contains(where: { $0.kind == .warranty }) && !includeWarranty {
             includeWarranty = true
         }
     }
@@ -627,31 +656,65 @@ struct DraftRecordView: View {
             finalWarrantyMonths: finalWarrantyMonths
         )
 
-        let record = PurchaseRecord(
-            productName: productName,
-            merchantName: merchantName.isEmpty ? nil : merchantName,
-            purchaseDate: purchaseDate,
-            warrantyExpiryDate: includeWarranty ? warrantyExpiryDate : nil,
-            notes: notes.isEmpty ? nil : notes,
-            amount: parsedAmount,
-            currency: currency,
-            category: category.isEmpty ? nil : category,
-            room: room.isEmpty ? nil : room,
-            tags: parsedTags
-        )
-
-        modelContext.insert(record)
-
-        let allAttachments = seededAttachments + extraAttachments
-        for attachment in allAttachments {
-            attachment.recordID = record.id
-            modelContext.insert(attachment)
+        // Build one record per selected line item (each tracked separately, with
+        // its own warranty/category/amount). The primary item uses the edited
+        // form fields; additional items use their receipt values. With 0–1
+        // record-worthy items selected, this is exactly one record from the form.
+        func makeRecord(productName: String, amount: Double?, category: String?) -> PurchaseRecord {
+            PurchaseRecord(
+                productName: productName,
+                merchantName: merchantName.isEmpty ? nil : merchantName,
+                purchaseDate: purchaseDate,
+                warrantyExpiryDate: includeWarranty ? warrantyExpiryDate : nil,
+                notes: notes.isEmpty ? nil : notes,
+                amount: amount,
+                currency: currency,
+                category: (category?.isEmpty == false) ? category : nil,
+                room: room.isEmpty ? nil : room,
+                tags: parsedTags
+            )
         }
 
-        // Schedule warranty notifications if applicable
+        let recordWorthySelected = selectedItems.filter { $0.kind.isRecordWorthy }
+        var records: [PurchaseRecord] = []
+        if recordWorthySelected.count >= 2 {
+            for (index, item) in recordWorthySelected.enumerated() {
+                records.append(index == 0
+                    ? makeRecord(productName: productName, amount: parsedAmount, category: category)
+                    : makeRecord(productName: item.name, amount: item.amount, category: item.category ?? category))
+            }
+        } else {
+            records.append(makeRecord(productName: productName, amount: parsedAmount, category: category))
+        }
+
+        for record in records {
+            modelContext.insert(record)
+        }
+
+        // Attachments: link the originals to the primary record; for any extra
+        // records, duplicate the metadata pointing at the same on-disk image files
+        // so every record shows the receipt.
+        let allAttachments = seededAttachments + extraAttachments
+        if let primary = records.first {
+            for attachment in allAttachments {
+                attachment.recordID = primary.id
+                modelContext.insert(attachment)
+            }
+            for record in records.dropFirst() {
+                for attachment in allAttachments {
+                    let dup = Attachment(type: attachment.type, localFilename: attachment.localFilename, ocrText: attachment.ocrText)
+                    dup.recordID = record.id
+                    modelContext.insert(dup)
+                }
+            }
+        }
+
+        // Schedule warranty notifications for each created record.
         if includeWarranty {
-            record.warrantyNotificationScheduled = true
-            NotificationManager.shared.scheduleWarrantyReminders(for: record)
+            for record in records {
+                record.warrantyNotificationScheduled = true
+                NotificationManager.shared.scheduleWarrantyReminders(for: record)
+            }
         }
 
         // Upload attachment images to CloudKit in the background
