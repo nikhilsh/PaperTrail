@@ -696,18 +696,22 @@ struct FoundationModelExtractionService: FieldExtractionService {
         let raw: Date? = {
             if let d = isoFormatter.date(from: trimmed) { return d }
 
-            // Unambiguous formats first (ISO numeric + textual months, where the
-            // day/year can't be confused), then ambiguous numeric formats ordered
-            // by the region's convention so "03/05/2025" resolves the right way.
-            var formats = [
-                "yyyy-MM-dd",
-                "d MMM yyyy", "dd MMM yyyy", "dd-MMM-yyyy",
-                "d MMM yy", "dd MMM yy", "dd-MMM-yy",
-            ]
+            // Textual-month dates ("23-Nov-25", "November 23, 2025") go through an
+            // explicit regex that fixes field roles by position — first number is
+            // the day, last is the year — instead of DateFormatter, whose textual
+            // patterns with a 2-digit year unreliably swap day and year.
+            if let d = parseTextualDate(trimmed) { return d }
+
+            // Purely numeric dates: unambiguous ISO-ish first, then ambiguous
+            // formats ordered by the region's convention so "03/05/2025" resolves
+            // the right way. `isLenient = false` avoids stray 2-digit "23" → 0023.
+            var formats = ["yyyy-MM-dd", "yyyy/MM/dd"]
             if convention.prefersMonthBeforeDay {
-                formats += ["MM/dd/yyyy", "MM-dd-yyyy", "MM.dd.yyyy", "dd/MM/yyyy"]
+                formats += ["MM/dd/yyyy", "MM-dd-yyyy", "MM.dd.yyyy", "MM/dd/yy",
+                            "dd/MM/yyyy", "dd/MM/yy"]
             } else {
-                formats += ["dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "MM/dd/yyyy"]
+                formats += ["dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "dd/MM/yy",
+                            "MM/dd/yyyy", "MM/dd/yy"]
             }
 
             for fmt in formats {
@@ -721,6 +725,55 @@ struct FoundationModelExtractionService: FieldExtractionService {
         }()
 
         return normalizePurchaseDate(raw)
+    }
+
+    private static let monthNameIndex: [String: Int] = [
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    ]
+
+    /// Parse a textual-month date, forcing day/year roles by position so they can
+    /// never be swapped: day-first ("23-Nov-25") → day, month, year; month-first
+    /// ("November 23, 2025") → month, day, year. Nil if not a textual-month date.
+    static func parseTextualDate(_ s: String) -> Date? {
+        func monthIndex(_ name: String) -> Int? {
+            monthNameIndex[String(name.lowercased().prefix(3))]
+        }
+        func makeDate(day: Int, month: Int, year: Int) -> Date? {
+            var comps = DateComponents()
+            comps.day = day
+            comps.month = month
+            comps.year = year < 100 ? 2000 + year : year
+            return Calendar(identifier: .gregorian).date(from: comps)
+        }
+
+        // Day-first: 23-Nov-25, 23 Nov 2025, 1 January 24
+        if let g = Self.regexGroups(#"^(\d{1,2})[\s\-./]+([A-Za-z]{3,9})\.?[\s\-./,]+(\d{2,4})$"#, s),
+           let day = Int(g[1]), let month = monthIndex(g[2]), let year = Int(g[3]) {
+            return makeDate(day: day, month: month, year: year)
+        }
+        // Month-first: Nov 23 2025, November 23, 2025
+        if let g = Self.regexGroups(#"^([A-Za-z]{3,9})\.?[\s\-./,]+(\d{1,2})[\s\-./,]+(\d{2,4})$"#, s),
+           let month = monthIndex(g[1]), let day = Int(g[2]), let year = Int(g[3]) {
+            return makeDate(day: day, month: month, year: year)
+        }
+        return nil
+    }
+
+    /// Capture groups (index 0 = whole match) of the first regex match, or nil.
+    private static func regexGroups(_ pattern: String, _ s: String) -> [String]? {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(s.startIndex..., in: s)
+        guard let match = re.firstMatch(in: s, range: range) else { return nil }
+        var groups: [String] = []
+        for i in 0..<match.numberOfRanges {
+            if let r = Range(match.range(at: i), in: s) {
+                groups.append(String(s[r]))
+            } else {
+                groups.append("")
+            }
+        }
+        return groups
     }
 
     /// Repair and sanity-check a parsed purchase date.

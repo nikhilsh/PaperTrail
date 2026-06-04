@@ -78,8 +78,12 @@ struct RoomAndDateTests {
     @Test func parsesTextualDateWithoutSwappingDayAndYear() throws {
         // The real-world bug: "23-Nov-25" prefilled as "25 Nov 23". It must be
         // day 23 / Nov / 2025 — day and year not swapped, year not 0023.
-        let d = try #require(FoundationModelExtractionService.parsePurchaseDateString("23-Nov-25"))
-        #expect(ymd(d) == (2025, 11, 23))
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("23-Nov-25"))) == (2025, 11, 23))
+        // Spaced and full-month variants.
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("23 November 2025"))) == (2025, 11, 23))
+        // Month-first textual (US style).
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("November 23, 2025"))) == (2025, 11, 23))
+        #expect(ymd(try #require(FoundationModelExtractionService.parsePurchaseDateString("Nov 23 2025"))) == (2025, 11, 23))
     }
 
     @Test func parsesDayFirstNumericDate() throws {
