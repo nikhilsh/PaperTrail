@@ -5,6 +5,7 @@ struct EditRecordView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var record: PurchaseRecord
     @Query private var allAttachments: [Attachment]
+    @Query private var allRecords: [PurchaseRecord]
 
     @State private var productName: String
     @State private var merchantName: String
@@ -15,6 +16,7 @@ struct EditRecordView: View {
     @State private var amountText: String
     @State private var currency: String
     @State private var category: String
+    @State private var room: String
     @State private var tagsText: String
 
     private var attachments: [Attachment] {
@@ -37,6 +39,7 @@ struct EditRecordView: View {
         }
         _currency = State(initialValue: record.currency ?? "SGD")
         _category = State(initialValue: record.category ?? "")
+        _room = State(initialValue: record.room ?? "")
         _tagsText = State(initialValue: record.tags.joined(separator: ", "))
     }
 
@@ -73,6 +76,9 @@ struct EditRecordView: View {
 
             Section("Organization") {
                 TextField("Category (e.g. Electronics, Kitchen)", text: $category)
+                LabeledContent("Room") {
+                    RoomPicker(room: $room, suggestions: RoomOptions.suggestions(existing: allRecords.compactMap(\.room)))
+                }
                 TextField("Tags (comma separated)", text: $tagsText)
             }
 
@@ -128,6 +134,7 @@ struct EditRecordView: View {
         record.amount = Double(amountText.replacingOccurrences(of: ",", with: ""))
         record.currency = currency
         record.category = category.isEmpty ? nil : category
+        record.room = room.isEmpty ? nil : room
         record.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         record.updatedAt = .now
 

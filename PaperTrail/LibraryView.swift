@@ -35,11 +35,11 @@ struct LibraryView: View {
         }
     }
 
-    /// Grouped by category/room for the "By room" view. Records with no room
-    /// fall under an "Unfiled" bucket sorted last — never forced to assign one.
+    /// Grouped by room for the "By room" view. Records with no room fall under
+    /// an "Unfiled" bucket sorted last — never forced to assign one.
     private var roomGroups: [(room: String, records: [PurchaseRecord])] {
         let grouped = Dictionary(grouping: records) { record -> String in
-            let trimmed = record.category?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = record.room?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (trimmed?.isEmpty ?? true) ? "Unfiled" : trimmed!
         }
         return grouped
