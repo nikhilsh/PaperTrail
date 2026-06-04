@@ -690,17 +690,21 @@ struct FoundationModelExtractionService: FieldExtractionService {
         let trimmed = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withFullDate]
-
         let raw: Date? = {
-            if let d = isoFormatter.date(from: trimmed) { return d }
-
-            // Textual-month dates ("23-Nov-25", "November 23, 2025") go through an
-            // explicit regex that fixes field roles by position — first number is
-            // the day, last is the year — instead of DateFormatter, whose textual
-            // patterns with a 2-digit year unreliably swap day and year.
+            // Textual-month dates ("23-Nov-25", "November 23, 2025") first — they
+            // assign day/year by token role so the two can't swap. This must run
+            // BEFORE ISO8601, which leniently misreads "23-Nov-25" as year 0023.
             if let d = parseTextualDate(trimmed) { return d }
+
+            // Strict ISO 8601 (the format we ask the model for), but only when the
+            // string actually starts with a 4-digit year — ISO8601DateFormatter
+            // otherwise leniently misreads "23-..." as year 0023.
+            if trimmed.prefix(4).allSatisfy(\.isNumber),
+               trimmed.count >= 5, trimmed[trimmed.index(trimmed.startIndex, offsetBy: 4)] == "-" {
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withFullDate]
+                if let d = isoFormatter.date(from: trimmed) { return d }
+            }
 
             // Purely numeric dates: unambiguous ISO-ish first, then ambiguous
             // formats ordered by the region's convention so "03/05/2025" resolves
