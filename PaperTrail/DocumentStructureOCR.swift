@@ -165,11 +165,13 @@ struct DocumentStructureOCRService: Sendable {
                 let joined = row.joined(separator: " ").lowercased()
                 if summaryMarkers.contains(where: { joined.contains($0) }) { continue }
 
-                // Name = the longest cell with letters; amount = a parseable money cell.
+                // Name = the longest cell with letters. Amount = the LAST parseable
+                // money cell — receipt tables put the line total in the rightmost
+                // column, so prefer it over a (possibly larger) unit-price column.
                 let nameCell = row
                     .filter { $0.contains(where: { $0.isLetter }) }
                     .max(by: { $0.count < $1.count })
-                let amount = row.compactMap(parseAmount).max()
+                let amount = row.compactMap(parseAmount).last
 
                 guard let name = nameCell?.trimmingCharacters(in: .whitespacesAndNewlines),
                       name.count >= 3 else { continue }
