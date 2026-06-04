@@ -59,17 +59,13 @@ struct OCRTable: Sendable {
 /// `OCRDocument`. Returns `nil` when the API is unavailable or fails, so the
 /// caller can fall back to the legacy `VNRecognizeTextRequest` path.
 ///
-/// ─────────────────────────────────────────────────────────────────────────
-/// ⚠️ XCODE-VERIFY: This is the only place that touches the iOS 26 document
-/// recognition API. The symbol names below reflect WWDC25 session 272 but
-/// could not be compiled in this environment. If the build fails here, verify
-/// against the current SDK:
+/// This is the only place that touches the iOS 26 document recognition API,
+/// against these symbols (per Apple's "Recognizing tables within a document"):
 ///   • `RecognizeDocumentsRequest()` and `perform(on:)` → `[DocumentObservation]`
-///   • `DocumentObservation.document` → `.transcript`, `.tables`
-///   • `Table.rowCount` / `.columnCount` / cell access (`cellAt(row:column:)`)
-///   • cell text accessor (`cell.content.text`)
+///   • `observation.document` → `DocumentObservation.Container`
+///   • `container.text.transcript` → full plain text
+///   • `container.tables` → `[Table]`; `table.rows`; `cell.content.text.transcript`
 /// The rest of the overhaul does not depend on these symbols — only this file.
-/// ─────────────────────────────────────────────────────────────────────────
 struct DocumentStructureOCRService: Sendable {
 
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.ocr.structured")
@@ -90,22 +86,21 @@ struct DocumentStructureOCRService: Sendable {
                 return nil
             }
 
-            let transcript = document.transcript
+            // Full document text: the container exposes a `text` object whose
+            // `.transcript` is the plain string (mirrors `cell.content.text`).
+            let transcript = document.text.transcript
             guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return nil
             }
 
-            // Walk tables inline so we never have to name the (SDK-versioned)
-            // nested Vision document type in a signature — only inferred member
-            // accesses remain, which are easier to fix if the SDK differs.
+            // Walk tables: `table.rows` is a sequence of rows, each row a sequence
+            // of cells, each cell's text at `cell.content.text.transcript`.
             var tables: [OCRTable] = []
             for table in document.tables {
                 var rows: [[String]] = []
-                for r in 0..<table.rowCount {
-                    var cells: [String] = []
-                    for c in 0..<table.columnCount {
-                        let text = table.cellAt(row: r, column: c)?.content.text ?? ""
-                        cells.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                for row in table.rows {
+                    let cells = row.map {
+                        $0.content.text.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                     }
                     rows.append(cells)
                 }
