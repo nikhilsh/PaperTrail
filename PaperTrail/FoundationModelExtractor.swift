@@ -732,48 +732,29 @@ struct FoundationModelExtractionService: FieldExtractionService {
         "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
     ]
 
-    /// Parse a textual-month date, forcing day/year roles by position so they can
-    /// never be swapped: day-first ("23-Nov-25") → day, month, year; month-first
-    /// ("November 23, 2025") → month, day, year. Nil if not a textual-month date.
+    /// Parse a textual-month date by token roles, so day and year can never be
+    /// swapped regardless of order: "23-Nov-25", "23 Nov 2025", "November 23,
+    /// 2025", "Nov 23 2025" all work. Rule: split into 3 tokens (one alphabetic
+    /// month + two numbers); the LAST numeric token is the year, the other is the
+    /// day. Nil if it isn't a 3-part textual-month date.
     static func parseTextualDate(_ s: String) -> Date? {
-        func monthIndex(_ name: String) -> Int? {
-            monthNameIndex[String(name.lowercased().prefix(3))]
-        }
-        func makeDate(day: Int, month: Int, year: Int) -> Date? {
-            var comps = DateComponents()
-            comps.day = day
-            comps.month = month
-            comps.year = year < 100 ? 2000 + year : year
-            return Calendar(identifier: .gregorian).date(from: comps)
-        }
+        let separators: Set<Character> = [" ", "-", ".", "/", ","]
+        let tokens = s.split(whereSeparator: { separators.contains($0) }).map(String.init)
+        guard tokens.count == 3 else { return nil }
 
-        // Day-first: 23-Nov-25, 23 Nov 2025, 1 January 24
-        if let g = Self.regexGroups(#"^(\d{1,2})[\s\-./]+([A-Za-z]{3,9})\.?[\s\-./,]+(\d{2,4})$"#, s),
-           let day = Int(g[1]), let month = monthIndex(g[2]), let year = Int(g[3]) {
-            return makeDate(day: day, month: month, year: year)
-        }
-        // Month-first: Nov 23 2025, November 23, 2025
-        if let g = Self.regexGroups(#"^([A-Za-z]{3,9})\.?[\s\-./,]+(\d{1,2})[\s\-./,]+(\d{2,4})$"#, s),
-           let month = monthIndex(g[1]), let day = Int(g[2]), let year = Int(g[3]) {
-            return makeDate(day: day, month: month, year: year)
-        }
-        return nil
-    }
+        let monthIdxs = tokens.indices.filter { tokens[$0].contains(where: \.isLetter) }
+        let numberIdxs = tokens.indices.filter { !tokens[$0].isEmpty && tokens[$0].allSatisfy(\.isNumber) }
+        guard monthIdxs.count == 1, numberIdxs.count == 2 else { return nil }
 
-    /// Capture groups (index 0 = whole match) of the first regex match, or nil.
-    private static func regexGroups(_ pattern: String, _ s: String) -> [String]? {
-        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
-        let range = NSRange(s.startIndex..., in: s)
-        guard let match = re.firstMatch(in: s, range: range) else { return nil }
-        var groups: [String] = []
-        for i in 0..<match.numberOfRanges {
-            if let r = Range(match.range(at: i), in: s) {
-                groups.append(String(s[r]))
-            } else {
-                groups.append("")
-            }
-        }
-        return groups
+        guard let month = monthNameIndex[String(tokens[monthIdxs[0]].lowercased().prefix(3))],
+              let dayIdx = numberIdxs.min(), let yearIdx = numberIdxs.max(),
+              let day = Int(tokens[dayIdx]), let rawYear = Int(tokens[yearIdx]) else { return nil }
+
+        var comps = DateComponents()
+        comps.day = day
+        comps.month = month
+        comps.year = rawYear < 100 ? 2000 + rawYear : rawYear
+        return Calendar(identifier: .gregorian).date(from: comps)
     }
 
     /// Repair and sanity-check a parsed purchase date.
