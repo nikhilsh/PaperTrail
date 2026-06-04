@@ -30,6 +30,8 @@ struct DraftRecordView: View {
     /// Existing records, used only to surface previously-used rooms in the picker.
     @Query private var allRecords: [PurchaseRecord]
     @State private var showExtractionLogSheet = false
+    /// The scanned image presented full-screen when the review thumbnail is tapped.
+    @State private var selectedImageFilename: SelectedFilename?
     @State private var showRawText = false
 
     /// Additional proof pages scanned via "Add another page" before saving.
@@ -211,6 +213,9 @@ struct DraftRecordView: View {
             )
             .ignoresSafeArea()
         }
+        .fullScreenCover(item: $selectedImageFilename) { selected in
+            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
+        }
         .task {
             guard learningContext == nil, let structuredResult else { return }
             let service = MerchantLearningService(modelContext: modelContext)
@@ -229,13 +234,26 @@ struct DraftRecordView: View {
                 .padding(.top, 8)
 
             HStack(spacing: 10) {
-                if let image = seededAttachments.first?.image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 54, height: 72)
-                        .clipShape(DogEarShape(radius: 8, ear: 12))
-                        .overlay(DogEarShape(radius: 8, ear: 12).stroke(PT.hair, lineWidth: 1))
+                if let attachment = seededAttachments.first, let image = attachment.image {
+                    Button {
+                        selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                    } label: {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 54, height: 72)
+                            .clipShape(DogEarShape(radius: 8, ear: 12))
+                            .overlay(DogEarShape(radius: 8, ear: 12).stroke(PT.hair, lineWidth: 1))
+                            .overlay(alignment: .bottomTrailing) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(3)
+                                    .background(.black.opacity(0.45), in: Circle())
+                                    .padding(4)
+                            }
+                    }
+                    .buttonStyle(.plain)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     let merchant = merchantName.isEmpty ? (seededOCR?.suggestedMerchantName ?? "receipt") : merchantName
