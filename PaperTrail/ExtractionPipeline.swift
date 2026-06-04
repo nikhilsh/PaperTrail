@@ -192,6 +192,9 @@ struct ExtractionPipeline: Sendable {
             currency: pick(primary.currency, fallback.currency),
             category: pick(primary.category, fallback.category),
             warrantyDurationMonths: pick(primary.warrantyDurationMonths, fallback.warrantyDurationMonths),
+            vatId: pick(primary.vatId, fallback.vatId),
+            taxAmount: pick(primary.taxAmount, fallback.taxAmount),
+            orderReference: pick(primary.orderReference, fallback.orderReference),
             lineItems: mergedLineItems,
             source: primary.source,
             diagnostics: primary.diagnostics

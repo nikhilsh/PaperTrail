@@ -92,14 +92,20 @@ struct LineItem: Sendable, Hashable, Identifiable {
     let kind: LineItemKind
     /// Per-item category (from the model's per-line-item classification), if any.
     let category: String?
+    /// Item/model/SKU code, if shown.
+    let sku: String?
+    /// Per-unit price (before multiplying by quantity), if shown.
+    let unitPrice: Double?
 
-    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown, category: String? = nil) {
+    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown, category: String? = nil, sku: String? = nil, unitPrice: Double? = nil) {
         self.id = UUID()
         self.name = name
         self.amount = amount
         self.quantity = quantity
         self.kind = kind
         self.category = category
+        self.sku = sku
+        self.unitPrice = unitPrice
     }
 
     enum LineItemKind: String, Sendable, Hashable, CaseIterable {
@@ -149,6 +155,14 @@ struct StructuredExtractionResult: Sendable, Hashable {
     var currency: ExtractedField<String>
     var category: ExtractedField<String>
     var warrantyDurationMonths: ExtractedField<Int>
+
+    /// Merchant tax/registration ID (UEN / GST Reg / VAT ID) — a stable, unique
+    /// business identity used as the primary merchant-matching key when present.
+    var vatId: ExtractedField<String> = .absent
+    /// Tax (GST/VAT/sales tax) amount, when a separate tax line is shown.
+    var taxAmount: ExtractedField<Double> = .absent
+    /// Order/invoice/reference number, useful for proof-of-purchase and dedupe.
+    var orderReference: ExtractedField<String> = .absent
 
     /// Individual line items extracted from the document (products, accessories, warranties, etc.).
     var lineItems: [LineItem]
@@ -227,6 +241,12 @@ struct LineItemSchema: Sendable {
 
     @Guide(description: "Category for this specific item.", .anyOf(["Electronics", "Appliance", "Kitchen", "Furniture", "Clothing", "Sports", "Health", "Home", "Other"]))
     var category: String?
+
+    @Guide(description: "Item/model/SKU code if shown, e.g. 'BRPS232SB'. Null if none.")
+    var sku: String?
+
+    @Guide(description: "Per-unit price as a decimal number, before multiplying by quantity. Null if not shown.")
+    var unitPrice: Double?
 }
 
 @Generable
@@ -254,6 +274,15 @@ struct ReceiptExtractionSchema: Sendable {
 
     @Guide(description: "Warranty duration in months if mentioned on the receipt or warranty card, e.g. 12 or 24. Null if not found.")
     var warrantyDurationMonths: Int?
+
+    @Guide(description: "The merchant's tax/business registration ID if printed, e.g. a GST Reg No, UEN, VAT ID, or company registration number (such as 'M2-0116439-7'). This identifies the business. Null if not present.")
+    var merchantTaxId: String?
+
+    @Guide(description: "The tax amount (GST/VAT/sales tax) as a decimal number, if a separate tax line is shown. Null if not present.")
+    var taxAmount: Double?
+
+    @Guide(description: "The order, invoice, or reference number if printed, e.g. 'PSINV-B10443651' or an order number. Useful as a receipt reference. Null if not present.")
+    var orderReference: String?
 
     @Guide(description: "Individual line items on the receipt. Each has name, optional amount, optional quantity, and kind (product/accessory/warranty/service/fee). Include all distinct items, not totals or subtotals.")
     var lineItems: [LineItemSchema]?
@@ -632,12 +661,15 @@ struct FoundationModelExtractionService: FieldExtractionService {
                   !name.isEmpty else { return nil }
             let kind = LineItem.LineItemKind(rawValue: itemSchema.kind?.lowercased() ?? "") ?? .unknown
             let itemCategory = itemSchema.category?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let itemSku = itemSchema.sku?.trimmingCharacters(in: .whitespacesAndNewlines)
             return LineItem(
                 name: name,
                 amount: itemSchema.amount,
                 quantity: itemSchema.quantity ?? 1,
                 kind: kind,
-                category: (itemCategory?.isEmpty == false) ? itemCategory : nil
+                category: (itemCategory?.isEmpty == false) ? itemCategory : nil,
+                sku: (itemSku?.isEmpty == false) ? itemSku : nil,
+                unitPrice: itemSchema.unitPrice
             )
         }
 
@@ -659,6 +691,12 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 value: schema.warrantyDurationMonths,
                 confidence: schema.warrantyDurationMonths != nil ? .medium : .none
             ),
+            vatId: field(schema.merchantTaxId, minLength: 4),
+            taxAmount: ExtractedField(
+                value: schema.taxAmount,
+                confidence: schema.taxAmount != nil ? .high : .none
+            ),
+            orderReference: field(schema.orderReference, minLength: 3),
             lineItems: mappedLineItems,
             source: .foundationModel,
             diagnostics: nil

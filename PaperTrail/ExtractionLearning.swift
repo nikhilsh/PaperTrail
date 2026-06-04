@@ -6,6 +6,10 @@ final class MerchantProfile {
     var id: UUID = UUID()
     var normalizedName: String = ""
     var displayName: String = ""
+    /// Normalized merchant tax/registration ID (UEN / GST Reg / VAT ID). When
+    /// present this is a stable, unique business identity — the most reliable
+    /// merchant-matching key, beating name normalization and embeddings.
+    var uen: String?
     var aliasesRaw: String = ""
     var defaultCategory: String?
     var defaultCurrency: String?
@@ -24,6 +28,7 @@ final class MerchantProfile {
         id: UUID = UUID(),
         normalizedName: String,
         displayName: String,
+        uen: String? = nil,
         aliases: [String] = [],
         defaultCategory: String? = nil,
         defaultCurrency: String? = nil,
@@ -41,6 +46,7 @@ final class MerchantProfile {
         self.id = id
         self.normalizedName = normalizedName
         self.displayName = displayName
+        self.uen = uen
         self.aliasesRaw = aliases.joined(separator: "||")
         self.defaultCategory = defaultCategory
         self.defaultCurrency = defaultCurrency
@@ -178,13 +184,19 @@ struct MerchantLearningService {
     func learningContext(for structured: StructuredExtractionResult?) -> MerchantLearningContext? {
         guard let structured else { return nil }
 
+        // Prefer a UEN/tax-ID match — a stable, unique business identity — over
+        // name-based matching. Falls back to merchant/product name candidates.
+        let uenProfile = structured.vatId.value.flatMap { findProfile(byUEN: $0) }
         let merchantCandidates = [
             structured.merchantName.value,
             structured.productName.value
         ].compactMap { $0 }
 
-        for candidate in merchantCandidates {
-            guard let profile = findProfile(matching: candidate) else { continue }
+        let nameProfile = uenProfile == nil
+            ? merchantCandidates.compactMap { findProfile(matching: $0) }.first
+            : nil
+
+        if let profile = uenProfile ?? nameProfile {
             profile.lastUsedAt = .now
             profile.updatedAt = .now
             return MerchantLearningContext(
@@ -214,18 +226,23 @@ struct MerchantLearningService {
         let normalized = Self.normalizeMerchantName(payload.finalMerchantName)
         guard !normalized.isEmpty else { return }
 
-        // Use fuzzy matching so OCR variants of the same store ("Harvey Norman"
-        // vs "HARVEY NORMAN (Suntec)") aggregate into one profile instead of
+        // Match by UEN/tax-ID first (stable unique business identity), then by
+        // fuzzy name so OCR variants of the same store ("Harvey Norman" vs
+        // "HARVEY NORMAN (Suntec)") aggregate into one profile instead of
         // fragmenting the learning loop.
-        let profile = findProfile(matching: payload.finalMerchantName) ?? MerchantProfile(
-            normalizedName: normalized,
-            displayName: payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let normalizedUEN = payload.structured?.vatId.value.flatMap(Self.normalizeUEN)
+        let profile = (normalizedUEN.flatMap { findProfile(byUEN: $0) })
+            ?? findProfile(matching: payload.finalMerchantName)
+            ?? MerchantProfile(
+                normalizedName: normalized,
+                displayName: payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
 
         if profile.modelContext == nil {
             modelContext.insert(profile)
         }
 
+        if let normalizedUEN { profile.uen = normalizedUEN }
         profile.displayName = payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.lastUsedAt = .now
         profile.updatedAt = .now
@@ -296,6 +313,14 @@ struct MerchantLearningService {
             if profile.normalizedName == normalized { return true }
             return profile.aliases.contains { Self.normalizeMerchantName($0) == normalized }
         }
+    }
+
+    /// Deterministic match on the merchant's tax/registration ID (UEN/GST/VAT).
+    private func findProfile(byUEN rawUEN: String) -> MerchantProfile? {
+        guard let normalized = Self.normalizeUEN(rawUEN) else { return nil }
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor) else { return nil }
+        return profiles.first { $0.uen == normalized }
     }
 
     /// Embedding-based fallback: match by *meaning* when exact normalization
@@ -454,6 +479,17 @@ struct MerchantLearningService {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    /// Normalize a tax/registration ID for exact keying: uppercase, alphanumerics
+    /// only (drops dashes/spaces, so "M2-0116439-7" == "M2 0116439 7"). Returns
+    /// nil if fewer than 5 alphanumerics — too short to be a reliable identity.
+    static func normalizeUEN(_ raw: String) -> String? {
+        let cleaned = raw.uppercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map { String($0) }
+            .joined()
+        return cleaned.count >= 5 ? cleaned : nil
     }
 
     // MARK: - Correction metrics
