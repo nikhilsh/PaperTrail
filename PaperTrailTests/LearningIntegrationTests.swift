@@ -41,7 +41,9 @@ struct LearningIntegrationTests {
     // MARK: - Heuristic integration
 
     @Test func learnedDocumentKindBiasesAmbiguousText() {
-        let ambiguous = "completely uninformative words here\nnothing else"
+        // No classifier keyword may appear — even as a SUBSTRING (the lists are
+        // matched with `contains`, so e.g. "uninfoRMAtive" trips the "rma" key).
+        let ambiguous = "lorem ipsum dolor sit amet\nconsectetur elit"
         let extractor = HeuristicFieldExtractor()
 
         let without = extractor.extract(from: ambiguous, learningContext: nil)
