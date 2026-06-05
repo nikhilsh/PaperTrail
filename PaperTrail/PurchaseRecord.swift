@@ -25,6 +25,21 @@ final class PurchaseRecord {
 
     // Notification tracking
     var warrantyNotificationScheduled: Bool = false
+    /// Tracks whether a return-window reminder has been scheduled, so we don't
+    /// double-schedule on re-save. Mirrors `warrantyNotificationScheduled`.
+    var returnWindowNotificationScheduled: Bool = false
+
+    // Trust / claim fields (added in the Settings & Trust wave). All optional or
+    // defaulted so existing CloudKit records migrate via lightweight migration.
+    /// Manufacturer serial / model-specific ID. Surfaced in Detail + Claim Packet.
+    var serialNumber: String?
+    /// Human coverage text, e.g. "Parts & labor", "Parts, labor & accidental".
+    var coverageSummary: String?
+    /// Whether the product has been registered with the manufacturer.
+    var isRegistered: Bool = false
+    /// Optional third proof image — a photo of the item itself, alongside the
+    /// receipt and warranty card. Links to an Attachment by id.
+    var productImageAttachmentID: UUID?
 
     // NOTE: No @Relationship to Attachment. Both models share one CloudKit-backed store,
     // but we intentionally avoid @Relationship to keep the schema simple and avoid
@@ -50,6 +65,11 @@ final class PurchaseRecord {
         supportConfidence: String? = nil,
         supportNote: String? = nil,
         warrantyNotificationScheduled: Bool = false,
+        returnWindowNotificationScheduled: Bool = false,
+        serialNumber: String? = nil,
+        coverageSummary: String? = nil,
+        isRegistered: Bool = false,
+        productImageAttachmentID: UUID? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -69,6 +89,11 @@ final class PurchaseRecord {
         self.supportConfidence = supportConfidence
         self.supportNote = supportNote
         self.warrantyNotificationScheduled = warrantyNotificationScheduled
+        self.returnWindowNotificationScheduled = returnWindowNotificationScheduled
+        self.serialNumber = serialNumber
+        self.coverageSummary = coverageSummary
+        self.isRegistered = isRegistered
+        self.productImageAttachmentID = productImageAttachmentID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
