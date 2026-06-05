@@ -207,6 +207,7 @@ struct LibraryView: View {
             modelContext.delete(attachment)
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
+        NotificationManager.shared.removeReturnWindowReminder(for: record)
         modelContext.delete(record)
 
         Task {

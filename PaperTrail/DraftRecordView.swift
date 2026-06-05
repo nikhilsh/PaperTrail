@@ -796,11 +796,18 @@ struct DraftRecordView: View {
             }
         }
 
-        // Schedule warranty notifications for each created record.
-        if includeWarranty {
+        // Schedule reminders per the user's preferences (§1-B, §6).
+        let reminderPrefs = ReminderSettings.shared
+        if includeWarranty, reminderPrefs.warrantyRemindersEnabled {
             for record in records {
                 record.warrantyNotificationScheduled = true
-                NotificationManager.shared.scheduleWarrantyReminders(for: record)
+                NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+            }
+        }
+        if reminderPrefs.returnWindowRemindersEnabled {
+            for record in records {
+                record.returnWindowNotificationScheduled = true
+                NotificationManager.shared.scheduleReturnWindowReminder(for: record)
             }
         }
 

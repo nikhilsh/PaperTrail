@@ -159,15 +159,25 @@ struct EditRecordView: View {
         let oldWarranty = record.warrantyExpiryDate
         record.warrantyExpiryDate = includeWarranty ? warrantyExpiryDate : nil
 
-        if includeWarranty {
+        let reminderPrefs = ReminderSettings.shared
+        if includeWarranty, reminderPrefs.warrantyRemindersEnabled {
             // Reschedule if warranty date changed
             if oldWarranty != warrantyExpiryDate || !record.warrantyNotificationScheduled {
                 record.warrantyNotificationScheduled = true
-                NotificationManager.shared.scheduleWarrantyReminders(for: record)
+                NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
             }
         } else {
             record.warrantyNotificationScheduled = false
             NotificationManager.shared.removeWarrantyReminders(for: record)
+        }
+
+        // Return-window reminder (§6): schedule/refresh or clear based on the pref.
+        if reminderPrefs.returnWindowRemindersEnabled {
+            record.returnWindowNotificationScheduled = true
+            NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+        } else {
+            record.returnWindowNotificationScheduled = false
+            NotificationManager.shared.removeReturnWindowReminder(for: record)
         }
 
         dismiss()
