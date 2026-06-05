@@ -250,6 +250,16 @@ struct MerchantLearningService {
             )
         }
 
+        // Community fallback: majority-learned merchant facts from OTHER
+        // installs (anonymized, opt-out). Capped well below authoritative so a
+        // personal profile — or the text itself — always outranks it.
+        if let merchantName = structured.merchantName.value {
+            let normalized = Self.normalizeMerchantName(merchantName)
+            if let hint = CommunityLearning.shared.hint(forNormalizedMerchant: normalized) {
+                return hint.learningContext()
+            }
+        }
+
         return nil
     }
 

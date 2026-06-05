@@ -27,6 +27,8 @@ jobs:
       BUNDLE_ID: nikhilsh.PaperTrail
       TEAM_ID: EHW7L3679R
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
     steps:
@@ -116,6 +118,8 @@ jobs:
 
           enum BuildSecrets {
               static let sentryDSN = "${SENTRY_DSN}"
+              static let supabaseURL = "${SUPABASE_URL}"
+              static let supabaseAnonKey = "${SUPABASE_ANON_KEY}"
           }
           EOF
 

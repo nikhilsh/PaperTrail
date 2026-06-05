@@ -136,6 +136,41 @@ system was accidentally designed for sharing. Mechanisms, in deployment order:
 with (1) + (5) now; build (2) when there's a real user base to feed it;
 (3)/(4) ride the inbox backend and adapter decisions respectively.
 
+### Implemented (2026-06): Supabase majority-learning pipeline — no curation
+
+Product decisions superseding the sketch above: **opt-OUT** (default on,
+Settings → Your data → "Share anonymous learning data"), **no human curation
+anywhere** — aggregation is pure SQL — and aggressive-but-anonymized
+collection (structured field corrections; never transcripts, images, or
+identity).
+
+- **Client** (`CommunityLearning.swift`): every locally-logged correction is
+  also POSTed to Supabase (PostgREST, anon key) keyed by a random install
+  UUID — generated locally, never linked to Apple ID/iCloud. Values are
+  scrubbed (emails/phone-shaped runs → `[redacted]`) and capped at 120 chars
+  client-side, 200 server-side. On launch the app pulls the aggregated
+  `community_merchants` table (cached on disk) and uses it as the learning
+  context **only when no personal profile exists**, confidence capped at
+  0.45 — community knowledge is never authoritative.
+- **Backend** (`supabase/schema.sql`, paste-and-go): `correction_events`
+  (RLS: anon may INSERT only — raw rows are unreadable from devices) and
+  `community_merchants` (anon may SELECT only). The "ML" is
+  `refresh_community_merchants()` on pg_cron hourly: `mode()` per merchant
+  per fact across a 12-month window, published only at **≥3 distinct
+  installs** (majority learning + poisoning resistance); raw events expire
+  after 18 months. The same `correction_events` table doubles as the
+  LoRA-adapter training corpus (CSV export) when item 8 matures.
+- **Ops**: secrets `SUPABASE_URL`/`SUPABASE_ANON_KEY` injected into
+  `GeneratedSecrets.swift` by CI (dormant when absent);
+  `supabase-keepalive.yml` pings twice weekly because free-tier projects
+  pause after ~1 week idle.
+- **Tool choice**: Supabase free tier (500 MB Postgres, unlimited API
+  requests, pg_cron) over PocketBase-on-Fyra (no pause, but hand-rolled
+  aggregation + another service to run) and Cloudflare D1 (no pg_cron
+  equivalent without Workers code). Revisit if the pause/500 MB ever bind.
+- **One manual step**: create the free Supabase project, paste
+  `supabase/schema.sql`, add the two repo secrets. Everything else is live.
+
 ## Privacy guardrails
 
 All per-user learning stays on-device (SwiftData + JSONL); Sentry gets field

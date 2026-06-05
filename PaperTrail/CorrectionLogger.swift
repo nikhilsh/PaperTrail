@@ -187,6 +187,10 @@ enum CorrectionLogger {
         for entry in corrections {
             writeEntry(entry)
         }
+
+        // Community learning (opt-out, anonymized): share the same events with
+        // the majority-learning backend. No-op when unconfigured or opted out.
+        CommunityLearning.shared.contribute(entries: corrections)
     }
 
     // MARK: - Storage

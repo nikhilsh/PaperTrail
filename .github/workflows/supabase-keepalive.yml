@@ -1,0 +1,30 @@
+name: Supabase keepalive
+
+# Supabase free-tier projects pause after ~1 week of inactivity, which would
+# silently kill the community-learning pipeline. A weekly authenticated read
+# counts as activity. No-ops cleanly until the secrets are configured.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1,4" # Mon + Thu 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping community_merchants
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Supabase secrets not configured — skipping keepalive."
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/community_merchants?select=merchant_key&limit=1")
+          echo "Keepalive HTTP $code"
+          [ "$code" -lt 500 ] # treat 2xx-4xx as alive; fail only on outage

@@ -170,6 +170,7 @@ struct PaperTrailApp: App {
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
                     await syncCloudImages()
+                    await CommunityLearning.shared.refreshCommunityHints()
                     CorrectionLogger.onLearningFeedback = { payload in
                         Task { @MainActor in
                             let service = MerchantLearningService(modelContext: modelContainer.mainContext)
