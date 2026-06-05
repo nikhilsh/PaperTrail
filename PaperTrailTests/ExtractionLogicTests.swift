@@ -175,6 +175,49 @@ struct ExtractionLogicTests {
         #expect(merged[0].amount == nil)
     }
 
+    // MARK: - Transcript text price overlay (per-item auto-fill catch-all)
+
+    @Test func overlaysTextPricesForBlankItems() {
+        // Real Gain City layout: names + prices on the same transcript line.
+        let text = """
+        BRANDT GAS HOB TI1100B 859.00
+        BUILT IN OVEN BXP6355X 919.00
+        BRANDT INDUCTION HOB TI1018B 759.00
+        REBATE -700.00
+        Total SGD 1,837.00
+        """
+        let items = [
+            LineItem(name: "Brandt Gas Hob", amount: nil, kind: .product),
+            LineItem(name: "Built In Oven", amount: nil, kind: .product),
+            LineItem(name: "Brandt Induction Hob", amount: nil, kind: .product),
+        ]
+        let filled = ExtractionPipeline.overlayTextPrices(items, text: text)
+        #expect(filled.map(\.amount) == [859.00, 919.00, 759.00])
+    }
+
+    @Test func textOverlayIgnoresIntegerCodesAndSummaryRows() {
+        // Model number 4502 must not be read as a price; only the 2-decimal token is.
+        #expect(ExtractionPipeline.priceOnLine("LG 2 DOOR FRIDGE GT-F4502PF 1299.00") == 1299.00)
+        #expect(ExtractionPipeline.priceOnLine("LG FRIDGE MODEL GT-F4502PF") == nil)
+        #expect(ExtractionPipeline.isMoneyToken("859.00"))
+        #expect(ExtractionPipeline.isMoneyToken("1,299.00"))
+        #expect(ExtractionPipeline.isMoneyToken("$49.90"))
+        #expect(!ExtractionPipeline.isMoneyToken("4502"))
+        #expect(!ExtractionPipeline.isMoneyToken("GT-F4502PF"))
+        #expect(!ExtractionPipeline.isMoneyToken("60CM"))
+    }
+
+    @Test func textOverlayKeepsExistingAmountsAndUnmatchedBlanks() {
+        let text = "BRANDT GAS HOB 859.00\nTotal 859.00"
+        let items = [
+            LineItem(name: "Brandt Gas Hob", amount: 859.00, kind: .product),   // already filled → keep
+            LineItem(name: "Dishwasher Quartz", amount: nil, kind: .product),   // not in text → stays blank
+        ]
+        let filled = ExtractionPipeline.overlayTextPrices(items, text: text)
+        #expect(filled[0].amount == 859.00)
+        #expect(filled[1].amount == nil)
+    }
+
     // MARK: - Heuristic line-item metadata rejection
 
     @Test func rejectsOrderMetadataAsLineItems() {

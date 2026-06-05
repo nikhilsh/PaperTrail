@@ -64,7 +64,77 @@ struct ExtractionPipeline: Sendable {
         // per-item amounts that aren't on the receipt. Keep an amount only if its
         // digits actually appear in the OCR text — prefer blank over a made-up number.
         result = groundAmounts(result, text: document.text)
+
+        // Final per-item price fill from the transcript itself. Vision's table grid
+        // is often partial (it may capture item *names* but only some price cells),
+        // so for any item still missing a price, find its line in the OCR text and
+        // read the trailing money token. This is the catch-all that makes secondary
+        // item prices auto-fill even when neither the model nor the table had them.
+        result.lineItems = Self.overlayTextPrices(result.lineItems, text: document.text)
         return result
+    }
+
+    /// Fill blank per-item amounts by locating each item's line in the OCR text
+    /// and reading the last money-shaped token on it (e.g. `859.00`). Integer-only
+    /// tokens (model numbers, quantities) are ignored — a price must have two
+    /// decimal places, keeping with "prefer blank over a made-up number".
+    static func overlayTextPrices(_ items: [LineItem], text: String) -> [LineItem] {
+        guard items.contains(where: { $0.amount == nil }) else { return items }
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+        let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst", "vat",
+                              "balance", "change", "amount due", "rounding"]
+
+        return items.map { item in
+            guard item.amount == nil else { return item }
+            let words = significantWords(item.name)
+            guard !words.isEmpty else { return item }
+
+            var best: (score: Int, price: Double)?
+            for line in lines {
+                let lower = line.lowercased()
+                if summaryMarkers.contains(where: { lower.contains($0) }) { continue }
+                let score = words.filter { lower.contains($0) }.count
+                guard score > 0, let price = priceOnLine(line) else { continue }
+                if best == nil || score > best!.score { best = (score, price) }
+            }
+            // Require matching at least half the item's words so a stray line with
+            // one common word can't donate a wrong price.
+            guard let hit = best, hit.score * 2 >= words.count else { return item }
+            return LineItem(name: item.name, amount: hit.price, quantity: item.quantity,
+                            kind: item.kind, category: item.category,
+                            sku: item.sku, unitPrice: item.unitPrice)
+        }
+    }
+
+    /// Lowercased alphanumeric words of length ≥3 — the tokens used to match an
+    /// item name against a receipt text line.
+    static func significantWords(_ name: String) -> [String] {
+        name.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 }
+    }
+
+    /// The last money-shaped token on a line (two decimal places required), parsed
+    /// to a Double. Returns nil when the line has no such token.
+    static func priceOnLine(_ line: String) -> Double? {
+        var last: Double?
+        for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+            guard isMoneyToken(String(token)),
+                  let value = DocumentStructureOCRService.parseAmount(String(token)) else { continue }
+            last = value
+        }
+        return last
+    }
+
+    /// True when a token is shaped like a currency amount: digits with a decimal
+    /// separator followed by exactly two digits at the end (`859.00`, `1,299.00`,
+    /// `$49.90`). Rejects bare integers (`1234`) and codes (`GT-F4502PF`).
+    static func isMoneyToken(_ token: String) -> Bool {
+        let kept = token.filter { $0.isNumber || $0 == "." || $0 == "," }
+        guard kept.count >= 3, let sep = kept.lastIndex(where: { $0 == "." || $0 == "," }) else { return false }
+        let tail = kept[kept.index(after: sep)...]
+        return tail.count == 2 && tail.allSatisfy(\.isNumber)
     }
 
     /// Null out any extracted amount whose digits don't appear in the OCR text.
