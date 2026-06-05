@@ -495,6 +495,10 @@ struct FoundationModelExtractionService: FieldExtractionService {
             if let productHint = context.productHint {
                 hints.append(productHint)
             }
+            // Few-shot (roadmap #5): replay the user's own recent corrections
+            // for THIS merchant as worked examples. Hard-capped at 2 truncated
+            // lines so the context window stays safe.
+            hints.append(contentsOf: CorrectionLogger.fewShotExamples(forNormalizedMerchant: context.normalizedMerchantName))
             guard !hints.isEmpty else { return "" }
             // Phrase the hints by how much we trust this profile: a merchant
             // corrected many times recently is near-authoritative; a single old

@@ -24,6 +24,9 @@ enum CorrectionLogger {
         let source: String       // ExtractionSource raw value
         let confidence: String   // ExtractionConfidence raw value
         let documentKind: String // DocumentKind raw value
+        /// Normalized merchant key, so corrections can be replayed as per-merchant
+        /// few-shot examples. Optional: pre-existing log lines decode as nil.
+        var merchant: String? = nil
     }
 
     /// Compare original extraction values to the user's final values and log any differences.
@@ -44,6 +47,10 @@ enum CorrectionLogger {
         guard let structured else { return }
 
         let kind = (documentKind ?? structured.documentKind.value ?? .unknown).rawValue
+        let merchantKey: String? = {
+            let normalized = MerchantLearningService.normalizeMerchantName(finalMerchantName)
+            return normalized.isEmpty ? nil : normalized
+        }()
         var corrections: [CorrectionEntry] = []
 
         // Product name
@@ -58,7 +65,8 @@ enum CorrectionLogger {
                 correctedValue: finalProductName,
                 source: structured.source.rawValue,
                 confidence: structured.productName.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -74,7 +82,8 @@ enum CorrectionLogger {
                 correctedValue: finalMerchantName,
                 source: structured.source.rawValue,
                 confidence: structured.merchantName.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -91,7 +100,8 @@ enum CorrectionLogger {
                     correctedValue: fmt.string(from: finalPurchaseDate),
                     source: structured.source.rawValue,
                     confidence: structured.purchaseDate.confidence.rawValue,
-                    documentKind: kind
+                    documentKind: kind,
+                    merchant: merchantKey
                 ))
             }
         }
@@ -105,7 +115,8 @@ enum CorrectionLogger {
                 correctedValue: String(format: "%.2f", finalAmt),
                 source: structured.source.rawValue,
                 confidence: structured.amount.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -120,7 +131,8 @@ enum CorrectionLogger {
                 correctedValue: finalCurrency,
                 source: structured.source.rawValue,
                 confidence: structured.currency.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -136,7 +148,8 @@ enum CorrectionLogger {
                 correctedValue: finalCategory,
                 source: structured.source.rawValue,
                 confidence: structured.category.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -151,7 +164,8 @@ enum CorrectionLogger {
                 correctedValue: "\(finalMonths)",
                 source: structured.source.rawValue,
                 confidence: structured.warrantyDurationMonths.confidence.rawValue,
-                documentKind: kind
+                documentKind: kind,
+                merchant: merchantKey
             ))
         }
 
@@ -240,6 +254,26 @@ enum CorrectionLogger {
             health.bySource[entry.source, default: 0] += 1
         }
         return health
+    }
+
+    /// Up to `limit` recent corrections for one merchant, formatted as few-shot
+    /// prompt lines — the strongest adaptation available without touching model
+    /// weights. Values are truncated and the count hard-capped to protect the
+    /// FM context window (it has overflowed before); everything stays on-device.
+    static func fewShotExamples(
+        forNormalizedMerchant merchant: String?,
+        limit: Int = 2,
+        entries: [CorrectionEntry]? = nil
+    ) -> [String] {
+        guard let merchant, !merchant.isEmpty else { return [] }
+        let relevant = (entries ?? readAllCorrections()).filter { $0.merchant == merchant }
+        return relevant.suffix(limit).map { entry in
+            "On a previous document from this merchant, '\(clip(entry.originalValue))' was the wrong \(entry.fieldName); the correct value was '\(clip(entry.correctedValue))'."
+        }
+    }
+
+    private static func clip(_ value: String, max: Int = 60) -> String {
+        value.count <= max ? value : String(value.prefix(max)) + "…"
     }
 
     /// Read all logged corrections (for debugging / future analytics).
