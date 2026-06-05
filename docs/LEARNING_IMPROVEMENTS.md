@@ -85,9 +85,63 @@ Research notes + roadmap (2026-06). Builds on the shipped learning system; see
      corrections JSONL is already accumulating exactly the right training
      data — keep capturing.
 
-## Privacy guardrails (unchanged)
+## Cross-user learning: using other users' data (research, 2026-06)
 
-All learning stays on-device (SwiftData + JSONL); Sentry gets field *names*
-and outcomes, never values. Any fixture lifted from a real transcript must be
-anonymized (names/addresses/phones) before committing — see
-`ReceiptFixtureTests` conventions.
+Today every device learns alone. The unlock is recognizing **which layer of
+the learned data is personal**:
+
+| Tier | Examples | Shareable? |
+|---|---|---|
+| **Merchant facts** | normalized name, aliases, UEN, document kind, date convention, total-label phrasing ("Total amount due"), default currency, support phone | **Yes** — facts about businesses, identical for every user |
+| **Product facts** | product → category, product → typical warranty length | Mostly — products are public objects (screen for free-text leakage) |
+| **Personal data** | amounts, purchase dates, transcripts, names/addresses | **Never** leaves the device raw |
+
+`MerchantProfile` is, by construction, almost entirely Tier-1 — the learning
+system was accidentally designed for sharing. Mechanisms, in deployment order:
+
+1. **Seed pack (zero infra, do anytime).** Curate merchant profiles (own
+   data + public knowledge) into a bundled/remote JSON the app merges as
+   *community-confidence* priors. Hostable on the existing Fyra site next to
+   the OTA assets; refresh without app updates. New users get a warm start
+   for SG retailers on day one.
+2. **CloudKit public database community directory (no server).** The app's
+   existing container has a public DB every user can read and opt-in write.
+   One `CommunityMerchant` record type keyed by UEN (fallback: normalized
+   name), holding only Tier-1 fields plus contributor counts. Devices
+   contribute their merchant-level hints (never correction values); readers
+   aggregate. Required safeguards:
+   - **Min-N before trust**: a community hint counts only with ≥3 independent
+     contributors agreeing (majority vote per field) — poisoning resistance.
+   - **Precedence**: personal `hintStrength` always outranks community
+     confidence; community hints cap at the "tentative" prompt phrasing.
+   - **Opt-in consent**: a "Help improve PaperTrail for everyone" toggle
+     (off by default; PDPA/GDPR-clean since only merchant facts are shared,
+     but consent + App Store privacy label updates regardless).
+   - Kill-switch flag, recency decay, and rate limits per contributor.
+3. **Backend aggregation (rides the receipts-inbox backend).** When the
+   `receipts@in.papertrail.app` service exists, the same backend can accept
+   opt-in merchant aggregates, curate centrally (human review), and publish
+   a signed community pack via CDN — better moderation than a raw public DB.
+4. **The shared model IS the cross-user vehicle (LoRA).** With explicit
+   opt-in donation of anonymized transcript→fields pairs, train ONE adapter
+   centrally and ship it to everyone via Background Assets. Other users'
+   receipts improve your extraction without any user data being visible to
+   any other user — the cleanest end-state, gated on item 8's economics.
+5. **Already happening, weakly:** the non-PII Sentry breadcrumbs (field
+   outcomes per source/kind) aggregate across all installs today. Reading
+   them developer-side to decide which extractor weakness to fix next *is*
+   cross-user learning — no new consent needed since no values are sent.
+
+**Sequencing for PaperTrail's reality (a handful of users today):** start
+with (1) + (5) now; build (2) when there's a real user base to feed it;
+(3)/(4) ride the inbox backend and adapter decisions respectively.
+
+## Privacy guardrails
+
+All per-user learning stays on-device (SwiftData + JSONL); Sentry gets field
+*names* and outcomes, never values. Any fixture lifted from a real transcript
+must be anonymized (names/addresses/phones) before committing — see
+`ReceiptFixtureTests` conventions. Any future cross-user sharing is opt-in
+and limited to the Tier-1/Tier-2 columns above — correction *values* never
+leave the device except as an explicit, separately-consented data donation
+for adapter training.
