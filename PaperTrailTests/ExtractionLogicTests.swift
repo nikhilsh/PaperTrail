@@ -218,6 +218,37 @@ struct ExtractionLogicTests {
         #expect(filled[1].amount == nil)
     }
 
+    // MARK: - Line-item sanity filter (column-major OCR noise)
+
+    @Test func plausibleProductKeepsRealDevices() {
+        // Real products from the Gain City sales order — must survive.
+        #expect(ExtractionPipeline.isPlausibleProduct("LG WASHER/DRYER - 10/6KG"))
+        #expect(ExtractionPipeline.isPlausibleProduct("LG 2 DOOR FRIDGE"))
+        #expect(ExtractionPipeline.isPlausibleProduct("RHEEM STORAGE HEATER 20L"))
+        #expect(ExtractionPipeline.isPlausibleProduct("EW-PREMIUM-WASHER FRONT/COMBO"))
+        // Lowercase product names with a trailing number are kept (not a bare code).
+        #expect(ExtractionPipeline.isPlausibleProduct("iPhone15 Pro"))
+    }
+
+    @Test func plausibleProductRejectsOCRNoise() {
+        // Bare model numbers / SKU codes.
+        #expect(!ExtractionPipeline.isPlausibleProduct("FV1410H3BA"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("GT-F4604EP"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("XS-20-SLIM"))
+        // Warranty / promo SKU lines.
+        #expect(!ExtractionPipeline.isPlausibleProduct("NPW~WF (2+3 YRS)"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("NPW~FG (2+3 YRS)"))
+        // Free-of-charge gifts and redemption promos.
+        #expect(!ExtractionPipeline.isPlausibleProduct("FOC 3L BABIENCE FIRST CLEAN DETERGENT"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("FOC $50 GROCERY VOC FROM 1/1 - 30/6."))
+        // Section separators and metadata / summary labels.
+        #expect(!ExtractionPipeline.isPlausibleProduct("*** GROUP 2***"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("Manual Order No."))
+        #expect(!ExtractionPipeline.isPlausibleProduct("Discount"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("Total amount due"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("INSTANT CASH REBATE"))
+    }
+
     // MARK: - Heuristic line-item metadata rejection
 
     @Test func rejectsOrderMetadataAsLineItems() {
