@@ -76,6 +76,17 @@ struct ExtractionPipeline: Sendable {
         // OCR noise that the column-major document transcript scatters between them
         // (bare model numbers, warranty/promo SKUs, free-gift lines, summary labels).
         result.lineItems = result.lineItems.filter { Self.isPlausibleProduct($0.name) }
+
+        // Column-aware price fill for COLUMN-MAJOR transcripts (the follow-up the
+        // build-14 diagnosis called for): when the recognizer serializes a table
+        // column-by-column, a description and its price never share a line, so
+        // the same-line overlay above fills nothing. But such receipts often carry
+        // a repeated per-row cell (e.g. an "LCN" code) alternating 1:1 with the
+        // unit-price column — a row anchor that recovers each row's price in
+        // order. Runs after the sanity filter so the surviving items can be
+        // validated 1:1 against the anchored rows; fills nothing when the counts
+        // or transcript order don't line up (prefer blank over bad).
+        result.lineItems = Self.overlayAnchoredColumnPrices(result.lineItems, text: document.text)
         return result
     }
 
@@ -155,6 +166,165 @@ struct ExtractionPipeline: Sendable {
                             kind: item.kind, category: item.category,
                             sku: item.sku, unitPrice: item.unitPrice)
         }
+    }
+
+    // MARK: - Column-major price fill (anchored)
+
+    /// The serialized per-row price column recovered from a column-major
+    /// transcript: one optional price per table row, in row order.
+    struct AnchoredPriceColumn {
+        var rowPrices: [Double?]
+        var firstAnchorIndex: Int
+        var moneyLineIndices: Set<Int>
+    }
+
+    /// Column-aware per-item price fill for column-major transcripts — the
+    /// follow-up the build-14 diagnosis called for. iOS 26's document recognizer
+    /// can serialize a receipt table column-by-column, so a description and its
+    /// price never share a line and `overlayTextPrices` correctly fills nothing.
+    /// Such receipts, however, often carry a repeated per-row cell (e.g. a
+    /// location/LCN code) that alternates 1:1 with the unit-price column in the
+    /// transcript — a row anchor that recovers each row's price *in row order*.
+    ///
+    /// Safety gates (all must hold, otherwise nothing is filled):
+    /// 1. A strict anchor pattern with ≥3 rows exists.
+    /// 2. Every item name occurs in the transcript, in order, BEFORE the price
+    ///    column — the signature of a column-major layout. (Row-major receipts
+    ///    fail this and keep their same-line fills.)
+    /// 3. `items.count ≤ rows`, and item *i* takes row *i*'s price only when the
+    ///    independent line-total money run agrees for that row.
+    /// 4. Only blank amounts are filled, and only with positive prices.
+    static func overlayAnchoredColumnPrices(_ items: [LineItem], text: String) -> [LineItem] {
+        guard !items.isEmpty, items.contains(where: { $0.amount == nil }) else { return items }
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+
+        guard let column = anchoredPriceColumn(in: lines),
+              items.count <= column.rowPrices.count else { return items }
+
+        // Column-major check: names appear, in order, before the price column.
+        var previousIndex = -1
+        for item in items {
+            guard let index = firstOccurrence(of: item.name, in: lines),
+                  index > previousIndex, index < column.firstAnchorIndex else { return items }
+            previousIndex = index
+        }
+
+        // The line-total column (a second, independent row-ordered money run)
+        // must agree with the unit-price column for any row we fill.
+        let totalsRun = longestConsecutiveMoneyRun(in: lines, excluding: column.moneyLineIndices)
+
+        return items.enumerated().map { index, item in
+            guard item.amount == nil,
+                  let price = column.rowPrices[index], price > 0 else { return item }
+            if totalsRun.count >= items.count, index < totalsRun.count,
+               abs(totalsRun[index] - price) > 0.005 {
+                return item // the two columns disagree for this row — prefer blank
+            }
+            return LineItem(name: item.name, amount: price, quantity: item.quantity,
+                            kind: item.kind, category: item.category,
+                            sku: item.sku, unitPrice: item.unitPrice)
+        }
+    }
+
+    /// Detect the anchored unit-price column: a line value repeating ≥3 times
+    /// (one occurrence per table row) with exactly 0 or 1 lone-money lines — and
+    /// nothing else — between consecutive occurrences. Returns one optional
+    /// price per row. Bails when the line before the first anchor is money (a
+    /// price-before-anchor layout would shift every row by one).
+    static func anchoredPriceColumn(in lines: [String]) -> AnchoredPriceColumn? {
+        let moneyValues: [Double?] = lines.map(lineMoneyValue)
+
+        var occurrences: [String: [Int]] = [:]
+        for (index, line) in lines.enumerated() {
+            guard moneyValues[index] == nil,
+                  line.count >= 2, line.count <= 24,
+                  line.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            occurrences[line, default: []].append(index)
+        }
+
+        var best: AnchoredPriceColumn?
+        for (_, indices) in occurrences where indices.count >= 3 {
+            var rowPrices: [Double?] = []
+            var moneyIndices: Set<Int> = []
+            var valid = true
+            var pricedRows = 0
+
+            for k in 0..<indices.count {
+                let betweenStart = indices[k] + 1
+                let betweenEnd = (k + 1 < indices.count) ? indices[k + 1] : min(indices[k] + 2, lines.count)
+                let between = Array(betweenStart..<betweenEnd)
+
+                if k + 1 < indices.count {
+                    // Strict alternation: at most one line between anchors, and
+                    // if present it must be a lone money line.
+                    guard between.count <= 1 else { valid = false; break }
+                    if let only = between.first {
+                        guard let value = moneyValues[only] else { valid = false; break }
+                        rowPrices.append(value)
+                        moneyIndices.insert(only)
+                        pricedRows += 1
+                    } else {
+                        rowPrices.append(nil)
+                    }
+                } else {
+                    // Last row: a price only if the very next line is money.
+                    if let next = between.first, let value = moneyValues[next] {
+                        rowPrices.append(value)
+                        moneyIndices.insert(next)
+                        pricedRows += 1
+                    } else {
+                        rowPrices.append(nil)
+                    }
+                }
+            }
+
+            guard valid, pricedRows >= 2 else { continue }
+            // Ambiguous layout guard: money immediately before the first anchor
+            // means prices could belong to the *preceding* rows.
+            let first = indices[0]
+            if first > 0, moneyValues[first - 1] != nil { continue }
+
+            if best == nil || rowPrices.count > best!.rowPrices.count {
+                best = AnchoredPriceColumn(rowPrices: rowPrices, firstAnchorIndex: first, moneyLineIndices: moneyIndices)
+            }
+        }
+        return best
+    }
+
+    /// The value of a line that is a single money token and nothing else
+    /// (optionally negative: "- 20.00"). Letters anywhere disqualify the line.
+    static func lineMoneyValue(_ line: String) -> Double? {
+        let compact = line.replacingOccurrences(of: " ", with: "")
+        guard !compact.isEmpty, !compact.contains(where: { $0.isLetter }) else { return nil }
+        let negative = compact.hasPrefix("-") || compact.hasPrefix("−") || compact.hasPrefix("(")
+        let unsigned = compact.filter { $0 != "-" && $0 != "−" && $0 != "(" && $0 != ")" }
+        guard isMoneyToken(unsigned),
+              let value = DocumentStructureOCRService.parseAmount(unsigned) else { return nil }
+        return negative ? -value : value
+    }
+
+    /// The longest run of consecutive lone-money lines outside `excluding` —
+    /// the serialized line-total column on a column-major receipt.
+    static func longestConsecutiveMoneyRun(in lines: [String], excluding: Set<Int>) -> [Double] {
+        var bestRun: [Double] = []
+        var current: [Double] = []
+        for (index, line) in lines.enumerated() {
+            if !excluding.contains(index), let value = lineMoneyValue(line) {
+                current.append(value)
+            } else {
+                if current.count > bestRun.count { bestRun = current }
+                current = []
+            }
+        }
+        if current.count > bestRun.count { bestRun = current }
+        return bestRun
+    }
+
+    /// First transcript line whose normalized text contains the item name.
+    static func firstOccurrence(of name: String, in lines: [String]) -> Int? {
+        let normalized = normalizeForMatch(name)
+        guard normalized.count >= 3 else { return nil }
+        return lines.firstIndex { normalizeForMatch($0).contains(normalized) }
     }
 
     private static let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst",
