@@ -119,13 +119,15 @@ struct DocumentStructureOCRService: Sendable {
             // AppLogger.error (it captures a Sentry message).
             if detectedTotal == nil {
                 let cellCount = tables.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.count } }
+                let pricedItems = lineItems.filter { $0.amount != nil }.count
                 AppLogger.error(
-                    "Structured OCR no total: tables=\(tables.count) cells=\(cellCount) items=\(lineItems.count)",
+                    "Structured OCR no total: tables=\(tables.count) cells=\(cellCount) items=\(lineItems.count) priced=\(pricedItems)",
                     category: "extraction.ocr.structured_empty",
                     tags: [
                         "table_count": String(tables.count),
                         "cell_count": String(cellCount),
                         "table_items": String(lineItems.count),
+                        "table_priced": String(pricedItems),
                         "transcript_len": String(transcript.count),
                     ]
                 )
