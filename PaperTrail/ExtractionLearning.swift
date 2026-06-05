@@ -163,6 +163,18 @@ final class ProductCategoryMemory {
         self.lastUsedAt = lastUsedAt
         self.createdAt = createdAt
     }
+
+    /// Confidence in this product → category memory, mirroring
+    /// `MerchantProfile.hintStrength`: evidence (count, saturating at ~5
+    /// sightings) weighted with recency (~6-month decay), so a one-off memory
+    /// from a year ago fades instead of mislabeling forever, while a
+    /// well-evidenced one stays authoritative. Computed — no schema change.
+    var hintStrength: Double {
+        let countFactor = min(1.0, Double(max(0, count)) / 5.0)
+        let days = max(0.0, Date.now.timeIntervalSince(lastUsedAt) / 86_400.0)
+        let recency = exp(-days / 180.0)
+        return min(1.0, countFactor * 0.6 + recency * 0.4)
+    }
 }
 
 struct LearningFeedbackPayload: Sendable {
@@ -381,7 +393,12 @@ struct MerchantLearningService {
         guard normalized.count >= 3 else { return nil }
 
         let descriptor = FetchDescriptor<ProductCategoryMemory>()
-        guard let memories = try? modelContext.fetch(descriptor), !memories.isEmpty else { return nil }
+        guard let fetched = try? modelContext.fetch(descriptor), !fetched.isEmpty else { return nil }
+        // Staleness gate: only memories with enough evidence-and-recency may
+        // suggest. A fresh single sighting passes; the same sighting a year
+        // later has faded below threshold.
+        let memories = fetched.filter { $0.hintStrength >= 0.25 }
+        guard !memories.isEmpty else { return nil }
 
         if let exact = memories.first(where: { $0.normalizedProduct == normalized }) {
             return exact.category
