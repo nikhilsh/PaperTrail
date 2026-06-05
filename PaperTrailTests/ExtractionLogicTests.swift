@@ -126,6 +126,55 @@ struct ExtractionLogicTests {
         #expect(!ExtractionPipeline.amountAppears(249.90, in: text))
     }
 
+    // MARK: - Table-price overlay (per-item auto-fill)
+
+    @Test func overlaysTablePricesOntoBlankItems() {
+        // Text extractor: clean names, prices blanked (model hallucinated → grounded away).
+        let items = [
+            LineItem(name: "Brandt Gas Hob", amount: nil, kind: .product),
+            LineItem(name: "Built In Oven", amount: nil, kind: .product),
+            LineItem(name: "Induction Hob", amount: nil, kind: .product),
+        ]
+        // Table: raw cell names + real prices from the price column.
+        let table = [
+            LineItem(name: "BRANDT GAS HOB", amount: 859.00),
+            LineItem(name: "BUILT IN OVEN", amount: 919.00),
+            LineItem(name: "INDUCTION HOB", amount: 759.00),
+        ]
+        let merged = ExtractionPipeline.overlayTableAmounts(items, from: table)
+        #expect(merged.map(\.amount) == [859.00, 919.00, 759.00])
+        // Clean names are preserved — only amounts are filled.
+        #expect(merged.map(\.name) == ["Brandt Gas Hob", "Built In Oven", "Induction Hob"])
+    }
+
+    @Test func overlayKeepsExistingGroundedAmounts() {
+        let items = [LineItem(name: "Built In Oven", amount: 919.00, kind: .product)]
+        let table = [LineItem(name: "BUILT IN OVEN", amount: 111.11)]
+        let merged = ExtractionPipeline.overlayTableAmounts(items, from: table)
+        #expect(merged[0].amount == 919.00)  // a real, grounded amount is not overwritten
+    }
+
+    @Test func overlayFallsBackToPositionWhenNamesDiffer() {
+        // Names don't match at all, but the two lists align 1:1 → positional fill.
+        let items = [
+            LineItem(name: "Refrigerator", amount: nil, kind: .product),
+            LineItem(name: "Microwave", amount: nil, kind: .product),
+        ]
+        let table = [
+            LineItem(name: "ITEM A", amount: 500.00),
+            LineItem(name: "ITEM B", amount: 250.00),
+        ]
+        let merged = ExtractionPipeline.overlayTableAmounts(items, from: table)
+        #expect(merged.map(\.amount) == [500.00, 250.00])
+    }
+
+    @Test func overlayNoOpWhenTableHasNoPrices() {
+        let items = [LineItem(name: "Refrigerator", amount: nil, kind: .product)]
+        let table = [LineItem(name: "REFRIGERATOR", amount: nil)]  // name-only column
+        let merged = ExtractionPipeline.overlayTableAmounts(items, from: table)
+        #expect(merged[0].amount == nil)
+    }
+
     // MARK: - Heuristic line-item metadata rejection
 
     @Test func rejectsOrderMetadataAsLineItems() {

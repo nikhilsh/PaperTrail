@@ -126,12 +126,52 @@ struct ExtractionPipeline: Sendable {
             ExtractionMetrics.recordStructuralTotalOverride(previous: previous, structural: total)
         }
 
-        // Use table-derived line items when the text extractors produced none.
+        // Line items: the table's price column is the *real* receipt data. The
+        // FM/heuristic line items have cleaner names, but their amounts are often
+        // hallucinated (and then blanked by groundAmounts) — so overlay the table
+        // amounts onto any item missing one. When the text extractors produced no
+        // items at all, take the table's items wholesale.
         if out.lineItems.isEmpty && !structure.tableLineItems.isEmpty {
             out.lineItems = structure.tableLineItems
+        } else if !structure.tableLineItems.isEmpty {
+            out.lineItems = Self.overlayTableAmounts(out.lineItems, from: structure.tableLineItems)
         }
 
         return out
+    }
+
+    /// Fill in missing per-item amounts from the table's price column. Matches a
+    /// text-extractor line item to a priced table row by fuzzy name, falling back
+    /// to position when the two lists are the same length. Only *blank* amounts
+    /// are filled — an amount the model already grounded in the OCR text is kept.
+    static func overlayTableAmounts(_ items: [LineItem], from table: [LineItem]) -> [LineItem] {
+        let priced = table.filter { $0.amount != nil }
+        guard !priced.isEmpty else { return items }
+        let sameLength = items.count == table.count
+
+        return items.enumerated().map { index, item in
+            guard item.amount == nil else { return item }
+            let match = priced.first { namesMatch($0.name, item.name) }
+                ?? (sameLength && table[index].amount != nil ? table[index] : nil)
+            guard let amount = match?.amount else { return item }
+            return LineItem(name: item.name, amount: amount, quantity: item.quantity,
+                            kind: item.kind, category: item.category,
+                            sku: item.sku, unitPrice: item.unitPrice)
+        }
+    }
+
+    /// Loose name equality for matching a clean FM item name against a raw table
+    /// cell: lowercase, alphanumerics only, then substring either direction.
+    static func namesMatch(_ a: String, _ b: String) -> Bool {
+        let na = normalizeForMatch(a), nb = normalizeForMatch(b)
+        guard na.count >= 3, nb.count >= 3 else { return false }
+        return na.contains(nb) || nb.contains(na)
+    }
+
+    private static func normalizeForMatch(_ s: String) -> String {
+        s.lowercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init).joined()
     }
 
     /// Extract structured fields from OCR text.
