@@ -71,6 +71,27 @@ struct ExtractionPipeline: Sendable {
         // read the trailing money token. This is the catch-all that makes secondary
         // item prices auto-fill even when neither the model nor the table had them.
         result.lineItems = Self.overlayTextPrices(result.lineItems, text: document.text)
+
+        // TEMP DEBUG (remove once per-item prices fill on device): when record-worthy
+        // items still lack a price after every overlay, transmit the exact transcript
+        // and the line-item names so we can see the device's line grouping and why the
+        // name→price match missed. This is the user's own receipt in their own Sentry,
+        // a short-lived debug aid. Removed in the follow-up once confirmed.
+        let worthy = result.lineItems.filter { $0.kind.isRecordWorthy }
+        let stillBlank = worthy.filter { $0.amount == nil }
+        if !worthy.isEmpty && !stillBlank.isEmpty {
+            let names = worthy.map { "\($0.amount == nil ? "∅" : "$\(String(format: "%.2f", $0.amount!))") «\($0.name)»" }
+                .joined(separator: " | ")
+            let snippet = String(document.text.prefix(3000))
+            AppLogger.error(
+                "PRICE-DEBUG items=[\(names)] ::TRANSCRIPT:: \(snippet)",
+                category: "extraction.price_debug",
+                tags: [
+                    "items_total": String(worthy.count),
+                    "items_blank": String(stillBlank.count),
+                ]
+            )
+        }
         return result
     }
 
@@ -81,8 +102,6 @@ struct ExtractionPipeline: Sendable {
     static func overlayTextPrices(_ items: [LineItem], text: String) -> [LineItem] {
         guard items.contains(where: { $0.amount == nil }) else { return items }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
-        let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst", "vat",
-                              "balance", "change", "amount due", "rounding"]
 
         return items.map { item in
             guard item.amount == nil else { return item }
@@ -91,8 +110,8 @@ struct ExtractionPipeline: Sendable {
 
             var best: (score: Int, price: Double)?
             for line in lines {
+                if isSummaryLine(line) { continue }
                 let lower = line.lowercased()
-                if summaryMarkers.contains(where: { lower.contains($0) }) { continue }
                 let score = words.filter { lower.contains($0) }.count
                 guard score > 0, let price = priceOnLine(line) else { continue }
                 if best == nil || score > best!.score { best = (score, price) }
@@ -104,6 +123,14 @@ struct ExtractionPipeline: Sendable {
                             kind: item.kind, category: item.category,
                             sku: item.sku, unitPrice: item.unitPrice)
         }
+    }
+
+    private static let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst",
+                                         "vat", "balance", "change", "amount due", "rounding"]
+
+    static func isSummaryLine(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        return summaryMarkers.contains { lower.contains($0) }
     }
 
     /// Lowercased alphanumeric words of length ≥3 — the tokens used to match an
