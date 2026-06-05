@@ -64,7 +64,10 @@ final class HouseholdManager {
     /// Ensure a household root record + CKShare exist, returning the share and
     /// container for `UICloudSharingController`.
     func makeShare() async throws -> (CKShare, CKContainer) {
-        if let share = cachedShare ?? (try await fetchExistingShare()) {
+        if let share = cachedShare {
+            return (share, container)
+        }
+        if let share = try await fetchExistingShare() {
             cachedShare = share
             return (share, container)
         }
