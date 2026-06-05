@@ -120,6 +120,11 @@ struct MerchantLearningContext: Sendable {
     let dateHint: String?
     let productHint: String?
 
+    /// The document kind this merchant has *consistently* produced (set only
+    /// when every learned kind agrees) — lets extraction assume "a Gain City
+    /// scan is a sales order" when the text itself is ambiguous.
+    var likelyDocumentKind: DocumentKind? = nil
+
     /// How much to trust this profile's hints, in `[0, 1]`. Derived from the
     /// number of corrections (a merchant corrected 10× is near-authoritative)
     /// decayed by recency (stores change layout; old corrections weigh less).
@@ -129,6 +134,23 @@ struct MerchantLearningContext: Sendable {
 
     /// Whether the hints are strong enough to auto-apply without the user asking.
     var isAuthoritative: Bool { confidence >= 0.6 }
+
+    /// The product name quoted inside `productHint` ("…similar to 'X'."), for
+    /// consumers that want the structured value rather than the prose — the
+    /// heuristic extractor uses it to rescue a blank product name.
+    var hintedProductName: String? {
+        guard let hint = productHint,
+              let open = hint.firstIndex(of: "'") else { return nil }
+        let afterOpen = hint.index(after: open)
+        guard let close = hint[afterOpen...].firstIndex(of: "'") else { return nil }
+        let name = String(hint[afterOpen..<close]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Whether `dateHint` records that this merchant prints day-first dates.
+    var prefersDayFirstDates: Bool {
+        dateHint?.localizedCaseInsensitiveContains("day-first") == true
+    }
 }
 
 // MARK: - Item-level category memory
@@ -221,6 +243,9 @@ struct MerchantLearningService {
                 amountHint: profile.amountHint,
                 dateHint: profile.dateHint,
                 productHint: profile.productHint,
+                // Bias the document kind only when this merchant has been
+                // consistent — one kind seen across all corrections.
+                likelyDocumentKind: profile.documentKinds.count == 1 ? profile.documentKinds.first : nil,
                 confidence: profile.hintStrength
             )
         }
