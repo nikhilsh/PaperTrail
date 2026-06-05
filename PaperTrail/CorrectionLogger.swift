@@ -212,6 +212,36 @@ enum CorrectionLogger {
         }
     }
 
+    /// Aggregate, non-PII view of the corrections log — counts only, never
+    /// values — for the Diagnostics screen and the Copy-diagnostics blob.
+    /// This is the first consumer of the previously write-only JSONL.
+    struct CorrectionHealth: Sendable {
+        var totalCorrections = 0
+        var last30Days = 0
+        var byField: [String: Int] = [:]
+        var bySource: [String: Int] = [:]
+
+        /// The field users fix most — the next place extraction should improve.
+        /// Ties break alphabetically so the answer is deterministic.
+        var mostCorrectedField: String? {
+            byField.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.first?.key
+        }
+    }
+
+    /// Summarize the corrections log. `entries` is injectable for tests;
+    /// defaults to reading the on-disk JSONL.
+    static func healthSummary(now: Date = .now, entries: [CorrectionEntry]? = nil) -> CorrectionHealth {
+        var health = CorrectionHealth()
+        let cutoff = now.addingTimeInterval(-30 * 86_400)
+        for entry in entries ?? readAllCorrections() {
+            health.totalCorrections += 1
+            if entry.timestamp >= cutoff { health.last30Days += 1 }
+            health.byField[entry.fieldName, default: 0] += 1
+            health.bySource[entry.source, default: 0] += 1
+        }
+        return health
+    }
+
     /// Read all logged corrections (for debugging / future analytics).
     static func readAllCorrections() -> [CorrectionEntry] {
         let url = logFileURL

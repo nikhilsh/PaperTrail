@@ -11,6 +11,8 @@ import FoundationModels
 struct AdvancedDiagnosticsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
+    @Query private var merchantProfiles: [MerchantProfile]
+    @Query private var productMemories: [ProductCategoryMemory]
     @Environment(AuthenticationManager.self) private var authManager
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Environment(\.dismiss) private var dismiss
@@ -25,6 +27,7 @@ struct AdvancedDiagnosticsView: View {
     @State private var fmDiagResult = ""
     @State private var fmDiagRunning = false
     @State private var copied = false
+    @State private var correctionHealth = CorrectionLogger.CorrectionHealth()
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -165,6 +168,22 @@ struct AdvancedDiagnosticsView: View {
                     }
                 }
 
+                // Learning — how the extraction self-improvement loop is doing.
+                SettingsSectionLabel(text: "Learning")
+                SettingsCard {
+                    SettingsRow(title: "Merchant profiles", value: "\(merchantProfiles.count)")
+                    SettingsRowDivider()
+                    SettingsRow(title: "Product memories", value: "\(productMemories.count)")
+                    SettingsRowDivider()
+                    SettingsRow(title: "Corrections logged",
+                                subtitle: "\(correctionHealth.last30Days) in the last 30 days",
+                                value: "\(correctionHealth.totalCorrections)")
+                    if let field = correctionHealth.mostCorrectedField {
+                        SettingsRowDivider()
+                        SettingsRow(title: "Most corrected field", value: field)
+                    }
+                }
+
                 // Observability
                 SettingsSectionLabel(text: "Observability")
                 SettingsCard {
@@ -190,6 +209,10 @@ struct AdvancedDiagnosticsView: View {
             .padding(.bottom, 130)
         }
         .ptScreen()
+        .task {
+            // File IO off the render path — counts only, never values.
+            correctionHealth = CorrectionLogger.healthSummary()
+        }
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -235,6 +258,14 @@ struct AdvancedDiagnosticsView: View {
         lines.append("Proof images: \(proofImagesSummary)")
         lines.append("On device: \(onDeviceSummary)")
         lines.append("Image sync errors: \(cloudImageSync.transferErrors.count)")
+        lines.append("")
+        lines.append("[Learning]")
+        lines.append("Merchant profiles: \(merchantProfiles.count)")
+        lines.append("Product memories: \(productMemories.count)")
+        lines.append("Corrections logged: \(correctionHealth.totalCorrections) (\(correctionHealth.last30Days) last 30 days)")
+        if let field = correctionHealth.mostCorrectedField {
+            lines.append("Most corrected field: \(field)")
+        }
         lines.append("")
         lines.append("[Observability]")
         lines.append("Sentry configured: \(AppLogger.isSentryEnabled)")
