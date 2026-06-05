@@ -97,21 +97,26 @@ enum ExportService {
         let dateFmt = ISO8601DateFormatter()
         dateFmt.formatOptions = [.withFullDate]
         for r in records {
-            let cells = [
-                r.productName,
-                r.merchantName ?? "",
-                r.purchaseDate.map { dateFmt.string(from: $0) } ?? "",
-                r.amount.map { String(format: "%.2f", $0) } ?? "",
-                r.currency ?? "",
-                r.category ?? "",
-                r.room ?? "",
-                r.tags.joined(separator: "; "),
-                r.serialNumber ?? "",
-                r.coverageSummary ?? "",
-                r.isRegistered ? "Yes" : "No",
-                r.warrantyExpiryDate.map { dateFmt.string(from: $0) } ?? "",
-                r.notes ?? "",
-            ]
+            // Built as explicitly-typed locals (not one big literal) so the
+            // type-checker doesn't time out on the mixed optional/ternary array.
+            let purchase: String = r.purchaseDate.map { dateFmt.string(from: $0) } ?? ""
+            let amount: String = r.amount.map { String(format: "%.2f", $0) } ?? ""
+            let expiry: String = r.warrantyExpiryDate.map { dateFmt.string(from: $0) } ?? ""
+            let registered: String = r.isRegistered ? "Yes" : "No"
+            var cells: [String] = []
+            cells.append(r.productName)
+            cells.append(r.merchantName ?? "")
+            cells.append(purchase)
+            cells.append(amount)
+            cells.append(r.currency ?? "")
+            cells.append(r.category ?? "")
+            cells.append(r.room ?? "")
+            cells.append(r.tags.joined(separator: "; "))
+            cells.append(r.serialNumber ?? "")
+            cells.append(r.coverageSummary ?? "")
+            cells.append(registered)
+            cells.append(expiry)
+            cells.append(r.notes ?? "")
             rows.append(cells.map(csvEscape).joined(separator: ","))
         }
         return rows.joined(separator: "\n")
