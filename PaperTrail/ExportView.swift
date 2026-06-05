@@ -64,7 +64,7 @@ struct ExportView: View {
                 .padding(.top, 4)
             }
             .padding(.horizontal, PT.Metric.screenPad)
-            .padding(.bottom, 60)
+            .padding(.bottom, 130)
         }
         .ptScreen()
         .navigationBarBackButtonHidden()

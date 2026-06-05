@@ -187,7 +187,7 @@ struct AdvancedDiagnosticsView: View {
             }
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.top, 6)
-            .padding(.bottom, 40)
+            .padding(.bottom, 130)
         }
         .ptScreen()
         .navigationBarBackButtonHidden()

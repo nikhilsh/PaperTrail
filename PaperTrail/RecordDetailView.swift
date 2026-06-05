@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import SafariServices
 
 struct RecordDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -17,6 +18,7 @@ struct RecordDetailView: View {
     @State private var productPhotoItem: PhotosPickerItem?
     @State private var isAddingProductPhoto = false
     @State private var toastMessage: String?
+    @State private var showRegisterSafari = false
 
     private let scanningService = ScanningService()
 
@@ -119,6 +121,12 @@ struct RecordDetailView: View {
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
             ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
+        }
+        .sheet(isPresented: $showRegisterSafari) {
+            if let url = registerSearchURL {
+                SafariView(url: url)
+                    .ignoresSafeArea()
+            }
         }
         .photosPicker(isPresented: $showProductPhotoPicker, selection: $productPhotoItem, matching: .images)
         .onChange(of: productPhotoItem) { _, newItem in
@@ -577,11 +585,19 @@ struct RecordDetailView: View {
         }
     }
 
-    private func registerProduct() {
+    /// The manufacturer-registration search, shown in an in-app Safari view.
+    /// Presented via SFSafariViewController (not `openURL`) so it ALWAYS opens
+    /// in Safari — a google.com universal link would otherwise get claimed by
+    /// the Google app when installed.
+    private var registerSearchURL: URL? {
         let query = "\(brand) product registration"
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "https://www.google.com/search?q=\(query)") {
-            openURL(url)
+        return URL(string: "https://www.google.com/search?q=\(query)")
+    }
+
+    private func registerProduct() {
+        if registerSearchURL != nil {
+            showRegisterSafari = true
         }
     }
 
@@ -676,4 +692,18 @@ private struct ProofThumbnail: View {
         Text("Preview requires SwiftData context")
     }
     .environmentObject(CloudImageSyncManager.shared)
+}
+
+// MARK: - In-app Safari
+
+/// In-app Safari presentation. Used for the Register flow so the page always
+/// opens in Safari instead of being claimed by another app's universal link.
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
