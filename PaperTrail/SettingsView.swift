@@ -14,6 +14,7 @@ struct SettingsView: View {
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("lastCloudSyncDate") private var lastCloudSyncRaw = 0.0
+    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = true
 
     private let reminders = ReminderSettings.shared
 
@@ -115,6 +116,10 @@ struct SettingsView: View {
                         SettingsRow(icon: "tray.and.arrow.down", iconColor: PT.gold, title: "Import receipts",
                                     subtitle: "From Photos, Files, or your inbox", showChevron: true)
                     }.buttonStyle(.plain)
+                    SettingsRowDivider()
+                    SettingsRow(icon: "brain", iconColor: PT.gold, title: "Share anonymous learning data",
+                                subtitle: "Merchant patterns only — never your purchases",
+                                toggle: $communityLearningEnabled)
                     SettingsRowDivider()
                     SettingsRow(icon: "lock", iconColor: PT.sage, title: "Records are private",
                                 subtitle: "Stored in your iCloud — only you can see them")
