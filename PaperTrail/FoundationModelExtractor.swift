@@ -871,7 +871,15 @@ struct HeuristicFieldExtractor {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.heuristic")
 
     func extract(from text: String, learningContext: MerchantLearningContext? = nil) -> StructuredExtractionResult {
-        let docKind = classifyDocument(from: text)
+        var docKind = classifyDocument(from: text)
+        // Learned document-kind bias: when the text itself gives no signal but
+        // this merchant has consistently produced one kind, assume it (low
+        // confidence — surfaced as a hint, never a fact).
+        if docKind.value == nil || docKind.value == .unknown,
+           let learnedKind = learningContext?.likelyDocumentKind, learnedKind != .unknown,
+           (learningContext?.confidence ?? 0) >= 0.3 {
+            docKind = ExtractedField(value: learnedKind, confidence: .low)
+        }
 
         let rawProduct = extractProductName(from: text)
         let rawMerchant = extractMerchantName(from: text)
@@ -896,6 +904,21 @@ struct HeuristicFieldExtractor {
                 return nil
             }
             return v
+        }()
+
+        // Learned-product rescue: when heuristics found no usable product name
+        // but this merchant's profile remembers the typical main item, pick the
+        // transcript line that best matches it — low confidence, so the Review
+        // screen still flags it for confirmation.
+        let resolvedProduct: (value: String?, confidence: ExtractionConfidence) = {
+            if let productName { return (productName, .heuristic) }
+            guard let hinted = learningContext?.hintedProductName,
+                  (learningContext?.confidence ?? 0) >= 0.3,
+                  let match = Self.lineMatching(hinted, in: text),
+                  !looksLikeBoilerplate(match), !looksLikeOCRJunk(match),
+                  isValidProductName(match) else { return (nil, .none) }
+            Self.logger.info("Product name rescued from merchant hint")
+            return (match, .low)
         }()
 
         let merchantName: String? = {
@@ -946,14 +969,14 @@ struct HeuristicFieldExtractor {
         let resolvedCategory = (learnedCategory?.isEmpty == false ? learnedCategory : nil)
         let resolvedWarrantyMonths = rawWarrantyMonths ?? learnedWarrantyMonths
 
-        let fieldCount = [productName, merchantName, resolvedCurrency, resolvedCategory].compactMap({ $0 }).count
+        let fieldCount = [resolvedProduct.value, merchantName, resolvedCurrency, resolvedCategory].compactMap({ $0 }).count
             + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (resolvedWarrantyMonths != nil ? 1 : 0)
 
         Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected, \(lineItems.count, privacy: .public) line items")
 
         return StructuredExtractionResult(
             documentKind: docKind,
-            productName: ExtractedField(value: productName, confidence: productName != nil ? .heuristic : .none),
+            productName: ExtractedField(value: resolvedProduct.value, confidence: resolvedProduct.value != nil ? resolvedProduct.confidence : .none),
             merchantName: ExtractedField(value: merchantName, confidence: merchantName != nil ? .heuristic : .none),
             purchaseDate: ExtractedField(value: purchaseDate, confidence: purchaseDate != nil ? .heuristic : .none),
             amount: ExtractedField(value: amount, confidence: amount != nil ? .heuristic : .none),
@@ -1032,6 +1055,24 @@ struct HeuristicFieldExtractor {
 
     private func countKeywords(_ text: String, _ keywords: [String]) -> Int {
         keywords.filter { text.contains($0) }.count
+    }
+
+    /// The transcript line sharing the most significant words with `target`
+    /// (at least half required) — used by the learned-product rescue.
+    /// `internal` so it is unit-testable.
+    static func lineMatching(_ target: String, in text: String) -> String? {
+        let words = ExtractionPipeline.significantWords(target)
+        guard !words.isEmpty else { return nil }
+        var best: (score: Int, line: String)?
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.count >= 3 else { continue }
+            let lower = line.lowercased()
+            let score = words.filter { lower.contains($0) }.count
+            if score > (best?.score ?? 0) { best = (score, line) }
+        }
+        guard let best, best.score * 2 >= words.count else { return nil }
+        return best.line
     }
 
     // MARK: - Boilerplate / junk detection
