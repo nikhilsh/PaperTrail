@@ -30,7 +30,7 @@ Research notes + roadmap (2026-06). Builds on the shipped learning system; see
 
 ### Near-term (high value, low risk)
 
-1. **Feed the stored hints to the heuristic path.** `amountHint`, `dateHint`,
+1. ✅ *(shipped, PR #45)* **Feed the stored hints to the heuristic path.** `amountHint`, `dateHint`,
    `productHint` are inferred and stored per merchant but only the FM prompt
    reads them. The heuristic extractor (which runs on every scan, and is the
    *only* path when Apple Intelligence is off) could use them to bias its
@@ -41,25 +41,25 @@ Research notes + roadmap (2026-06). Builds on the shipped learning system; see
    (anonymized) so the fix is regression-guarded in CI forever. The
    column-major Gain City receipt is the template — `ColumnPriceFillTests`
    was built exactly this way. Make this the standard bug-fix workflow.
-3. **Use learned `documentKinds`.** Captured per merchant, never read. Bias
+3. ✅ *(shipped, PR #45)* **Use learned `documentKinds`.** Captured per merchant, never read. Bias
    the document-kind classifier with the merchant's history (a Gain City scan
    is near-certainly a sales order) — improves kind-dependent extraction
    phrasing and FM instructions.
-4. **Read the corrections JSONL.** It's currently write-only. A lightweight
+4. ✅ *(shipped, PR #46 — Diagnostics "Learning" card + Copy-diagnostics section)* **Read the corrections JSONL.** It's currently write-only. A lightweight
    on-device summary (per-field correction rates by merchant/source) could:
    (a) drive an "extraction health" line in Diagnostics, (b) auto-tune when
    to trust FM vs heuristic per merchant, (c) be exportable for offline eval.
 
 ### Medium-term
 
-5. **Per-merchant few-shot in the FM prompt.** Beyond hints, include 1–2 of
+5. ✅ *(shipped, PR #47 — 2 examples max, values clipped)* **Per-merchant few-shot in the FM prompt.** Beyond hints, include 1–2 of
    the user's *actual past corrections* for this merchant as input→output
    examples ("for this store, the total appears as 'Total amount due'"). This
    is the strongest "training" available without touching model weights —
    prompt-level adaptation, instantly reversible, no shipping cost. Guard the
    context window (the FM context-overflow failure of 2026-06-04 — chunk or
    summarize examples).
-6. **Embedding-based product memory.** `ProductCategoryMemory` already fuzzy
+6. ◐ *(merchant aliasing already existed via SemanticMatcher; product-side fuzzy match also present)* **Embedding-based product memory.** `ProductCategoryMemory` already fuzzy
    matches via `SemanticMatcher`; extend the same embedding store to merchant
    aliasing (replacing the 0.82-threshold name fuzz) and to "similar past
    product → warranty length" suggestions.
