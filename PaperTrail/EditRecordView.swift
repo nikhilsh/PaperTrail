@@ -18,6 +18,9 @@ struct EditRecordView: View {
     @State private var category: String
     @State private var room: String
     @State private var tagsText: String
+    @State private var serialNumber: String
+    @State private var coverageSummary: String
+    @State private var isRegistered: Bool
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -41,6 +44,9 @@ struct EditRecordView: View {
         _category = State(initialValue: record.category ?? "")
         _room = State(initialValue: record.room ?? "")
         _tagsText = State(initialValue: record.tags.joined(separator: ", "))
+        _serialNumber = State(initialValue: record.serialNumber ?? "")
+        _coverageSummary = State(initialValue: record.coverageSummary ?? "")
+        _isRegistered = State(initialValue: record.isRegistered)
     }
 
     var body: some View {
@@ -72,6 +78,14 @@ struct EditRecordView: View {
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
+            }
+
+            Section("Proof & coverage") {
+                TextField("Serial number", text: $serialNumber)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+                TextField("Covers (e.g. Parts & labor)", text: $coverageSummary)
+                Toggle("Registered with manufacturer", isOn: $isRegistered)
             }
 
             Section("Organization") {
@@ -136,6 +150,9 @@ struct EditRecordView: View {
         record.category = category.isEmpty ? nil : category
         record.room = room.isEmpty ? nil : room
         record.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        record.serialNumber = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.coverageSummary = coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.isRegistered = isRegistered
         record.updatedAt = .now
 
         // Update warranty & notifications
