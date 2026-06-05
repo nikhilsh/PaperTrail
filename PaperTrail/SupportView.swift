@@ -10,9 +10,6 @@ struct SupportView: View {
     @Query private var allAttachments: [Attachment]
     let record: PurchaseRecord
 
-    @State private var shareURL: URL?
-    @State private var showShareSheet = false
-    @State private var isExporting = false
 
     private var attachments: [Attachment] { allAttachments.filter { $0.recordID == record.id } }
     private var support: SupportInfo? { record.supportInfo }
@@ -48,16 +45,14 @@ struct SupportView: View {
                     } else {
                         ProofChipsOnPaper(attachments: attachments)
                     }
-                    Button {
-                        Task { await exportBundle() }
+                    // The Claim Packet (§9) supersedes the raw proof-bundle share:
+                    // one formatted PDF with everything a claim needs.
+                    NavigationLink {
+                        ClaimPacketView(record: record)
                     } label: {
-                        HStack(spacing: 8) {
-                            if isExporting { ProgressView().tint(PT.paper) }
-                            Text(isExporting ? "Preparing…" : "Share proof bundle")
-                        }
+                        Text("Get claim packet")
                     }
                     .buttonStyle(PTDarkButtonStyle())
-                    .disabled(isExporting || attachments.isEmpty)
                 }
 
                 stepCard(number: 2, title: "Contact \(brand) support") {
@@ -106,11 +101,6 @@ struct SupportView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(PT.txt2)
                 }
-            }
-        }
-        .sheet(isPresented: $showShareSheet) {
-            if let shareURL {
-                ShareSheetView(activityItems: [shareURL])
             }
         }
     }
@@ -198,18 +188,6 @@ struct SupportView: View {
     private func findServiceCenter() {
         let query = "\(brand) service center".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         if let url = URL(string: "http://maps.apple.com/?q=\(query)") { openURL(url) }
-    }
-
-    private func exportBundle() async {
-        isExporting = true
-        defer { isExporting = false }
-        do {
-            let url = try await RecordSharingManager.exportRecord(record, attachments: attachments)
-            shareURL = url
-            showShareSheet = true
-        } catch {
-            AppLogger.error("Support share export failed: \(error)", category: "sharing")
-        }
     }
 }
 

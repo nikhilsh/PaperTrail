@@ -12,9 +12,6 @@ struct RecordDetailView: View {
 
     @State private var showDeleteConfirmation = false
     @State private var selectedImageFilename: SelectedFilename?
-    @State private var showShareSheet = false
-    @State private var shareURL: URL?
-    @State private var isExporting = false
     @State private var showScanner = false
     @State private var isAddingProof = false
     @State private var productPhotoItem: PhotosPickerItem?
@@ -87,14 +84,13 @@ struct RecordDetailView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 14) {
-                    Button { Task { await exportRecord() } } label: {
-                        if isExporting {
-                            ProgressView().tint(PT.txt)
-                        } else {
-                            Image(systemName: "square.and.arrow.up")
-                        }
+                    // Share now routes to the Claim Packet (§9) — a formatted PDF
+                    // — superseding the old raw proof-bundle share.
+                    NavigationLink {
+                        ClaimPacketView(record: record)
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                     }
-                    .disabled(isExporting)
 
                     NavigationLink {
                         EditRecordView(record: record)
@@ -104,11 +100,6 @@ struct RecordDetailView: View {
                 }
                 .font(.system(size: 16))
                 .foregroundStyle(PT.txt2)
-            }
-        }
-        .sheet(isPresented: $showShareSheet) {
-            if let shareURL {
-                ShareSheetView(activityItems: [shareURL])
             }
         }
         .fullScreenCover(isPresented: $showScanner) {
@@ -621,18 +612,6 @@ struct RecordDetailView: View {
         let toUpload = result.attachments.map { AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename) }
         for info in toUpload {
             await cloudImageSync.upload(attachmentID: info.id, localFilename: info.localFilename)
-        }
-    }
-
-    private func exportRecord() async {
-        isExporting = true
-        defer { isExporting = false }
-        do {
-            let url = try await RecordSharingManager.exportRecord(record, attachments: attachments)
-            shareURL = url
-            showShareSheet = true
-        } catch {
-            AppLogger.error("Record export failed: \(error)", category: "sharing")
         }
     }
 
