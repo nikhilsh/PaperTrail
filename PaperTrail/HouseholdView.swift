@@ -76,7 +76,7 @@ struct HouseholdView: View {
                 }
             }
             .padding(.horizontal, PT.Metric.screenPad)
-            .padding(.bottom, 60)
+            .padding(.bottom, 130)
         }
         .ptScreen()
         .navigationBarBackButtonHidden()
