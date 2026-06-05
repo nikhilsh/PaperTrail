@@ -45,7 +45,7 @@ final class ReminderSettings {
         static let shareWithHousehold = "reminders.shareWithHousehold"
     }
 
-    private let defaults: UserDefaults
+    @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
