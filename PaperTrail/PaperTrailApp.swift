@@ -28,6 +28,14 @@ private func addStartupBreadcrumb(level: SentryLevel, category: String, message:
 }
 
 private func configureSentry() {
+    // Respect the user's Diagnostics → "Crash & error reporting" preference
+    // (defaults to on). Applies on next launch, which the toggle's subtitle states.
+    UserDefaults.standard.register(defaults: ["crashReportingEnabled": true])
+    guard UserDefaults.standard.bool(forKey: "crashReportingEnabled") else {
+        AppLogger.info("Crash reporting disabled by user preference", category: "observability")
+        return
+    }
+
     let dsn = BuildSecrets.sentryDSN
     guard !dsn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return
@@ -191,5 +199,9 @@ struct PaperTrailApp: App {
         // Upload first (source device pushes), then download (receiving device pulls)
         await manager.uploadMissingImages(attachments: syncInfos)
         await manager.syncMissingImages(attachments: syncInfos)
+
+        // Record the time of the last successful sync so Settings can show an
+        // honest "Backed up · {relativeTime}" instead of a permanent green (§7).
+        UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "lastCloudSyncDate")
     }
 }
