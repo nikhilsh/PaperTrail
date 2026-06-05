@@ -72,27 +72,59 @@ struct ExtractionPipeline: Sendable {
         // item prices auto-fill even when neither the model nor the table had them.
         result.lineItems = Self.overlayTextPrices(result.lineItems, text: document.text)
 
-        // TEMP DEBUG (remove once per-item prices fill on device): when record-worthy
-        // items still lack a price after every overlay, transmit the exact transcript
-        // and the line-item names so we can see the device's line grouping and why the
-        // name→price match missed. This is the user's own receipt in their own Sentry,
-        // a short-lived debug aid. Removed in the follow-up once confirmed.
-        let worthy = result.lineItems.filter { $0.kind.isRecordWorthy }
-        let stillBlank = worthy.filter { $0.amount == nil }
-        if !worthy.isEmpty && !stillBlank.isEmpty {
-            let names = worthy.map { "\($0.amount == nil ? "∅" : "$\(String(format: "%.2f", $0.amount!))") «\($0.name)»" }
-                .joined(separator: " | ")
-            let snippet = String(document.text.prefix(3000))
-            AppLogger.error(
-                "PRICE-DEBUG items=[\(names)] ::TRANSCRIPT:: \(snippet)",
-                category: "extraction.price_debug",
-                tags: [
-                    "items_total": String(worthy.count),
-                    "items_blank": String(stillBlank.count),
-                ]
-            )
-        }
+        // Sanity-filter the line items so the picker shows real products, not the
+        // OCR noise that the column-major document transcript scatters between them
+        // (bare model numbers, warranty/promo SKUs, free-gift lines, summary labels).
+        result.lineItems = result.lineItems.filter { Self.isPlausibleProduct($0.name) }
         return result
+    }
+
+    /// Whether a line-item name plausibly denotes a purchased product, as opposed
+    /// to OCR noise a receipt interleaves with real items. The document recognizer
+    /// serializes tables column-by-column, so the "Description" column arrives as a
+    /// run of lines that mixes product names with model numbers, warranty/promo SKUs,
+    /// free-gift ("FOC") lines, and summary labels — all of which the extractors can
+    /// mistake for items. Rejecting them keeps the multi-item picker trustworthy.
+    static func isPlausibleProduct(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        guard trimmed.count >= 3 else { return false }
+
+        // Summary rows and metadata labels.
+        if isSummaryLine(trimmed) { return false }
+        let metadataLabels = ["order no", "order date", "order number", "delivery date",
+                              "delivery time", "sales person", "salesperson", "payment term",
+                              "payment method", "customer no", "manual order", "discount",
+                              "remarks", "signature", "certificate no", "gst reg", "uen",
+                              "ref no", "reference", "qty uom", "unit price", "rebate",
+                              "redemption", "redeem"]
+        if metadataLabels.contains(where: { lower.contains($0) }) { return false }
+
+        // Section separators like "*** GROUP 2***".
+        if trimmed.contains("***") { return false }
+
+        // Free-of-charge gifts / vouchers — bundled, not a purchased device.
+        if lower.hasPrefix("foc ") || lower.hasPrefix("free ") || lower.contains("grocery voc") {
+            return false
+        }
+
+        // Warranty/promo SKU lines such as "NPW~WF (2+3 YRS)".
+        if trimmed.contains("~") { return false }
+        if lower.contains("yrs") && trimmed.contains("(") { return false }
+
+        // Bare model number / SKU code: a single whitespace-free token that mixes
+        // UPPERCASE letters with digits (e.g. FV1410H3BA, GT-F4604EP, XS-20-SLIM).
+        // A real product name has spaces/real words, and lowercase product names
+        // (e.g. "iPhone15") are kept because their letters aren't all uppercase.
+        if !trimmed.contains(" ") {
+            let letters = trimmed.filter { $0.isLetter }
+            let hasDigit = trimmed.contains { $0.isNumber }
+            let allUpper = !letters.isEmpty && letters.allSatisfy { $0.isUppercase }
+            let codeLike = trimmed.contains("-") || trimmed.count >= 6
+            if hasDigit && allUpper && codeLike { return false }
+        }
+
+        return true
     }
 
     /// Fill blank per-item amounts by locating each item's line in the OCR text
