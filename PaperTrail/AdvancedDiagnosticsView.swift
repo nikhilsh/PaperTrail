@@ -57,6 +57,14 @@ struct AdvancedDiagnosticsView: View {
         activeSyncBackend == "Local fallback" ? "Local fallback" : (authManager.isSignedIn ? "Active" : "Sign in required")
     }
 
+    private var activeWarrantyCount: Int {
+        records.filter { $0.warrantyStatus == .active || $0.warrantyStatus == .expiringSoon }.count
+    }
+
+    private var scheduledNotificationsSummary: String {
+        records.contains(where: \.warrantyNotificationScheduled) ? "Scheduled" : "None"
+    }
+
     private var versionString: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—" }
     private var buildString: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—" }
 
@@ -123,6 +131,14 @@ struct AdvancedDiagnosticsView: View {
                         .font(.caption)
                         .foregroundStyle(PT.amber)
                         .padding(.horizontal, 4)
+                }
+
+                // Warranties — the two counts the old Settings surfaced.
+                SettingsSectionLabel(text: "Warranties")
+                SettingsCard {
+                    SettingsRow(title: "Active warranties", value: "\(activeWarrantyCount)")
+                    SettingsRowDivider()
+                    SettingsRow(title: "Warranty notifications", value: scheduledNotificationsSummary)
                 }
 
                 // CloudKit container
@@ -258,6 +274,8 @@ struct AdvancedDiagnosticsView: View {
         lines.append("Proof images: \(proofImagesSummary)")
         lines.append("On device: \(onDeviceSummary)")
         lines.append("Image sync errors: \(cloudImageSync.transferErrors.count)")
+        lines.append("Active warranties: \(activeWarrantyCount)")
+        lines.append("Warranty notifications: \(scheduledNotificationsSummary)")
         lines.append("")
         lines.append("[Learning]")
         lines.append("Merchant profiles: \(merchantProfiles.count)")
