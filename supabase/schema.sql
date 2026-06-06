@@ -7,6 +7,9 @@
 -- community_merchants, which devices SELECT. The anon role can ONLY insert
 -- events and read aggregates — never read raw events.
 
+-- pg_cron must be enabled before the schedule calls at the bottom.
+create extension if not exists pg_cron;
+
 -- ───────────────────────── raw contributions ─────────────────────────
 
 create table if not exists correction_events (
