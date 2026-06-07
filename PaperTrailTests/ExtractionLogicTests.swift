@@ -60,6 +60,26 @@ struct ExtractionLogicTests {
         #expect(DocumentStructureOCRService.detectTotal(in: []) == nil)
     }
 
+    @Test func picksGrandTotalOverSavingsRow() {
+        // A "Total Savings"/"Total Discount" line shares the "total" rank and, by
+        // appearing first, used to win — saving 200.00 was reported as the total.
+        let table = OCRTable(rows: [
+            ["Subtotal", "1,499.00"],
+            ["Total Savings", "200.00"],
+            ["Total", "1,299.00"],
+        ])
+        #expect(DocumentStructureOCRService.detectTotal(in: [table]) == 1299.00)
+    }
+
+    @Test func picksTotalAmountNotLargerCellOnSameRow() {
+        // When the total row also carries a larger figure (RRP / "you saved"), the
+        // rightmost amount is the total — `.max()` used to grab the bigger one.
+        let table = OCRTable(rows: [
+            ["Total", "1,500.00", "1,299.00"],
+        ])
+        #expect(DocumentStructureOCRService.detectTotal(in: [table]) == 1299.00)
+    }
+
     // MARK: - Line-item reconstruction (lineItems)
 
     @Test func reconstructsLineItemsAndSkipsSummaryRows() {
@@ -124,6 +144,21 @@ struct ExtractionLogicTests {
         #expect(!ExtractionPipeline.amountAppears(2599.90, in: text))  // hallucinated
         #expect(!ExtractionPipeline.amountAppears(499.90, in: text))
         #expect(!ExtractionPipeline.amountAppears(249.90, in: text))
+    }
+
+    @Test func groundingRejectsSmallRoundHallucinationsAndOddValues() {
+        let text = "BUILT IN OVEN 919.00\nINDUCTION HOB 759.00\nTotal SGD 1,837.00"
+        // A hallucinated small round amount must not "ground" just because its
+        // digits appear inside a larger figure ("9" lives in "919", "1837").
+        #expect(!ExtractionPipeline.amountAppears(9.00, in: text))
+        #expect(!ExtractionPipeline.amountAppears(8.00, in: text))
+        // A genuine standalone integer-form amount is still accepted.
+        #expect(ExtractionPipeline.amountAppears(919.00, in: "INDUCTION HOB 919"))
+        // Odd/garbled model amounts must return false, never trap on Int(_:).
+        #expect(!ExtractionPipeline.amountAppears(.nan, in: text))
+        #expect(!ExtractionPipeline.amountAppears(.infinity, in: text))
+        #expect(!ExtractionPipeline.amountAppears(-.infinity, in: text))
+        #expect(!ExtractionPipeline.amountAppears(1e19, in: text))   // beyond Int range
     }
 
     // MARK: - Table-price overlay (per-item auto-fill)
@@ -280,5 +315,22 @@ struct ExtractionLogicTests {
         #expect(fresh10.hintStrength > 0.9)
         #expect(fresh0.hintStrength < 0.4)
         #expect(fresh10.hintStrength <= 1.0)
+    }
+
+    // MARK: - Embedding similarity (CategoryClassifier caching refactor)
+
+    @Test func cosineSimilarityMatchesSimilarityScale() {
+        // The category classifier now embeds the query ONCE and compares against
+        // cached exemplar vectors via cosineSimilarity, instead of re-embedding
+        // both strings per exemplar. This locks the scale so ranking is unchanged:
+        // identical → 1, orthogonal → 0.5, opposite → 0 (mirrors `similarity`'s
+        // `1 - distance/2` mapping). Pure math — no embedding asset needed in CI.
+        let m = SemanticMatcher.shared
+        #expect(m.cosineSimilarity([1, 0, 0], [1, 0, 0]) == 1.0)        // identical
+        #expect(m.cosineSimilarity([1, 0], [0, 1]) == 0.5)             // orthogonal
+        #expect(m.cosineSimilarity([1, 0], [-1, 0]) == 0.0)           // opposite
+        #expect(m.cosineSimilarity([], []) == nil)                    // undefined
+        #expect(m.cosineSimilarity([1, 0], [1, 0, 0]) == nil)         // length mismatch
+        #expect(m.cosineSimilarity([0, 0], [1, 1]) == nil)           // zero vector
     }
 }
