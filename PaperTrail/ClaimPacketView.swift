@@ -2,6 +2,13 @@ import SwiftUI
 import SwiftData
 import MessageUI
 
+/// Whether the claim packet is worth offering for a record. Centralized so every
+/// entry point (Detail share icon, Support step 1) gates the same way: a packet
+/// with no proof images is just metadata, useless for an actual claim.
+enum ClaimPacketAvailability {
+    static func isOffered(attachmentCount: Int) -> Bool { attachmentCount > 0 }
+}
+
 /// The payoff (§9): one shareable PDF with everything a repair, retailer, or
 /// insurer asks for. Reached from Detail's share icon, the warranty answer's
 /// "Something's wrong with it", and Support step 1.

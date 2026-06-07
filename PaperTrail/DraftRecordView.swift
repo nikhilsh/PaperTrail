@@ -603,23 +603,15 @@ struct DraftRecordView: View {
         } else {
             selectedItemIds.insert(item.id)
         }
-        // Only rebind the main form when the PRIMARY item actually changes — never
-        // clobber the user's typed product/price just because they selected another
-        // item (the previous bug: every toggle reset the form to the primary's raw
-        // amount, which is blank after a hallucinated price is grounded out).
-        let newPrimary = recordWorthySelectedItems.first
-        if newPrimary?.id != previousPrimary?.id, let newPrimary {
-            // Preserve fields the user has hand-edited: only overwrite when the
-            // field is still empty or still matches the previous primary's value.
-            let prevName = previousPrimary?.name ?? ""
-            let prevAmount = previousPrimary?.amount.map { String(format: "%.2f", $0) } ?? ""
-            if productName.isEmpty || productName == prevName {
-                productName = newPrimary.name
-            }
-            if amountText.isEmpty || amountText == prevAmount {
-                amountText = newPrimary.amount.map { String(format: "%.2f", $0) } ?? ""
-            }
-        }
+        // Rebind the main form to the new primary without clobbering values the
+        // user hand-edited — the rule lives in PrimaryItemBinding so it's testable.
+        let bound = PrimaryItemBinding.rebound(
+            previousPrimary: previousPrimary,
+            newPrimary: recordWorthySelectedItems.first,
+            current: .init(productName: productName, amountText: amountText)
+        )
+        productName = bound.productName
+        amountText = bound.amountText
         // Auto-toggle warranty if any selected line item is a warranty.
         if selectedItems.contains(where: { $0.kind == .warranty }) && !includeWarranty {
             includeWarranty = true
@@ -938,4 +930,36 @@ struct PTReviewDateRow: View {
     .preferredColorScheme(.dark)
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
+}
+
+/// Pure decision for rebinding the main draft form to a new primary line item
+/// without clobbering values the user hand-edited. Extracted from
+/// `DraftRecordView.toggleItem` so the rule is unit-testable without SwiftUI state.
+enum PrimaryItemBinding {
+    struct Fields: Equatable {
+        var productName: String
+        var amountText: String
+    }
+
+    /// The field values after the primary selection changes. A field is
+    /// overwritten only when it is empty or still equal to the previous primary's
+    /// value (i.e. the user hasn't typed over it); otherwise the edit is kept.
+    static func rebound(previousPrimary: LineItem?, newPrimary: LineItem?, current: Fields) -> Fields {
+        guard let newPrimary, newPrimary.id != previousPrimary?.id else { return current }
+        let prevName = previousPrimary?.name ?? ""
+        let prevAmount = previousPrimary.flatMap(Self.amountText) ?? ""
+        var result = current
+        if current.productName.isEmpty || current.productName == prevName {
+            result.productName = newPrimary.name
+        }
+        if current.amountText.isEmpty || current.amountText == prevAmount {
+            result.amountText = Self.amountText(newPrimary) ?? ""
+        }
+        return result
+    }
+
+    /// The 2-decimal text form of a line item's amount, or nil when it has none.
+    static func amountText(_ item: LineItem) -> String? {
+        item.amount.map { String(format: "%.2f", $0) }
+    }
 }

@@ -397,14 +397,13 @@ struct ExtractionPipeline: Sendable {
         let magnitude = abs(amount)
         let normalized = text.replacingOccurrences(of: ",", with: "")
 
-        // The "123.45" form is the strongest signal — accept it directly.
+        // Match either the "123.45" or bare-integer form, but only as a STANDALONE
+        // number — never as a substring of a larger figure. Without the boundary
+        // check a hallucinated "9.00" grounds against the "9.00" inside "919.00",
+        // and "9" matches the "9" in "1999"/dates/quantities.
         let twoDecimals = String(format: "%.2f", magnitude)
-        if normalized.contains(twoDecimals) { return true }
+        if Self.containsStandaloneNumber(twoDecimals, in: normalized) { return true }
 
-        // Otherwise fall back to the integer part, but only when it appears as a
-        // STANDALONE number — not as a substring of a larger figure. Without this,
-        // a hallucinated "9.00" matches the "9" inside "1999"/dates/quantities and
-        // every small round amount trivially "grounds".
         guard magnitude < Double(Int.max) else { return false }
         let intPart = String(Int(magnitude))
         return Self.containsStandaloneNumber(intPart, in: normalized)
