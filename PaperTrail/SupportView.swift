@@ -38,11 +38,7 @@ struct SupportView: View {
                 tonePanel
 
                 stepCard(number: 1, title: "Your proof is ready") {
-                    if attachments.isEmpty {
-                        Text("No proof images on file for this record. Add a receipt or photo before generating a claim packet.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(PT.onPaper2)
-                    } else {
+                    if ClaimPacketAvailability.isOffered(attachmentCount: attachments.count) {
                         ProofChipsOnPaper(attachments: attachments)
                         // The Claim Packet (§9) supersedes the raw proof-bundle share:
                         // one formatted PDF with everything a claim needs. Only offered
@@ -53,6 +49,10 @@ struct SupportView: View {
                             Text("Get claim packet")
                         }
                         .buttonStyle(PTDarkButtonStyle())
+                    } else {
+                        Text("No proof images on file for this record. Add a receipt or photo before generating a claim packet.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(PT.onPaper2)
                     }
                 }
 

@@ -87,11 +87,14 @@ struct RecordDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 14) {
                     // Share now routes to the Claim Packet (§9) — a formatted PDF
-                    // — superseding the old raw proof-bundle share.
-                    NavigationLink {
-                        ClaimPacketView(record: record)
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                    // — superseding the old raw proof-bundle share. Only shown when
+                    // there's proof to put in it (same rule as Support step 1).
+                    if ClaimPacketAvailability.isOffered(attachmentCount: attachments.count) {
+                        NavigationLink {
+                            ClaimPacketView(record: record)
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
                     }
 
                     NavigationLink {

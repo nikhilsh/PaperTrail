@@ -333,4 +333,49 @@ struct ExtractionLogicTests {
         #expect(m.cosineSimilarity([1, 0], [1, 0, 0]) == nil)         // length mismatch
         #expect(m.cosineSimilarity([0, 0], [1, 1]) == nil)           // zero vector
     }
+
+    // MARK: - Primary item rebind (multi-item edit preservation)
+
+    @Test func reboundFillsUntouchedAndEmptyFields() {
+        let prev = LineItem(name: "Old Item", amount: 100.0, kind: .product)
+        let next = LineItem(name: "New Item", amount: 200.0, kind: .product)
+        // Fields still equal to the previous primary (untouched) → adopt new primary.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: next,
+            current: .init(productName: "Old Item", amountText: "100.00"))
+            == .init(productName: "New Item", amountText: "200.00"))
+        // Empty fields → filled from the new primary.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: next,
+            current: .init(productName: "", amountText: ""))
+            == .init(productName: "New Item", amountText: "200.00"))
+    }
+
+    @Test func reboundPreservesHandEditedFields() {
+        let prev = LineItem(name: "Old Item", amount: 100.0, kind: .product)
+        let next = LineItem(name: "New Item", amount: 200.0, kind: .product)
+        // Both fields hand-edited → both preserved across the selection change.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: next,
+            current: .init(productName: "My Edit", amountText: "149.99"))
+            == .init(productName: "My Edit", amountText: "149.99"))
+        // Mixed: name edited, amount still the previous primary's → only amount updates.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: next,
+            current: .init(productName: "My Edit", amountText: "100.00"))
+            == .init(productName: "My Edit", amountText: "200.00"))
+    }
+
+    @Test func reboundNoopWhenPrimaryUnchangedOrCleared() {
+        let prev = LineItem(name: "Old Item", amount: 100.0, kind: .product)
+        let edited = PrimaryItemBinding.Fields(productName: "My Edit", amountText: "149.99")
+        // Same primary id → never touches the fields.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: prev, current: edited) == edited)
+        // All record-worthy items deselected (no new primary) → fields untouched.
+        #expect(PrimaryItemBinding.rebound(previousPrimary: prev, newPrimary: nil, current: edited) == edited)
+    }
+
+    // MARK: - Claim packet gating (no proof → no offer)
+
+    @Test func claimPacketOnlyOfferedWithProof() {
+        #expect(!ClaimPacketAvailability.isOffered(attachmentCount: 0))
+        #expect(ClaimPacketAvailability.isOffered(attachmentCount: 1))
+        #expect(ClaimPacketAvailability.isOffered(attachmentCount: 5))
+    }
 }
