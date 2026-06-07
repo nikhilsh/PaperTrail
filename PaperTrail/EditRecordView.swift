@@ -171,13 +171,13 @@ struct EditRecordView: View {
             NotificationManager.shared.removeWarrantyReminders(for: record)
         }
 
-        // Return-window reminder (§6): schedule/refresh or clear based on the pref.
+        // Return-window reminder (§6): schedule/refresh when enabled. When the
+        // global pref is off we leave any existing reminder untouched — turning the
+        // feature off globally is handled where the toggle lives, so an unrelated
+        // edit shouldn't silently cancel a still-valid pending reminder.
         if reminderPrefs.returnWindowRemindersEnabled {
             record.returnWindowNotificationScheduled = true
             NotificationManager.shared.scheduleReturnWindowReminder(for: record)
-        } else {
-            record.returnWindowNotificationScheduled = false
-            NotificationManager.shared.removeReturnWindowReminder(for: record)
         }
 
         dismiss()

@@ -39,20 +39,21 @@ struct SupportView: View {
 
                 stepCard(number: 1, title: "Your proof is ready") {
                     if attachments.isEmpty {
-                        Text("No proof images on file for this record.")
+                        Text("No proof images on file for this record. Add a receipt or photo before generating a claim packet.")
                             .font(.system(size: 13))
                             .foregroundStyle(PT.onPaper2)
                     } else {
                         ProofChipsOnPaper(attachments: attachments)
+                        // The Claim Packet (§9) supersedes the raw proof-bundle share:
+                        // one formatted PDF with everything a claim needs. Only offered
+                        // when there's actual proof — an image-less packet is useless.
+                        NavigationLink {
+                            ClaimPacketView(record: record)
+                        } label: {
+                            Text("Get claim packet")
+                        }
+                        .buttonStyle(PTDarkButtonStyle())
                     }
-                    // The Claim Packet (§9) supersedes the raw proof-bundle share:
-                    // one formatted PDF with everything a claim needs.
-                    NavigationLink {
-                        ClaimPacketView(record: record)
-                    } label: {
-                        Text("Get claim packet")
-                    }
-                    .buttonStyle(PTDarkButtonStyle())
                 }
 
                 stepCard(number: 2, title: "Contact \(brand) support") {

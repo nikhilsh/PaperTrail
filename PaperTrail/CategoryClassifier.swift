@@ -28,6 +28,21 @@ enum CategoryClassifier {
         "Home": ["table lamp lighting", "curtains", "bedsheets linen", "air purifier", "electric fan", "storage box"],
     ]
 
+    /// Exemplar phrases pre-embedded once. The exemplar set is constant, so its
+    /// vectors never change — caching them means a scan embeds only the query
+    /// (once), not all ~60 exemplars on every call.
+    private static let exemplarVectors: [(category: String, vector: [Double])] = {
+        var result: [(String, [Double])] = []
+        for (category, phrases) in exemplars {
+            for phrase in phrases {
+                if let v = SemanticMatcher.shared.vector(for: phrase) {
+                    result.append((category, v))
+                }
+            }
+        }
+        return result
+    }()
+
     /// Suggest a category for a product/description, or `nil` if no exemplar set
     /// is similar enough (or embeddings are unavailable).
     ///
@@ -35,15 +50,15 @@ enum CategoryClassifier {
     ///   suggestions while avoiding random assignment for unrelated text.
     static func classify(_ text: String, minSimilarity: Double = 0.5) -> String? {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.count >= 3, SemanticMatcher.shared.isAvailable else { return nil }
+        guard query.count >= 3,
+              let queryVector = SemanticMatcher.shared.vector(for: query),
+              !exemplarVectors.isEmpty else { return nil }
 
         var best: (category: String, score: Double)?
-        for (category, phrases) in exemplars {
-            for phrase in phrases {
-                guard let score = SemanticMatcher.shared.similarity(query, phrase) else { continue }
-                if best == nil || score > best!.score {
-                    best = (category, score)
-                }
+        for (category, vector) in exemplarVectors {
+            guard let score = SemanticMatcher.shared.cosineSimilarity(queryVector, vector) else { continue }
+            if best == nil || score > best!.score {
+                best = (category, score)
             }
         }
 
