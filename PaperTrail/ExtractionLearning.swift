@@ -66,11 +66,8 @@ final class MerchantProfile {
 extension MerchantProfile {
     var aliases: [String] {
         get {
-            aliasesRaw.split(separator: "|")
-                .map(String.init)
-                .joined(separator: "|")
-                .split(separator: "||")
-                .map(String.init)
+            aliasesRaw
+                .components(separatedBy: "||")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         }
@@ -399,10 +396,13 @@ struct MerchantLearningService {
         let normalized = Self.normalizeProductName(product)
         guard normalized.count >= 3 else { return }
 
-        let descriptor = FetchDescriptor<ProductCategoryMemory>()
+        var descriptor = FetchDescriptor<ProductCategoryMemory>(
+            predicate: #Predicate { $0.normalizedProduct == normalized }
+        )
+        descriptor.fetchLimit = 1
         let existing = (try? modelContext.fetch(descriptor)) ?? []
 
-        if let memory = existing.first(where: { $0.normalizedProduct == normalized }) {
+        if let memory = existing.first {
             if memory.category.caseInsensitiveCompare(category) == .orderedSame {
                 memory.count += 1
             } else {

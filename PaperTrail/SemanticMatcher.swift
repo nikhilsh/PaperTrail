@@ -50,6 +50,34 @@ final class SemanticMatcher: @unchecked Sendable {
         return max(0.0, min(1.0, 1.0 - distance / 2.0))
     }
 
+    /// Raw sentence-embedding vector for `text`, or `nil` if embeddings are
+    /// unavailable or undefined for the input. Use with `cosineSimilarity` to
+    /// embed a query once and compare it against many pre-embedded candidates,
+    /// instead of re-embedding both strings on every `similarity` call.
+    func vector(for text: String) -> [Double]? {
+        guard let embedding else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let v = embedding.vector(for: trimmed)
+        return (v?.isEmpty == false) ? v : nil
+    }
+
+    /// Cosine *similarity* in `[0, 1]` between two embedding vectors, matching the
+    /// scale of `similarity(_:_:)` (which maps cosine distance `1 - d/2`).
+    func cosineSimilarity(_ a: [Double], _ b: [Double]) -> Double? {
+        guard a.count == b.count, !a.isEmpty else { return nil }
+        var dot = 0.0, normA = 0.0, normB = 0.0
+        for i in a.indices {
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        guard normA > 0, normB > 0 else { return nil }
+        let cosine = dot / (normA.squareRoot() * normB.squareRoot())
+        guard cosine.isFinite else { return nil }
+        return max(0.0, min(1.0, (cosine + 1.0) / 2.0))
+    }
+
     /// The best match for `query` among `candidates` whose similarity meets
     /// `threshold`. Returns the candidate and its score, or `nil`.
     func bestMatch<C: Sequence>(

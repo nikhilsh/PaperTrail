@@ -411,8 +411,22 @@ struct DraftRecordView: View {
 
     private func editedAmount(for item: LineItem) -> Double? {
         guard let text = itemPriceEdits[item.id] else { return item.amount }
-        let cleaned = text.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
-        return cleaned.isEmpty ? nil : (Double(cleaned) ?? item.amount)
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return nil }
+        return Self.parseAmount(trimmed) ?? item.amount
+    }
+
+    /// Parse a user-typed amount, honouring the device locale's decimal separator
+    /// (so "1.299,00" on a comma-decimal keyboard isn't silently dropped) before
+    /// falling back to plain "1,299.00" grouping.
+    static func parseAmount(_ raw: String) -> Double? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = .current
+        if let n = formatter.number(from: trimmed) { return n.doubleValue }
+        return Double(trimmed.replacingOccurrences(of: ",", with: ""))
     }
 
     private var lineItemCard: some View {
@@ -583,7 +597,7 @@ struct DraftRecordView: View {
 
     /// Called when the user taps a line item to select it as the main record item.
     private func toggleItem(_ item: LineItem) {
-        let previousPrimaryID = recordWorthySelectedItems.first?.id
+        let previousPrimary = recordWorthySelectedItems.first
         if selectedItemIds.contains(item.id) {
             selectedItemIds.remove(item.id)
         } else {
@@ -594,9 +608,17 @@ struct DraftRecordView: View {
         // item (the previous bug: every toggle reset the form to the primary's raw
         // amount, which is blank after a hallucinated price is grounded out).
         let newPrimary = recordWorthySelectedItems.first
-        if newPrimary?.id != previousPrimaryID, let newPrimary {
-            productName = newPrimary.name
-            amountText = newPrimary.amount.map { String(format: "%.2f", $0) } ?? ""
+        if newPrimary?.id != previousPrimary?.id, let newPrimary {
+            // Preserve fields the user has hand-edited: only overwrite when the
+            // field is still empty or still matches the previous primary's value.
+            let prevName = previousPrimary?.name ?? ""
+            let prevAmount = previousPrimary?.amount.map { String(format: "%.2f", $0) } ?? ""
+            if productName.isEmpty || productName == prevName {
+                productName = newPrimary.name
+            }
+            if amountText.isEmpty || amountText == prevAmount {
+                amountText = newPrimary.amount.map { String(format: "%.2f", $0) } ?? ""
+            }
         }
         // Auto-toggle warranty if any selected line item is a warranty.
         if selectedItems.contains(where: { $0.kind == .warranty }) && !includeWarranty {

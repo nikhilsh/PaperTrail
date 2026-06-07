@@ -391,10 +391,38 @@ struct ExtractionPipeline: Sendable {
     /// Whether an amount's digits appear in the OCR text (commas ignored), e.g.
     /// 919.0 matches "919.00" or "919"; a hallucinated 2599.9 matches neither.
     static func amountAppears(_ amount: Double, in text: String) -> Bool {
+        // Reject non-finite / out-of-range values up front — `Int(_:)` below traps
+        // on NaN/±inf or magnitudes beyond Int range (e.g. a garbled 1e19 amount).
+        guard amount.isFinite else { return false }
+        let magnitude = abs(amount)
         let normalized = text.replacingOccurrences(of: ",", with: "")
-        let intPart = String(abs(Int(amount)))
-        let twoDecimals = String(format: "%.2f", abs(amount))
-        return normalized.contains(twoDecimals) || normalized.contains(intPart)
+
+        // The "123.45" form is the strongest signal — accept it directly.
+        let twoDecimals = String(format: "%.2f", magnitude)
+        if normalized.contains(twoDecimals) { return true }
+
+        // Otherwise fall back to the integer part, but only when it appears as a
+        // STANDALONE number — not as a substring of a larger figure. Without this,
+        // a hallucinated "9.00" matches the "9" inside "1999"/dates/quantities and
+        // every small round amount trivially "grounds".
+        guard magnitude < Double(Int.max) else { return false }
+        let intPart = String(Int(magnitude))
+        return Self.containsStandaloneNumber(intPart, in: normalized)
+    }
+
+    /// True if `number` occurs in `text` not flanked by other digits, so "919"
+    /// matches "919" / "$919" / "919.00" but not the "919" inside "29190".
+    private static func containsStandaloneNumber(_ number: String, in text: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: number, range: searchStart..<text.endIndex) {
+            let beforeOK = range.lowerBound == text.startIndex
+                || !text[text.index(before: range.lowerBound)].isNumber
+            let afterOK = range.upperBound == text.endIndex
+                || !text[range.upperBound].isNumber
+            if beforeOK && afterOK { return true }
+            searchStart = range.upperBound
+        }
+        return false
     }
 
     /// When no category was extracted, suggest one from the product name via

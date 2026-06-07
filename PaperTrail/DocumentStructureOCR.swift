@@ -154,6 +154,9 @@ struct DocumentStructureOCRService: Sendable {
     static func detectTotal(in tables: [OCRTable]) -> Double? {
         let strongLabels = ["grand total", "total due", "amount due", "balance due", "total amount", "total"]
         let weakLabels = ["subtotal", "sub total", "sub-total"]
+        // Rows that contain "total" but are NOT the grand total — a "Total Savings"
+        // or "Total Discount" line otherwise out-ranks the real total.
+        let negativeLabels = ["saving", "discount", "rounding", "voucher", "rebate", "cashback"]
 
         var best: (rank: Int, value: Double)?
         for table in tables {
@@ -163,10 +166,13 @@ struct DocumentStructureOCRService: Sendable {
                 if weakLabels.contains(where: { label.contains($0) }) && !strongLabels.dropLast().contains(where: { label.contains($0) }) {
                     continue
                 }
+                // Skip savings/discount-style rows that merely mention "total".
+                if negativeLabels.contains(where: { label.contains($0) }) { continue }
                 guard let rank = strongLabels.firstIndex(where: { label.contains($0) }) else { continue }
-                // Take the largest parseable amount on this row as the total value.
+                // The total is the LAST amount on the row (rightmost column); using
+                // `.max()` would pick a larger savings/RRP figure on the same row.
                 let amounts = row.compactMap(parseAmount)
-                guard let value = amounts.max() else { continue }
+                guard let value = amounts.last else { continue }
                 // Lower rank index = stronger label.
                 if best == nil || rank < best!.rank {
                     best = (rank, value)

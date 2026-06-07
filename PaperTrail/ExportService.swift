@@ -33,9 +33,12 @@ enum ExportService {
         try csv.data(using: .utf8)?.write(to: stageDir.appendingPathComponent("records.csv"))
 
         // 2. Per-record PDFs + accumulate into the proof book.
+        // Index attachments by record once (O(R+A)) instead of re-scanning the full
+        // attachment list for every record (O(R×A)).
+        let attachmentsByRecord = Dictionary(grouping: allAttachments, by: { $0.recordID })
         let proofBook = PDFDocument()
         for record in records {
-            let recordAttachments = allAttachments.filter { $0.recordID == record.id }
+            let recordAttachments = attachmentsByRecord[record.id] ?? []
             guard let doc = makeRecordPDF(record: record, attachments: recordAttachments) else { continue }
             let safe = safeFilename(record.productName)
             let recordURL = pdfDir.appendingPathComponent("\(safe)-\(ClaimPacketPDF.documentNumber(for: record)).pdf")
