@@ -473,13 +473,8 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         Self.logger.info("Foundation Models available — running structured extraction")
 
-        // iOS 27+: pass the image directly to the model — OCRTool handles text extraction
-        // internally (30+ languages, no locale errors) and BarcodeReaderTool picks up serial
-        // numbers on warranty cards. The entire text-cleaning + retry stack is bypassed.
-        if #available(iOS 27, *), let image {
-            return await extractMultimodal(image: image, learningContext: learningContext)
-        }
-
+        // iOS 27 multimodal path (OCRTool + BarcodeReaderTool + Attachment(UIImage)) ships in
+        // Xcode 26.5+. Restore the extractMultimodal() early-exit when that SDK is available.
         let adaptiveHints = learningContext.map { context in
             var hints: [String] = []
             if let displayName = context.displayMerchantName {
@@ -750,51 +745,28 @@ struct FoundationModelExtractionService: FieldExtractionService {
             \(adaptiveHints)
             """
 
-        do {
-            let session = LanguageModelSession(instructions: instructions, tools: [OCRTool(), BarcodeReaderTool()])
-            let response = try await session.respond(
-                to: Prompt {
-                    "Extract all structured fields from this receipt or purchase document."
-                    Attachment(image)
-                },
-                generating: ReceiptExtractionSchema.self
-            )
-            let schema = response.content
-            let fieldCount = [
-                schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
-            ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
-
-            Self.logger.info("FM multimodal succeeded with \(fieldCount, privacy: .public) fields")
-
-            var mapped = mapSchemaToResult(schema)
-            mapped.diagnostics = ExtractionDiagnostics(
-                foundationModelAvailable: true,
-                foundationModelRan: true,
-                foundationModelSkipReason: nil,
-                foundationModelFieldCount: fieldCount,
-                heuristicFieldCount: 0,
-                rejectedFields: []
-            )
-            return mapped
-        } catch {
-            let errorDesc = error.localizedDescription
-            Self.logger.error("FM multimodal failed: \(errorDesc, privacy: .public)")
-            AppLogger.error(
-                "FM multimodal extraction failed: \(errorDesc)",
-                category: "extraction.fm.multimodal",
-                tags: ["fm_error": errorDesc]
-            )
-            var result = StructuredExtractionResult.empty
-            result.diagnostics = ExtractionDiagnostics(
-                foundationModelAvailable: true,
-                foundationModelRan: false,
-                foundationModelSkipReason: "multimodal error: \(errorDesc)",
-                foundationModelFieldCount: 0,
-                heuristicFieldCount: 0,
-                rejectedFields: []
-            )
-            return result
-        }
+        // OCRTool, BarcodeReaderTool, and Attachment(UIImage) require Xcode 26.5+ SDK
+        // (WWDC 2026 additions; not present in Xcode 26.4.1). Restore full implementation once
+        // macos-26 runner ships Xcode 26.5. Wiring: re-add the early-exit in extract() above.
+        //
+        // When ready, replace this stub with:
+        //   let session = LanguageModelSession(
+        //       tools: [OCRTool(), BarcodeReaderTool()], instructions: instructions)
+        //   let response = try await session.respond(
+        //       to: Prompt { "Extract all structured fields from this receipt." ; Attachment(image) },
+        //       generating: ReceiptExtractionSchema.self)
+        _ = image
+        _ = adaptiveHints
+        var result = StructuredExtractionResult.empty
+        result.diagnostics = ExtractionDiagnostics(
+            foundationModelAvailable: true,
+            foundationModelRan: false,
+            foundationModelSkipReason: "pending Xcode 26.5 SDK",
+            foundationModelFieldCount: 0,
+            heuristicFieldCount: 0,
+            rejectedFields: []
+        )
+        return result
     }
 
     private func buildAdaptiveHints(from learningContext: MerchantLearningContext?) -> String {
