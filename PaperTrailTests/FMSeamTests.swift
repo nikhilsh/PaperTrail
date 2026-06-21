@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import UIKit
 @testable import PaperTrail
 #if canImport(FoundationModels)
 import FoundationModels
@@ -22,7 +23,7 @@ struct FMSeamTests {
     /// Canned-result stand-in for either extractor.
     private struct StubExtractionService: FieldExtractionService {
         let result: StructuredExtractionResult
-        func extract(from ocrText: String, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult {
+        func extract(from ocrText: String, image: UIImage?, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult {
             result
         }
     }
