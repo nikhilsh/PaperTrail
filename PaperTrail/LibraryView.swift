@@ -15,6 +15,13 @@ enum LibraryFilterOption: String, CaseIterable {
     case expired = "Expired"
 }
 
+enum LibraryDateFilterOption: String, CaseIterable {
+    case any = "Any Date"
+    case last30Days = "Last 30 Days"
+    case thisYear = "This Year"
+    case noDate = "No Purchase Date"
+}
+
 struct LibraryView: View {
     @Query(sort: \PurchaseRecord.updatedAt, order: .reverse) private var records: [PurchaseRecord]
     @Query private var allAttachments: [Attachment]
@@ -23,15 +30,36 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var sortOption: LibrarySortOption = .newest
     @State private var filterOption: LibraryFilterOption = .all
+    @State private var dateFilterOption: LibraryDateFilterOption = .any
+    @State private var selectedCategory: String?
+    @State private var selectedTag: String?
 
     private func attachments(for record: PurchaseRecord) -> [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
     }
 
+    private var availableCategories: [String] {
+        sortedUnique(records.compactMap(\.category))
+    }
+
+    private var availableTags: [String] {
+        sortedUnique(records.flatMap(\.tags))
+    }
+
+    private var activeFilterCount: Int {
+        [
+            filterOption != .all,
+            dateFilterOption != .any,
+            selectedCategory != nil,
+            selectedTag != nil
+        ].filter { $0 }.count
+    }
+
     private var processedRecords: [PurchaseRecord] {
         var result = records
+        let searchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Filter
+        // Warranty status
         switch filterOption {
         case .all: break
         case .active:
@@ -42,15 +70,43 @@ struct LibraryView: View {
             result = result.filter { $0.warrantyStatus == .expired }
         }
 
-        // Search (including OCR text in attachments)
-        if !searchText.isEmpty {
+        // Category and tags
+        if let selectedCategory {
+            result = result.filter { $0.category?.caseInsensitiveCompare(selectedCategory) == .orderedSame }
+        }
+
+        if let selectedTag {
             result = result.filter { record in
-                record.productName.localizedCaseInsensitiveContains(searchText)
-                || (record.merchantName?.localizedCaseInsensitiveContains(searchText) ?? false)
-                || (record.notes?.localizedCaseInsensitiveContains(searchText) ?? false)
-                || (record.category?.localizedCaseInsensitiveContains(searchText) ?? false)
-                || record.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
-                || attachments(for: record).contains { $0.ocrText?.localizedCaseInsensitiveContains(searchText) ?? false }
+                record.tags.contains { $0.caseInsensitiveCompare(selectedTag) == .orderedSame }
+            }
+        }
+
+        // Purchase date
+        switch dateFilterOption {
+        case .any:
+            break
+        case .last30Days:
+            let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
+            result = result.filter { ($0.purchaseDate ?? .distantPast) >= cutoff }
+        case .thisYear:
+            let year = Calendar.current.component(.year, from: .now)
+            result = result.filter { record in
+                guard let purchaseDate = record.purchaseDate else { return false }
+                return Calendar.current.component(.year, from: purchaseDate) == year
+            }
+        case .noDate:
+            result = result.filter { $0.purchaseDate == nil }
+        }
+
+        // Search (including OCR text in attachments)
+        if !searchQuery.isEmpty {
+            result = result.filter { record in
+                record.productName.localizedCaseInsensitiveContains(searchQuery)
+                || (record.merchantName?.localizedCaseInsensitiveContains(searchQuery) ?? false)
+                || (record.notes?.localizedCaseInsensitiveContains(searchQuery) ?? false)
+                || (record.category?.localizedCaseInsensitiveContains(searchQuery) ?? false)
+                || record.tags.contains { $0.localizedCaseInsensitiveContains(searchQuery) }
+                || attachments(for: record).contains { $0.ocrText?.localizedCaseInsensitiveContains(searchQuery) ?? false }
             }
         }
 
@@ -78,50 +134,17 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 18) {
                 LibrarySummaryRow(totalCount: records.count, expiringSoonCount: expiringSoonCount)
 
-                // Sort & Filter controls
-                HStack {
-                    Menu {
-                        ForEach(LibrarySortOption.allCases, id: \.self) { option in
-                            Button {
-                                sortOption = option
-                            } label: {
-                                if sortOption == option {
-                                    Label(option.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(option.rawValue)
-                                }
-                            }
-                        }
-                    } label: {
-                        Label(sortOption.rawValue, systemImage: "arrow.up.arrow.down")
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(.tertiarySystemBackground), in: Capsule())
-                    }
-
-                    Menu {
-                        ForEach(LibraryFilterOption.allCases, id: \.self) { option in
-                            Button {
-                                filterOption = option
-                            } label: {
-                                if filterOption == option {
-                                    Label(option.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(option.rawValue)
-                                }
-                            }
-                        }
-                    } label: {
-                        Label(filterOption.rawValue, systemImage: "line.3.horizontal.decrease")
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(.tertiarySystemBackground), in: Capsule())
-                    }
-
-                    Spacer()
-                }
+                LibraryFilterBar(
+                    sortOption: $sortOption,
+                    warrantyFilter: $filterOption,
+                    dateFilter: $dateFilterOption,
+                    selectedCategory: $selectedCategory,
+                    selectedTag: $selectedTag,
+                    availableCategories: availableCategories,
+                    availableTags: availableTags,
+                    activeFilterCount: activeFilterCount,
+                    clearFilters: clearFilters
+                )
 
                 if processedRecords.isEmpty {
                     if records.isEmpty {
@@ -136,7 +159,7 @@ struct LibraryView: View {
                         ContentUnavailableView(
                             "No matches",
                             systemImage: "magnifyingglass",
-                            description: Text("Try a different search or filter.")
+                            description: Text("Try a different search or clear filters.")
                         )
                         .frame(maxWidth: .infinity)
                         .padding(.top, 48)
@@ -183,9 +206,161 @@ struct LibraryView: View {
             }
         }
     }
+
+    private func clearFilters() {
+        filterOption = .all
+        dateFilterOption = .any
+        selectedCategory = nil
+        selectedTag = nil
+    }
+
+    private func sortedUnique(_ values: [String]) -> [String] {
+        let trimmed = values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return Array(Set(trimmed))
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
 }
 
 // MARK: - Subviews
+
+private struct LibraryFilterBar: View {
+    @Binding var sortOption: LibrarySortOption
+    @Binding var warrantyFilter: LibraryFilterOption
+    @Binding var dateFilter: LibraryDateFilterOption
+    @Binding var selectedCategory: String?
+    @Binding var selectedTag: String?
+
+    let availableCategories: [String]
+    let availableTags: [String]
+    let activeFilterCount: Int
+    let clearFilters: () -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(LibrarySortOption.allCases, id: \.self) { option in
+                        Button {
+                            sortOption = option
+                        } label: {
+                            checkedLabel(option.rawValue, isSelected: sortOption == option)
+                        }
+                    }
+                } label: {
+                    FilterControlLabel(title: sortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                }
+
+                Menu {
+                    ForEach(LibraryFilterOption.allCases, id: \.self) { option in
+                        Button {
+                            warrantyFilter = option
+                        } label: {
+                            checkedLabel(option.rawValue, isSelected: warrantyFilter == option)
+                        }
+                    }
+                } label: {
+                    FilterControlLabel(title: warrantyFilter.rawValue, systemImage: "shield")
+                }
+
+                Menu {
+                    ForEach(LibraryDateFilterOption.allCases, id: \.self) { option in
+                        Button {
+                            dateFilter = option
+                        } label: {
+                            checkedLabel(option.rawValue, isSelected: dateFilter == option)
+                        }
+                    }
+                } label: {
+                    FilterControlLabel(title: dateFilter.rawValue, systemImage: "calendar")
+                }
+
+                Menu {
+                    Button {
+                        selectedCategory = nil
+                    } label: {
+                        checkedLabel("Any Category", isSelected: selectedCategory == nil)
+                    }
+
+                    if !availableCategories.isEmpty {
+                        Divider()
+                    }
+
+                    ForEach(availableCategories, id: \.self) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            checkedLabel(category, isSelected: selectedCategory == category)
+                        }
+                    }
+                } label: {
+                    FilterControlLabel(title: selectedCategory ?? "Category", systemImage: "folder")
+                }
+                .disabled(availableCategories.isEmpty)
+
+                Menu {
+                    Button {
+                        selectedTag = nil
+                    } label: {
+                        checkedLabel("Any Tag", isSelected: selectedTag == nil)
+                    }
+
+                    if !availableTags.isEmpty {
+                        Divider()
+                    }
+
+                    ForEach(availableTags, id: \.self) { tag in
+                        Button {
+                            selectedTag = tag
+                        } label: {
+                            checkedLabel(tag, isSelected: selectedTag == tag)
+                        }
+                    }
+                } label: {
+                    FilterControlLabel(title: selectedTag ?? "Tag", systemImage: "tag")
+                }
+                .disabled(availableTags.isEmpty)
+
+                if activeFilterCount > 0 {
+                    Button(action: clearFilters) {
+                        Label("Clear \(activeFilterCount)", systemImage: "xmark.circle.fill")
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color(.tertiarySystemBackground), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear filters")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func checkedLabel(_ title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
+    }
+}
+
+private struct FilterControlLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemBackground), in: Capsule())
+    }
+}
 
 private struct LibrarySummaryRow: View {
     let totalCount: Int

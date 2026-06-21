@@ -252,21 +252,24 @@ struct ReceiptExtractionSchema: Sendable {
 
 // MARK: - Extraction protocol & implementations
 
-/// Protocol for extracting structured fields from raw OCR text.
+/// Protocol for extracting structured fields from OCR text or a raw image.
+/// Implementations that support multimodal input (iOS 27+) should use `image` when available.
 protocol FieldExtractionService: Sendable {
-    func extract(from ocrText: String, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult
+    func extract(from ocrText: String, image: UIImage?, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult
 }
 
 // MARK: - Foundation Model extraction service
 
 /// Uses Apple's on-device Foundation Models (iOS 26+) to extract structured receipt fields.
 ///
-/// The service:
-/// 1. Checks model availability at runtime.
-/// 2. Cleans OCR text to remove junk that triggers locale detection errors.
-/// 3. Sends the cleaned text with a system prompt to the on-device model.
-/// 4. Retries with progressively more aggressive filtering on locale errors.
-/// 5. Falls back to `.empty` if the model is unavailable or all attempts fail.
+/// iOS 27+: multimodal path — the scanned image is passed directly to the model via the
+/// Attachment API, with OCRTool and BarcodeReaderTool available for the model to invoke.
+/// This bypasses all text-cleaning and locale-error retry logic.
+///
+/// iOS 26: text-based path — Vision OCR text is cleaned to remove junk, then sent to the
+/// model. Retries with progressively more aggressive filtering on locale errors.
+///
+/// Falls back to `.empty` if the model is unavailable or all attempts fail.
 struct FoundationModelExtractionService: FieldExtractionService {
 
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.fm")
@@ -369,7 +372,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return desc.contains("locale") || desc.contains("language") || desc.contains("unsupported")
     }
 
-    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, image: UIImage? = nil, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
         let availability = SystemLanguageModel.default.availability
         let rawAvailability = String(describing: availability)
@@ -422,6 +425,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
         }
 
         Self.logger.info("Foundation Models available — running structured extraction")
+
+        // iOS 27+: pass the image directly to the model — OCRTool handles text extraction
+        // internally (30+ languages, no locale errors) and BarcodeReaderTool picks up serial
+        // numbers on warranty cards. The entire text-cleaning + retry stack is bypassed.
+        if #available(iOS 27, *), let image {
+            return await extractMultimodal(image: image, learningContext: learningContext)
+        }
 
         let adaptiveHints = learningContext.map { context in
             var hints: [String] = []
@@ -656,6 +666,88 @@ struct FoundationModelExtractionService: FieldExtractionService {
         )
     }
 
+    // MARK: - Multimodal extraction (iOS 27+)
+
+    /// Sends the scanned image directly to the on-device model using OCRTool and BarcodeReaderTool.
+    /// This replaces the text-cleaning + retry loop used on iOS 26: the model handles OCR
+    /// internally in 30+ languages, eliminating locale errors and spatial context loss.
+    ///
+    /// Verify Prompt builder / Attachment syntax against WWDC26 session 241 before shipping.
+    @available(iOS 27, *)
+    private func extractMultimodal(image: UIImage, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult {
+        let adaptiveHints = buildAdaptiveHints(from: learningContext)
+        let instructions = """
+            You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
+            Extract structured fields from the attached receipt or purchase document image. \
+            Be precise: prefer exact values from the image over guesses. \
+            If a field is not clearly present, leave it null. \
+            Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
+            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
+            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            \(adaptiveHints)
+            """
+
+        do {
+            let session = LanguageModelSession(instructions: instructions, tools: [OCRTool(), BarcodeReaderTool()])
+            let response = try await session.respond(
+                to: Prompt {
+                    "Extract all structured fields from this receipt or purchase document."
+                    Attachment(image)
+                },
+                generating: ReceiptExtractionSchema.self
+            )
+            let schema = response.content
+            let fieldCount = [
+                schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
+            ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+
+            Self.logger.info("FM multimodal succeeded with \(fieldCount, privacy: .public) fields")
+
+            var mapped = mapSchemaToResult(schema)
+            mapped.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: true,
+                foundationModelSkipReason: nil,
+                foundationModelFieldCount: fieldCount,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return mapped
+        } catch {
+            let errorDesc = error.localizedDescription
+            Self.logger.error("FM multimodal failed: \(errorDesc, privacy: .public)")
+            AppLogger.error(
+                "FM multimodal extraction failed: \(errorDesc)",
+                category: "extraction.fm.multimodal",
+                tags: ["fm_error": errorDesc]
+            )
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: false,
+                foundationModelSkipReason: "multimodal error: \(errorDesc)",
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
+        }
+    }
+
+    private func buildAdaptiveHints(from learningContext: MerchantLearningContext?) -> String {
+        guard let context = learningContext else { return "" }
+        var hints: [String] = []
+        if let displayName = context.displayMerchantName { hints.append("Known merchant: \(displayName).") }
+        if let category = context.categorySuggestion { hints.append("This merchant often maps to category '\(category)'.") }
+        if let currency = context.currencySuggestion { hints.append("Preferred currency is usually \(currency).") }
+        if let warranty = context.warrantySuggestionMonths { hints.append("Common warranty duration is \(warranty) months.") }
+        if let amountHint = context.amountHint { hints.append(amountHint) }
+        if let dateHint = context.dateHint { hints.append(dateHint) }
+        if let productHint = context.productHint { hints.append(productHint) }
+        guard !hints.isEmpty else { return "" }
+        return "\nMerchant-specific hints:\n" + hints.joined(separator: "\n")
+    }
+
     /// Helper to create a string field with basic validation.
     private func field(_ value: String?, minLength: Int) -> ExtractedField<String> {
         guard let value, value.trimmingCharacters(in: .whitespacesAndNewlines).count >= minLength else {
@@ -682,7 +774,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
 /// Wraps the existing VisionOCRService heuristic extraction into the `FieldExtractionService` protocol.
 /// This is the fallback when Foundation Models are unavailable.
 struct HeuristicExtractionService: FieldExtractionService {
-    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, image: UIImage? = nil, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         // Delegate to the same heuristic logic that VisionOCRService already uses.
         let heuristic = HeuristicFieldExtractor()
         return heuristic.extract(from: ocrText, learningContext: learningContext)

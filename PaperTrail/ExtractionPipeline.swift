@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import Sentry
+import UIKit
 
 /// Orchestrates field extraction from OCR text.
 ///
@@ -31,20 +32,23 @@ struct ExtractionPipeline: Sendable {
         self.heuristicService = heuristicService
     }
 
-    /// Extract structured fields from OCR text.
+    /// Extract structured fields from OCR text, optionally using the source image for multimodal extraction.
     ///
+    /// When `image` is provided and iOS 27+ is available, the Foundation Model extraction path
+    /// uses the image directly (OCRTool + BarcodeReaderTool) rather than the pre-extracted text.
     /// Returns a merged result: Foundation Model values take priority, heuristic values fill gaps.
-    func extract(from ocrText: String, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
+    func extract(from ocrText: String, image: UIImage? = nil, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         guard !ocrText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             Self.logger.info("Empty OCR text — skipping extraction")
             return .empty
         }
 
-        Self.logger.info("Starting extraction pipeline (OCR text: \(ocrText.count, privacy: .public) chars)")
+        Self.logger.info("Starting extraction pipeline (OCR text: \(ocrText.count, privacy: .public) chars, image: \(image != nil ? "yes" : "no", privacy: .public))")
 
-        // Run both extractions concurrently.
-        async let fmResult = foundationModelService.extract(from: ocrText, learningContext: learningContext)
-        async let heuristicResult = heuristicService.extract(from: ocrText, learningContext: learningContext)
+        // Run both extractions concurrently. FM uses the image when available (iOS 27+);
+        // heuristic always uses text (image is unused by the heuristic path).
+        async let fmResult = foundationModelService.extract(from: ocrText, image: image, learningContext: learningContext)
+        async let heuristicResult = heuristicService.extract(from: ocrText, image: nil, learningContext: learningContext)
 
         let fm = await fmResult
         let heuristic = await heuristicResult

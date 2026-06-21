@@ -18,8 +18,9 @@ struct VisionOCRService: OCRService {
 
         let recognizedText = try await performRecognition(on: cgImage)
 
-        // Run the structured extraction pipeline on the raw OCR text.
-        let structured = await pipeline.extract(from: recognizedText)
+        // Run the structured extraction pipeline. Vision OCR text is still used for storage
+        // and the heuristic path; the FM path uses the original image on iOS 27+ (multimodal).
+        let structured = await pipeline.extract(from: recognizedText, image: image)
 
         // Bridge back to the OCRExtractionResult format the rest of the app expects.
         return structured.toOCRExtractionResult(recognizedText: recognizedText)
