@@ -1,0 +1,5 @@
+node_modules/
+out/
+# large local render artifacts (regenerate with `npm run render`)
+render-*.png
+crop-*.png

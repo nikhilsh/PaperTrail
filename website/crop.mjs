@@ -1,0 +1,11 @@
+import http from "node:http"; import { readFile } from "node:fs/promises";
+import path from "node:path"; import puppeteer from "puppeteer-core";
+const root="/tmp/ptsite/out"; const exe="/root/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome";
+const MIME={".html":"text/html",".css":"text/css",".js":"text/javascript",".json":"application/json",".png":"image/png"};
+const s=http.createServer(async(q,r)=>{try{const rel=decodeURIComponent(q.url.split("?")[0]);const fp=path.join(root,rel==="/"?"index.html":rel);const b=await readFile(fp);r.writeHead(200,{"Content-Type":MIME[path.extname(fp)]||"application/octet-stream"});r.end(b);}catch{r.writeHead(404);r.end();}});
+await new Promise(r=>s.listen(0,"127.0.0.1",r)); const port=s.address().port;
+const b=await puppeteer.launch({executablePath:exe,headless:true,args:["--no-sandbox"]});
+const p=await b.newPage(); await p.setViewport({width:1100,height:300,deviceScaleFactor:2});
+await p.goto(`http://127.0.0.1:${port}/`,{waitUntil:"networkidle0"}); await new Promise(r=>setTimeout(r,500));
+await p.screenshot({path:"/tmp/ptsite/crop-header.png",clip:{x:0,y:0,width:1100,height:230}});
+await b.close(); s.close();

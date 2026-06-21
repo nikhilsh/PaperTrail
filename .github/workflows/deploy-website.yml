@@ -1,0 +1,67 @@
+name: deploy-website
+
+# Builds the static PaperTrail site (landing + iOS OTA install page) and ships
+# it to Fyra (papertrail.kaopeh.com). Runs when the site source changes, and
+# after each ad-hoc release so the OTA manifest/version refresh automatically.
+# Mirrors the conduit website→Fyra deploy.
+
+on:
+  push:
+    branches: [master]
+    paths: ['website/**', '.github/workflows/deploy-website.yml']
+  workflow_run:
+    workflows: ["Build Ad Hoc IPA"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: papertrail-website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: deploy website to Fyra
+    runs-on: ubuntu-24.04
+    # On workflow_run, only deploy when the upstream release build succeeded.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Fyra CLI
+        run: curl -fsSL https://fyra.sh/install.sh | sh
+
+      - name: Configure Fyra auth
+        env:
+          FYRA_TOKEN: ${{ secrets.FYRA_TOKEN }}
+          FYRA_SERVER: ${{ secrets.FYRA_SERVER }}
+        run: |
+          mkdir -p "$HOME/.fyra"
+          cat > "$HOME/.fyra/config.yaml" <<EOF
+          server_address: ${FYRA_SERVER:-server.fyra.sh:50051}
+          token: ${FYRA_TOKEN}
+          EOF
+
+      - name: Build site against latest release
+        working-directory: website
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node build.mjs
+
+      - name: Deploy to Fyra
+        working-directory: website/out
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          # .deploy.yaml (slug + domain) is written into out/ by build.mjs.
+          # `script` provides a PTY so fyra's progress bar doesn't error out.
+          script -q -e -c "fyra push" /dev/null

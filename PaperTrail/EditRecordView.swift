@@ -5,6 +5,7 @@ struct EditRecordView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var record: PurchaseRecord
     @Query private var allAttachments: [Attachment]
+    @Query private var allRecords: [PurchaseRecord]
 
     @State private var productName: String
     @State private var merchantName: String
@@ -15,7 +16,11 @@ struct EditRecordView: View {
     @State private var amountText: String
     @State private var currency: String
     @State private var category: String
+    @State private var room: String
     @State private var tagsText: String
+    @State private var serialNumber: String
+    @State private var coverageSummary: String
+    @State private var isRegistered: Bool
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -37,7 +42,11 @@ struct EditRecordView: View {
         }
         _currency = State(initialValue: record.currency ?? "SGD")
         _category = State(initialValue: record.category ?? "")
+        _room = State(initialValue: record.room ?? "")
         _tagsText = State(initialValue: record.tags.joined(separator: ", "))
+        _serialNumber = State(initialValue: record.serialNumber ?? "")
+        _coverageSummary = State(initialValue: record.coverageSummary ?? "")
+        _isRegistered = State(initialValue: record.isRegistered)
     }
 
     var body: some View {
@@ -71,8 +80,19 @@ struct EditRecordView: View {
                 }
             }
 
+            Section("Proof & coverage") {
+                TextField("Serial number", text: $serialNumber)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+                TextField("Covers (e.g. Parts & labor)", text: $coverageSummary)
+                Toggle("Registered with manufacturer", isOn: $isRegistered)
+            }
+
             Section("Organization") {
                 TextField("Category (e.g. Electronics, Kitchen)", text: $category)
+                LabeledContent("Room") {
+                    RoomPicker(room: $room, suggestions: RoomOptions.suggestions(existing: allRecords.compactMap(\.room)))
+                }
                 TextField("Tags (comma separated)", text: $tagsText)
             }
 
@@ -128,22 +148,36 @@ struct EditRecordView: View {
         record.amount = Double(amountText.replacingOccurrences(of: ",", with: ""))
         record.currency = currency
         record.category = category.isEmpty ? nil : category
+        record.room = room.isEmpty ? nil : room
         record.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        record.serialNumber = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.coverageSummary = coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.isRegistered = isRegistered
         record.updatedAt = .now
 
         // Update warranty & notifications
         let oldWarranty = record.warrantyExpiryDate
         record.warrantyExpiryDate = includeWarranty ? warrantyExpiryDate : nil
 
-        if includeWarranty {
+        let reminderPrefs = ReminderSettings.shared
+        if includeWarranty, reminderPrefs.warrantyRemindersEnabled {
             // Reschedule if warranty date changed
             if oldWarranty != warrantyExpiryDate || !record.warrantyNotificationScheduled {
                 record.warrantyNotificationScheduled = true
-                NotificationManager.shared.scheduleWarrantyReminders(for: record)
+                NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
             }
         } else {
             record.warrantyNotificationScheduled = false
             NotificationManager.shared.removeWarrantyReminders(for: record)
+        }
+
+        // Return-window reminder (§6): schedule/refresh when enabled. When the
+        // global pref is off we leave any existing reminder untouched — turning the
+        // feature off globally is handled where the toggle lives, so an unrelated
+        // edit shouldn't silently cancel a still-valid pending reminder.
+        if reminderPrefs.returnWindowRemindersEnabled {
+            record.returnWindowNotificationScheduled = true
+            NotificationManager.shared.scheduleReturnWindowReminder(for: record)
         }
 
         dismiss()

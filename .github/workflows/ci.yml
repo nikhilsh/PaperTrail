@@ -1,0 +1,81 @@
+name: ci
+
+# Runs a no-signing simulator build + unit tests on every PR (and on master
+# pushes) so compile errors and failing tests are caught before merge — the
+# guardrail PaperTrail was missing. Mirrors the conduit ios-build CI strategy.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Silence the Node 20 deprecation warnings on the GitHub-hosted actions.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: papertrail-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-build-test:
+    name: ios sim build + unit tests
+    runs-on: macos-15
+    env:
+      SCHEME: PaperTrail
+      PROJECT_PATH: PaperTrail.xcodeproj
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      # No signing on PRs: a simulator build needs no certs/profile, so this runs
+      # on forks/branches without secrets. GeneratedSecrets.swift is committed
+      # with an empty Sentry DSN, which the app handles gracefully.
+      - name: Build (simulator, no signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Unit tests (PaperTrailTests, simulator)
+        run: |
+          # macos runners don't guarantee a fixed device name. Pick the available
+          # simulator on the HIGHEST iOS runtime — the app's iOS 26 deployment
+          # target makes older-runtime sims ineligible for the scheme. (jq ignores
+          # leading whitespace, so it's safe to indent inside this YAML block.)
+          DEVICE_UDID=$(xcrun simctl list devices available --json | jq -r '
+            [ .devices | to_entries[]
+              | select(.key | test("iOS-[0-9]+-[0-9]+"))
+              | (.key | capture("iOS-(?<a>[0-9]+)-(?<b>[0-9]+)")) as $m
+              | (($m.a | tonumber) * 1000 + ($m.b | tonumber)) as $ver
+              | .value[] | select(.isAvailable) | {ver: $ver, udid: .udid}
+            ] | (max_by(.ver).udid // "")')
+          if [ -z "$DEVICE_UDID" ]; then
+            echo "no iOS simulator available — listing for debug:" >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          echo "Using simulator $DEVICE_UDID"
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_UDID" \
+            -only-testing:PaperTrailTests \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            test

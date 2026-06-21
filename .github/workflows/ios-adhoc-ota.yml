@@ -27,6 +27,8 @@ jobs:
       BUNDLE_ID: nikhilsh.PaperTrail
       TEAM_ID: EHW7L3679R
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
     steps:
@@ -116,6 +118,8 @@ jobs:
 
           enum BuildSecrets {
               static let sentryDSN = "${SENTRY_DSN}"
+              static let supabaseURL = "${SUPABASE_URL}"
+              static let supabaseAnonKey = "${SUPABASE_ANON_KEY}"
           }
           EOF
 
@@ -145,6 +149,16 @@ jobs:
             -archivePath "$ARCHIVE_PATH" \
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Read app version
+        run: |
+          APP_PLIST="$ARCHIVE_PATH/Products/Applications/PaperTrail.app/Info.plist"
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PLIST")
+          echo "APP_SHORT_VERSION=$SHORT" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$BUILD" >> "$GITHUB_ENV"
+          printf '{"shortVersion":"%s","build":"%s"}\n' "$SHORT" "$BUILD" > "$GITHUB_WORKSPACE/app-version.json"
+          echo "App version: $SHORT ($BUILD)"
 
       - name: Install sentry-cli
         run: |
@@ -207,12 +221,17 @@ jobs:
           if gh release view adhoc-latest >/dev/null 2>&1; then
             gh release upload adhoc-latest \
               build/export/PaperTrail.ipa \
+              app-version.json \
               --clobber
+            gh release edit adhoc-latest \
+              --title "PaperTrail v${APP_SHORT_VERSION} (${APP_BUILD})" \
+              --notes "Latest Ad Hoc build — v${APP_SHORT_VERSION} (build ${APP_BUILD})."
           else
             gh release create adhoc-latest \
               build/export/PaperTrail.ipa \
-              --title "PaperTrail Ad Hoc Latest" \
-              --notes "Latest Ad Hoc build for PaperTrail." \
+              app-version.json \
+              --title "PaperTrail v${APP_SHORT_VERSION} (${APP_BUILD})" \
+              --notes "Latest Ad Hoc build — v${APP_SHORT_VERSION} (build ${APP_BUILD})." \
               --prerelease
           fi
 

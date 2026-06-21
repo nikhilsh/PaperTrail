@@ -28,6 +28,14 @@ private func addStartupBreadcrumb(level: SentryLevel, category: String, message:
 }
 
 private func configureSentry() {
+    // Respect the user's Diagnostics → "Crash & error reporting" preference
+    // (defaults to on). Applies on next launch, which the toggle's subtitle states.
+    UserDefaults.standard.register(defaults: ["crashReportingEnabled": true])
+    guard UserDefaults.standard.bool(forKey: "crashReportingEnabled") else {
+        AppLogger.info("Crash reporting disabled by user preference", category: "observability")
+        return
+    }
+
     let dsn = BuildSecrets.sentryDSN
     guard !dsn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return
@@ -107,12 +115,16 @@ struct PaperTrailApp: App {
     init() {
         configureSentry()
 
+        // Register the bundled OFL fonts (Newsreader, IBM Plex Mono) before any
+        // view renders so the design-system type is available on first paint.
+        PTFont.registerIfNeeded()
+
         // Single-store approach: both PurchaseRecord and Attachment live in the same
         // CloudKit-backed store. Attachment holds only lightweight metadata (filename,
         // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.
         // This avoids the multi-configuration + CloudKit bug that causes
         // SwiftDataError.loadIssueModelContainer on iOS 17/18.
-        let schema = Schema([PurchaseRecord.self, Attachment.self, MerchantProfile.self])
+        let schema = Schema([PurchaseRecord.self, Attachment.self, MerchantProfile.self, ProductCategoryMemory.self])
 
         let cloudConfig = ModelConfiguration(
             "PaperTrail",
@@ -158,6 +170,7 @@ struct PaperTrailApp: App {
                     await authManager.checkCredentialState()
                     await runCloudKitPreflight()
                     await syncCloudImages()
+                    await CommunityLearning.shared.refreshCommunityHints()
                     CorrectionLogger.onLearningFeedback = { payload in
                         Task { @MainActor in
                             let service = MerchantLearningService(modelContext: modelContainer.mainContext)
@@ -187,5 +200,9 @@ struct PaperTrailApp: App {
         // Upload first (source device pushes), then download (receiving device pulls)
         await manager.uploadMissingImages(attachments: syncInfos)
         await manager.syncMissingImages(attachments: syncInfos)
+
+        // Record the time of the last successful sync so Settings can show an
+        // honest "Backed up · {relativeTime}" instead of a permanent green (§7).
+        UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "lastCloudSyncDate")
     }
 }

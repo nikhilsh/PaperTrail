@@ -1,0 +1,14 @@
+{
+  "name": "papertrail-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "push-code": "node build.mjs && cd out && fyra push",
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

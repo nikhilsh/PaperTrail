@@ -2,26 +2,45 @@ import SwiftUI
 import SwiftData
 import UIKit
 import AuthenticationServices
-#if canImport(FoundationModels)
-import FoundationModels
-#endif
 
+/// Settings, rebuilt around outcomes (§1): a Library Card hero, then Reminders,
+/// Your data, Household, Your library, Help & about, and Sign out. Every raw
+/// diagnostic now lives in `AdvancedDiagnosticsView` (§2) — nothing technical
+/// greets a real person here, but nothing was deleted.
 struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
     @Environment(AuthenticationManager.self) private var authManager
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
-    @AppStorage("cloudKitInitError") private var cloudKitInitError = ""
-    @AppStorage("cloudKitAccountStatus") private var cloudKitAccountStatus = "Unknown"
-    @AppStorage("cloudKitContainerStatus") private var cloudKitContainerStatus = "Not checked"
-    @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
-    private let sentryStatus = AppLogger.isSentryEnabled ? "Enabled" : "Disabled"
-    private let sentryHost = AppLogger.sentryHost ?? "Not configured"
-    @State private var fmDiagResult = ""
-    @State private var fmDiagRunning = false
+    @AppStorage("lastCloudSyncDate") private var lastCloudSyncRaw = 0.0
+    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = true
 
-    private var totalImageSize: String {
+    private let reminders = ReminderSettings.shared
+
+    @State private var showNameEditor = false
+    @State private var nameDraft = ""
+    @State private var showLoggedValueInfo = false
+
+    // MARK: Derived
+
+    private var itemCount: Int { records.count }
+
+    private var totalValue: String {
+        let sum = records.compactMap(\.amount).reduce(0, +)
+        let currency = records.compactMap(\.currency).first ?? "SGD"
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = currency
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: sum)) ?? "—"
+    }
+
+    private var roomCount: Int { Set(records.compactMap(\.room).filter { !$0.isEmpty }).count }
+
+    private var householdSummary: String { "Set up" }
+
+    private var storageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
             let url = ImageStorageManager.url(for: attachment.localFilename)
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
@@ -30,283 +49,270 @@ struct SettingsView: View {
         return ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
     }
 
-    private var localImageCount: Int {
-        attachments.filter { FileManager.default.fileExists(atPath: ImageStorageManager.url(for: $0.localFilename).path) }.count
+    private var lastSyncDate: Date? {
+        lastCloudSyncRaw > 0 ? Date(timeIntervalSince1970: lastCloudSyncRaw) : nil
     }
 
-    private var missingImageCount: Int {
-        attachments.count - localImageCount
-    }
-
-    private var imageSyncSummary: String {
-        if attachments.isEmpty {
-            return "No proof images yet"
-        }
-        if !cloudImageSync.activeTransfers.isEmpty {
-            return "Syncing"
-        }
-        if !cloudImageSync.transferErrors.isEmpty {
-            return "Needs attention"
-        }
-        return "Synced"
-    }
-
-    private var localAvailabilitySummary: String {
-        if attachments.isEmpty {
-            return "None"
-        }
-        return "\(localImageCount) of \(attachments.count) available offline"
-    }
-
-    private var activeWarrantyCount: Int {
-        records.filter { $0.warrantyStatus == .active || $0.warrantyStatus == .expiringSoon }.count
-    }
-
-    private var categorySummary: String {
-        let categories = Set(records.compactMap(\.category))
-        return categories.isEmpty ? "None" : categories.sorted().joined(separator: ", ")
+    private var backupState: BackupState {
+        currentBackupState(syncManager: cloudImageSync, activeSyncBackend: activeSyncBackend, lastSync: lastSyncDate)
     }
 
     var body: some View {
-        List {
-            // Account
-            Section("Account") {
-                if authManager.isSignedIn {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
+        @Bindable var reminders = reminders
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Settings")
+                    .font(PTFont.serif(34, weight: 600))
+                    .foregroundStyle(PT.txt)
+                    .padding(.bottom, 18)
+
+                libraryCard
+                    .padding(.bottom, 26)
+
+                // Reminders
+                SettingsSectionLabel(text: "Reminders")
+                SettingsCard {
+                    SettingsRow(
+                        icon: "bell", iconColor: PT.gold, title: "Warranty reminders",
+                        subtitle: reminders.warrantyRemindersEnabled ? "Before each warranty runs out" : "Off — you won't be warned",
+                        toggle: $reminders.warrantyRemindersEnabled
+                    )
+                    if reminders.warrantyRemindersEnabled {
+                        SettingsRowDivider()
+                        Menu {
+                            ForEach(WarrantyLeadTime.allCases) { lead in
+                                Button(lead.label) { reminders.warrantyLeadTime = lead }
+                            }
+                        } label: {
+                            SettingsRow(icon: "calendar", title: "Remind me", value: reminders.warrantyLeadTime.label, showChevron: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    SettingsRowDivider()
+                    SettingsRow(
+                        icon: "arrow.uturn.backward", iconColor: PT.gold, title: "Return windows",
+                        subtitle: "Warn before a return or refund period closes",
+                        toggle: $reminders.returnWindowRemindersEnabled
+                    )
+                    SettingsRowDivider()
+                    SettingsRow(
+                        icon: "sparkles", iconColor: PT.gold, title: "Suggest support contacts",
+                        subtitle: "Look up brand help lines when something breaks",
+                        toggle: $reminders.suggestSupportContacts
+                    )
+                }
+                .padding(.bottom, 22)
+
+                // Your data
+                SettingsSectionLabel(text: "Your data")
+                SettingsCard {
+                    NavigationLink { ExportView() } label: {
+                        SettingsRow(icon: "square.and.arrow.up", iconColor: PT.gold, title: "Export everything",
+                                    subtitle: "A full copy — PDF + CSV, no lock-in", showChevron: true)
+                    }.buttonStyle(.plain)
+                    SettingsRowDivider()
+                    NavigationLink { ImportView() } label: {
+                        SettingsRow(icon: "tray.and.arrow.down", iconColor: PT.gold, title: "Import receipts",
+                                    subtitle: "From Photos, Files, or your inbox", showChevron: true)
+                    }.buttonStyle(.plain)
+                    SettingsRowDivider()
+                    SettingsRow(icon: "brain", iconColor: PT.gold, title: "Share anonymous learning data",
+                                subtitle: "Merchant patterns only — never your purchases",
+                                toggle: $communityLearningEnabled)
+                    SettingsRowDivider()
+                    SettingsRow(icon: "lock", iconColor: PT.sage, title: "Records are private",
+                                subtitle: "Stored in your iCloud — only you can see them")
+                }
+                .padding(.bottom, 22)
+
+                // Household
+                SettingsSectionLabel(text: "Household")
+                SettingsCard {
+                    NavigationLink { HouseholdView() } label: {
+                        SettingsRow(icon: "person.2", iconColor: PT.gold, title: "Family sharing",
+                                    subtitle: "Share proof with the people you live with",
+                                    value: householdSummary, showChevron: true)
+                    }.buttonStyle(.plain)
+                }
+                .padding(.bottom, 22)
+
+                // Your library
+                SettingsSectionLabel(text: "Your library")
+                SettingsCard {
+                    SettingsRow(icon: "square.stack.3d.up", title: "Logged value",
+                                subtitle: "Handy for insurance & claims",
+                                value: totalValue, showChevron: true,
+                                action: { showLoggedValueInfo = true })
+                    SettingsRowDivider()
+                    SettingsRow(icon: "square.grid.2x2", title: "Categories", subtitle: "Rooms & types",
+                                value: "\(roomCount) room\(roomCount == 1 ? "" : "s")")
+                    SettingsRowDivider()
+                    SettingsRow(icon: "shippingbox", title: "Storage",
+                                value: storageSize)
+                }
+                .padding(.bottom, 22)
+
+                // Help & about
+                SettingsSectionLabel(text: "Help & about")
+                SettingsCard {
+                    SettingsRow(icon: "questionmark.circle", title: "Help & support", showChevron: true,
+                                action: { openURL("https://papertrail.kaopeh.com") })
+                    SettingsRowDivider()
+                    SettingsRow(icon: "hand.raised", title: "Privacy policy", showChevron: true,
+                                action: { openURL("https://papertrail.kaopeh.com/privacy") })
+                    SettingsRowDivider()
+                    SettingsRow(icon: "star", title: "Rate PaperTrail", showChevron: true,
+                                action: { openURL("https://apps.apple.com/app/id0") })
+                    SettingsRowDivider()
+                    NavigationLink { AdvancedDiagnosticsView() } label: {
+                        SettingsRow(icon: "gearshape.2", title: "Advanced & Diagnostics",
+                                    subtitle: "Sync details, debug tools, support info", showChevron: true)
+                    }.buttonStyle(.plain)
+                }
+                .padding(.bottom, 22)
+
+                // Sign out / account
+                SettingsCard {
+                    if authManager.isSignedIn {
+                        SettingsRow(title: "Sign out", danger: true, action: { authManager.signOut() })
+                    } else {
+                        SignInWithAppleButton(.signIn) { request in
+                            request.requestedScopes = [.fullName, .email]
+                        } onCompletion: { result in
+                            authManager.handleSignInResult(result)
+                        }
+                        .signInWithAppleButtonStyle(.white)
+                        .frame(height: 44)
+                        .padding(16)
+                    }
+                }
+                .padding(.bottom, 18)
+
+                // Footer
+                VStack(spacing: 4) {
+                    Text("PaperTrail · Version \(versionString)")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(PT.txt3)
+                    Text("Proof of purchase, ready the day you need it.")
+                        .font(PTFont.serif(13, weight: 500, italic: true))
+                        .foregroundStyle(PT.txt3)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+            }
+            .padding(.horizontal, PT.Metric.screenPad)
+            .padding(.top, 4)
+            .padding(.bottom, 120)
+        }
+        .ptScreen()
+        .toolbar(.hidden, for: .navigationBar)
+        .alert("Your name", isPresented: $showNameEditor) {
+            TextField("Name", text: $nameDraft)
+            Button("Save") { authManager.setDisplayName(nameDraft) }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Apple only shares your name the first time you sign in, so set one here to show in the app.")
+        }
+        .alert("Logged value", isPresented: $showLoggedValueInfo) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("\(itemCount) item\(itemCount == 1 ? "" : "s") · \(totalValue) logged. Handy for insurance & claims.")
+        }
+    }
+
+    // MARK: - Library Card hero
+
+    private var libraryCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("PAPERTRAIL · LIBRARY CARD")
+                    .ptMonoLabel(9.5, tracking: 2.4)
+                    .foregroundStyle(PT.goldDeep)
+                Spacer()
+                Text("EST. 2026")
+                    .font(PTFont.mono(9.5))
+                    .tracking(1.4)
+                    .foregroundStyle(PT.onPaper3)
+            }
+            .padding(.bottom, 14)
+
+            if authManager.isSignedIn {
+                Button { startEditingName() } label: {
+                    HStack(spacing: 12) {
+                        PTAvatar(initials: authManager.resolvedName?.ptInitials, size: 48)
+                        VStack(alignment: .leading, spacing: 3) {
+                            if authManager.hasName {
                                 Text(authManager.displayName)
-                                    .font(.headline)
-                                if let email = authManager.userEmail, !email.isEmpty {
-                                    Text(email)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else if let userID = authManager.userID {
-                                    Text("Apple ID linked · \(userID.prefix(8))…")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                    .font(PTFont.serif(20, weight: 600))
+                                    .foregroundStyle(PT.onPaper)
+                            } else {
+                                (Text("Add your name").foregroundStyle(PT.onPaper)
+                                 + Text(" ›").foregroundStyle(PT.goldDeep))
+                                    .font(PTFont.serif(20, weight: 600))
                             }
+                            Text("Signed in with Apple")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(PT.onPaper2)
                         }
-                        Text("Signed in with Apple")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-
-                    Button("Sign Out", role: .destructive) {
-                        authManager.signOut()
-                    }
-                } else {
-                    SignInWithAppleButton(.signIn) { request in
-                        request.requestedScopes = [.fullName, .email]
-                    } onCompletion: { result in
-                        authManager.handleSignInResult(result)
-                    }
-                    .signInWithAppleButtonStyle(.black)
-                    .frame(height: 44)
-
-                    Text("Sign in to sync across devices and share records.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            // Sync
-            Section("Sync") {
-                LabeledContent("iCloud", value: "Automatic")
-                LabeledContent("Backend", value: activeSyncBackend)
-                LabeledContent("Status", value: authManager.isSignedIn ? "Active" : "Sign in required")
-                LabeledContent("Sentry", value: sentryStatus)
-                LabeledContent("CK account", value: cloudKitAccountStatus)
-                LabeledContent("CK container", value: cloudKitContainerIdentifier)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Preflight")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(cloudKitContainerStatus)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                }
-                .padding(.vertical, 4)
-
-                if activeSyncBackend == "Local fallback" {
-                    Text("CloudKit failed during startup, so PaperTrail is currently using local-only storage on this device.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-
-                    if !cloudKitInitError.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Startup error")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(cloudKitInitError)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-
-            // Storage
-            Section("Storage") {
-                LabeledContent("Records", value: "\(records.count)")
-                LabeledContent("Attachments", value: "\(attachments.count)")
-                LabeledContent("Image storage", value: totalImageSize)
-                LabeledContent("Persistence", value: "SwiftData + CloudKit (single store)")
-            }
-
-            // Image Sync
-            Section("Image Sync") {
-                LabeledContent("Proof images", value: imageSyncSummary)
-                LabeledContent("On this device", value: localAvailabilitySummary)
-
-                if !cloudImageSync.activeTransfers.isEmpty {
-                    HStack {
-                        ProgressView()
-                        Text("Syncing \(cloudImageSync.activeTransfers.count) image(s)…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if missingImageCount > 0 {
-                    Button("Download missing images") {
-                        Task {
-                            let syncInfos = attachments.map {
-                                AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename)
-                            }
-                            await cloudImageSync.syncMissingImages(attachments: syncInfos)
-                        }
-                    }
-                }
-
-                if !cloudImageSync.transferErrors.isEmpty {
-                    Label("\(cloudImageSync.transferErrors.count) image sync issue(s)", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            // Warranties
-            Section("Warranties") {
-                LabeledContent("Active warranties", value: "\(activeWarrantyCount)")
-                LabeledContent("Notifications", value: records.filter(\.warrantyNotificationScheduled).count > 0 ? "Scheduled" : "None")
-            }
-
-            // Categories
-            Section("Categories") {
-                Text(categorySummary)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Foundation Models Diagnostics
-            Section("Foundation Models Diagnostics") {
-                Button {
-                    Task { await runFMDiagnostic() }
-                } label: {
-                    HStack {
-                        Text("Test Foundation Models")
                         Spacer()
-                        if fmDiagRunning {
-                            ProgressView()
-                        }
                     }
                 }
-                .disabled(fmDiagRunning)
-
-                if !fmDiagResult.isEmpty {
-                    Text(fmDiagResult)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 12) {
+                    PTAvatar(size: 48)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Not signed in")
+                            .font(PTFont.serif(20, weight: 600))
+                            .foregroundStyle(PT.onPaper)
+                        Text("Sign in below to sync & share")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(PT.onPaper2)
+                    }
+                    Spacer()
                 }
             }
 
-            // About
-            Section("About") {
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
-            }
+            GoldRule()
+                .padding(.vertical, 14)
 
-            Section("Milestone") {
-                LabeledContent("Current", value: "Milestone 3")
-                LabeledContent("Focus", value: "CloudKit sync, Apple auth, sharing")
+            HStack {
+                BackupStatusBadge(state: backupState, onRetry: retryBackup)
+                Spacer()
+                Text("\(itemCount) ITEMS · \(totalValue)")
+                    .font(PTFont.mono(10))
+                    .tracking(0.6)
+                    .foregroundStyle(PT.onPaper3)
             }
         }
-        .navigationTitle("Settings")
+        .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
+        .frame(maxWidth: .infinity)
+        .paperCard(goldFold: true)
     }
 
-    // MARK: - Foundation Models Diagnostic
-
-    private func runFMDiagnostic() async {
-        fmDiagRunning = true
-        defer { fmDiagRunning = false }
-
-        #if canImport(FoundationModels)
-        let availability = SystemLanguageModel.default.availability
-        let rawAvailability = String(describing: availability)
-        var result = "Raw availability: \(rawAvailability)\n"
-
-        let deviceModel = Self.deviceModelIdentifier()
-        let iosVersion = UIDevice.current.systemVersion
-        result += "Device: \(deviceModel)\n"
-        result += "iOS: \(iosVersion)\n"
-
-        guard availability == .available else {
-            result += "\n⚠️ Model not available.\n"
-            result += "State: \(rawAvailability)\n"
-            result += "This may mean Apple Intelligence is off, the model is downloading, or the region/language is unsupported."
-            fmDiagResult = result
-            return
-        }
-
-        // Test 1: Plain text generation (no @Generable)
-        do {
-            let session = LanguageModelSession()
-            let response = try await session.respond(to: "Say hello in one word")
-            result += "\n✅ Plain text: \(response)\n"
-        } catch {
-            result += "\n❌ Plain text error: \(error.localizedDescription)\n"
-            result += "Full: \(String(describing: error))\n"
-        }
-
-        // Test 2: Structured generation with @Generable
-        do {
-            let session = LanguageModelSession(
-                instructions: "Extract receipt fields from the text. Respond in English."
-            )
-            let structuredResponse = try await session.respond(
-                to: "Store: Apple Singapore, Product: iPhone 16 Pro, Amount: $1599, Date: 2025-01-15",
-                generating: ReceiptExtractionSchema.self
-            )
-            let schema = structuredResponse.content
-            result += "✅ Structured: product=\(schema.productName ?? "nil"), merchant=\(schema.merchantName ?? "nil"), amount=\(schema.amount.map { String($0) } ?? "nil")\n"
-        } catch {
-            result += "❌ Structured error: \(error.localizedDescription)\n"
-            result += "Full: \(String(describing: error))\n"
-        }
-
-        fmDiagResult = result
-        #else
-        fmDiagResult = "FoundationModels framework not available in this build"
-        #endif
+    private var versionString: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
-    /// Returns the hardware model identifier (e.g. "iPhone17,1").
-    private static func deviceModelIdentifier() -> String {
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        return withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingCString: $0) ?? UIDevice.current.model
-            }
+    // MARK: - Actions
+
+    private func startEditingName() {
+        nameDraft = authManager.resolvedName ?? ""
+        showNameEditor = true
+    }
+
+    private func retryBackup() {
+        Task {
+            let infos = attachments.map { AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename) }
+            await cloudImageSync.uploadMissingImages(attachments: infos)
+            await cloudImageSync.syncMissingImages(attachments: infos)
         }
+    }
+
+    private func openURL(_ string: String) {
+        guard let url = URL(string: string) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
@@ -314,6 +320,8 @@ struct SettingsView: View {
     NavigationStack {
         SettingsView()
     }
+    .tint(PT.gold)
+    .preferredColorScheme(.dark)
     .environment(AuthenticationManager())
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)

@@ -16,27 +16,50 @@ final class AuthenticationManager {
     var userID: String?
     var userName: String?
     var userEmail: String?
+    /// A name the user set themselves. Apple only returns the real name on the
+    /// first consent, so this is the only way to show a name on re-sign-ins.
+    var customName: String?
 
-    var displayName: String {
-        if let userName = userName?.nilIfBlank {
-            return userName
-        }
+    /// The best name we have, or nil if we genuinely don't know one.
+    var resolvedName: String? {
+        if let customName = customName?.nilIfBlank { return customName }
+        if let userName = userName?.nilIfBlank { return userName }
         if let userEmail = userEmail?.nilIfBlank {
             let prefix = userEmail.split(separator: "@").first.map(String.init) ?? userEmail
             return prefix.replacingOccurrences(of: ".", with: " ").capitalized
         }
-        return "Apple User"
+        return nil
+    }
+
+    var displayName: String {
+        resolvedName ?? "Apple User"
+    }
+
+    /// True when we have no real name and are falling back to a placeholder.
+    var hasName: Bool { resolvedName != nil }
+
+    /// Persist a user-entered display name (pass empty to clear).
+    func setDisplayName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        customName = trimmed.isEmpty ? nil : trimmed
+        if let customName {
+            UserDefaults.standard.set(customName, forKey: customNameKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: customNameKey)
+        }
     }
 
     private let userIDKey = "appleUserID"
     private let userNameKey = "appleUserName"
     private let userEmailKey = "appleUserEmail"
+    private let customNameKey = "appleCustomName"
 
     init() {
         // Restore from Keychain/UserDefaults
         userID = UserDefaults.standard.string(forKey: userIDKey)
         userName = UserDefaults.standard.string(forKey: userNameKey)
         userEmail = UserDefaults.standard.string(forKey: userEmailKey)
+        customName = UserDefaults.standard.string(forKey: customNameKey)
         isSignedIn = userID != nil
     }
 
@@ -77,10 +100,12 @@ final class AuthenticationManager {
         userID = nil
         userName = nil
         userEmail = nil
+        customName = nil
         isSignedIn = false
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: userNameKey)
         UserDefaults.standard.removeObject(forKey: userEmailKey)
+        UserDefaults.standard.removeObject(forKey: customNameKey)
     }
 
     /// Check if the Apple ID credential is still valid.

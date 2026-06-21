@@ -90,13 +90,22 @@ struct LineItem: Sendable, Hashable, Identifiable {
     let amount: Double?
     let quantity: Int?
     let kind: LineItemKind
+    /// Per-item category (from the model's per-line-item classification), if any.
+    let category: String?
+    /// Item/model/SKU code, if shown.
+    let sku: String?
+    /// Per-unit price (before multiplying by quantity), if shown.
+    let unitPrice: Double?
 
-    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown) {
+    init(name: String, amount: Double? = nil, quantity: Int? = nil, kind: LineItemKind = .unknown, category: String? = nil, sku: String? = nil, unitPrice: Double? = nil) {
         self.id = UUID()
         self.name = name
         self.amount = amount
         self.quantity = quantity
         self.kind = kind
+        self.category = category
+        self.sku = sku
+        self.unitPrice = unitPrice
     }
 
     enum LineItemKind: String, Sendable, Hashable, CaseIterable {
@@ -146,6 +155,14 @@ struct StructuredExtractionResult: Sendable, Hashable {
     var currency: ExtractedField<String>
     var category: ExtractedField<String>
     var warrantyDurationMonths: ExtractedField<Int>
+
+    /// Merchant tax/registration ID (UEN / GST Reg / VAT ID) — a stable, unique
+    /// business identity used as the primary merchant-matching key when present.
+    var vatId: ExtractedField<String> = .absent
+    /// Tax (GST/VAT/sales tax) amount, when a separate tax line is shown.
+    var taxAmount: ExtractedField<Double> = .absent
+    /// Order/invoice/reference number, useful for proof-of-purchase and dedupe.
+    var orderReference: ExtractedField<String> = .absent
 
     /// Individual line items extracted from the document (products, accessories, warranties, etc.).
     var lineItems: [LineItem]
@@ -204,24 +221,37 @@ enum ExtractionSource: String, Sendable, Hashable {
 ///
 /// Field names are kept short and JSON-friendly for the model's constrained output.
 #if canImport(FoundationModels)
+// NOTE (XCODE-VERIFY): `@Guide(.anyOf([...]))` constrains the model's output to
+// an exact value set via constrained decoding (it cannot invent "Gadgets").
+// This reflects the FoundationModels API as of WWDC25 286; if the build fails on
+// the `.anyOf` form, fall back to `@Guide(description:)` listing the values.
 @Generable
 struct LineItemSchema: Sendable {
     @Guide(description: "Item name/description as shown on the receipt.")
     var name: String?
 
-    @Guide(description: "Price as decimal number, null if bundled or no separate price.")
+    @Guide(description: "The exact line total printed for this item, as a decimal number. Use ONLY a number that actually appears on this line; if it is bundled, free, or you cannot read the price, use null. Never estimate or invent a price.")
     var amount: Double?
 
     @Guide(description: "Quantity purchased, default 1.")
     var quantity: Int?
 
-    @Guide(description: "Type of item: product, accessory, warranty, service, or fee.")
+    @Guide(description: "Type of item.", .anyOf(["product", "accessory", "warranty", "service", "fee"]))
     var kind: String?
+
+    @Guide(description: "Category for this specific item.", .anyOf(["Electronics", "Appliance", "Kitchen", "Furniture", "Clothing", "Sports", "Health", "Home", "Other"]))
+    var category: String?
+
+    @Guide(description: "Item/model/SKU code if shown, e.g. 'BRPS232SB'. Null if none.")
+    var sku: String?
+
+    @Guide(description: "Per-unit price as a decimal number, before multiplying by quantity. Null if not shown.")
+    var unitPrice: Double?
 }
 
 @Generable
 struct ReceiptExtractionSchema: Sendable {
-    @Guide(description: "The type of document: one of receipt, invoice, warranty_card, order_confirmation, packing_slip, support_document, manual, unknown.")
+    @Guide(description: "The type of document.", .anyOf(["receipt", "invoice", "warranty_card", "order_confirmation", "packing_slip", "support_document", "manual", "unknown"]))
     var documentKind: String?
 
     @Guide(description: "The product or device name purchased. If multiple items, pick the most expensive or prominent one.")
@@ -230,20 +260,29 @@ struct ReceiptExtractionSchema: Sendable {
     @Guide(description: "The merchant or store name.")
     var merchantName: String?
 
-    @Guide(description: "The purchase date in ISO 8601 format (YYYY-MM-DD).")
+    @Guide(description: "The purchase date from a LABELED field (Order/Invoice/Transaction/Purchase Date), in ISO 8601 YYYY-MM-DD with a 4-digit year. Day-first source dates; a 2-digit year YY means 20YY. Not the page-corner print timestamp. Null if unclear.")
     var purchaseDate: String?
 
-    @Guide(description: "The total amount paid as a decimal number, e.g. 129.99. Do not include currency symbols.")
+    @Guide(description: "The exact grand total paid, as a decimal number that actually appears on the receipt (e.g. the 'Total' line). No currency symbols. Use null if you cannot read it — never estimate or invent it.")
     var amount: Double?
 
     @Guide(description: "The ISO 4217 currency code, e.g. SGD, USD, MYR.")
     var currency: String?
 
-    @Guide(description: "A category for the product: one of Electronics, Appliance, Kitchen, Furniture, Clothing, Sports, Health, Home, Other.")
+    @Guide(description: "A category for the overall purchase.", .anyOf(["Electronics", "Appliance", "Kitchen", "Furniture", "Clothing", "Sports", "Health", "Home", "Other"]))
     var category: String?
 
     @Guide(description: "Warranty duration in months if mentioned on the receipt or warranty card, e.g. 12 or 24. Null if not found.")
     var warrantyDurationMonths: Int?
+
+    @Guide(description: "The merchant's tax/business registration ID if printed, e.g. a GST Reg No, UEN, VAT ID, or company registration number (such as 'M2-0116439-7'). This identifies the business. Null if not present.")
+    var merchantTaxId: String?
+
+    @Guide(description: "The tax amount (GST/VAT/sales tax) as a decimal number, if a separate tax line is shown. Null if not present.")
+    var taxAmount: Double?
+
+    @Guide(description: "The order, invoice, or reference number if printed, e.g. 'PSINV-B10443651' or an order number. Useful as a receipt reference. Null if not present.")
+    var orderReference: String?
 
     @Guide(description: "Individual line items on the receipt. Each has name, optional amount, optional quantity, and kind (product/accessory/warranty/service/fee). Include all distinct items, not totals or subtotals.")
     var lineItems: [LineItemSchema]?
@@ -372,6 +411,14 @@ struct FoundationModelExtractionService: FieldExtractionService {
         return desc.contains("locale") || desc.contains("language") || desc.contains("unsupported")
     }
 
+    private func isContextWindowError(_ error: Error) -> Bool {
+        let desc = error.localizedDescription.lowercased()
+        return desc.contains("context window") || desc.contains("context length")
+            || desc.contains("context size") || desc.contains("too large")
+            || (desc.contains("context") && desc.contains("exceed"))
+            || (desc.contains("token") && desc.contains("exceed"))
+    }
+
     func extract(from ocrText: String, image: UIImage? = nil, learningContext: MerchantLearningContext? = nil) async -> StructuredExtractionResult {
         #if canImport(FoundationModels)
         let availability = SystemLanguageModel.default.availability
@@ -456,8 +503,21 @@ struct FoundationModelExtractionService: FieldExtractionService {
             if let productHint = context.productHint {
                 hints.append(productHint)
             }
+            // Few-shot (roadmap #5): replay the user's own recent corrections
+            // for THIS merchant as worked examples. Hard-capped at 2 truncated
+            // lines so the context window stays safe.
+            hints.append(contentsOf: CorrectionLogger.fewShotExamples(forNormalizedMerchant: context.normalizedMerchantName))
             guard !hints.isEmpty else { return "" }
-            return "\nMerchant-specific hints:\n" + hints.joined(separator: "\n")
+            // Phrase the hints by how much we trust this profile: a merchant
+            // corrected many times recently is near-authoritative; a single old
+            // correction is only a gentle nudge (see MerchantProfile.hintStrength).
+            let header: String
+            switch context.confidence {
+            case 0.6...:   header = "Strongly trust these merchant-specific hints (consistently corrected before):"
+            case 0.3..<0.6: header = "Merchant-specific hints (use unless the text clearly disagrees):"
+            default:       header = "Tentative merchant-specific hints (low confidence — defer to the text):"
+            }
+            return "\n" + header + "\n" + hints.joined(separator: "\n")
         } ?? ""
 
         let instructions = """
@@ -466,8 +526,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Be precise: prefer exact values from the text over guesses. \
             If a field is not clearly present, leave it null. \
             Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
-            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            For the purchase date, use the date from a clearly LABELED field such as "Order Date", "Invoice Date", "Tax Invoice Date", "Transaction Date", "Date of Purchase", or "Date". \
+            Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
+            Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
+            Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
+            A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
+            For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
+            If you cannot determine the purchase date confidently, leave it null rather than guessing.\
             \(adaptiveHints)
             """
 
@@ -475,14 +540,16 @@ struct FoundationModelExtractionService: FieldExtractionService {
         // Attempt 1: cleaned OCR text (standard filter)
         // Attempt 2: aggressively cleaned text (on locale error)
         // Attempt 3: first 500 chars of aggressively cleaned text (on locale error)
-        let cleanedText = cleanOCRTextForModel(ocrText)
-        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true)
-        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 500)
+        // Progressively smaller inputs: large receipts overflow the on-device
+        // model's context window, so each retry feeds less text.
+        let cleanedText = cleanOCRTextForModel(ocrText, maxLength: 2200)
+        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 1200)
+        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 600)
 
         let attempts: [(label: String, input: String)] = [
-            ("attempt 1: cleaned OCR", cleanedText),
-            ("attempt 2: aggressive filter", aggressiveText),
-            ("attempt 3: minimal (500 chars)", minimalText),
+            ("attempt 1: cleaned OCR (2200)", cleanedText),
+            ("attempt 2: aggressive (1200)", aggressiveText),
+            ("attempt 3: minimal (600)", minimalText),
         ]
 
         var lastError: Error?
@@ -529,13 +596,15 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 Self.logger.warning("FM \(attempt.label, privacy: .public) failed: \(errorDesc, privacy: .public)")
                 lastError = error
 
-                // Only retry on locale/language errors — other errors should fail immediately
-                guard isLocaleError(error) else {
-                    Self.logger.error("FM non-locale error, not retrying: \(errorDesc, privacy: .public)")
+                // Retry on locale errors (anchor language) and context-window
+                // overflows (feed less text on the next, shorter attempt). Other
+                // errors fail immediately.
+                guard isLocaleError(error) || isContextWindowError(error) else {
+                    Self.logger.error("FM non-retryable error, not retrying: \(errorDesc, privacy: .public)")
                     break
                 }
 
-                // Continue to next attempt for locale errors
+                // Continue to the next (shorter) attempt.
             }
         }
 
@@ -581,24 +650,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     #if canImport(FoundationModels)
     private func mapSchemaToResult(_ schema: ReceiptExtractionSchema) -> StructuredExtractionResult {
-        let parsedDate: Date? = {
-            guard let dateStr = schema.purchaseDate else { return nil }
-
-            // Try ISO 8601 first
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withFullDate]
-            if let d = isoFormatter.date(from: dateStr) { return d }
-
-            // Fallback: try common formats the model might produce
-            let fallbackFormats = ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy"]
-            for fmt in fallbackFormats {
-                let f = DateFormatter()
-                f.dateFormat = fmt
-                f.locale = Locale(identifier: "en_SG")
-                if let d = f.date(from: dateStr) { return d }
-            }
-            return nil
-        }()
+        let parsedDate: Date? = Self.parsePurchaseDateString(schema.purchaseDate)
 
         let documentKind: ExtractedField<DocumentKind> = {
             guard let kindStr = schema.documentKind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
@@ -634,11 +686,16 @@ struct FoundationModelExtractionService: FieldExtractionService {
             guard let name = itemSchema.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !name.isEmpty else { return nil }
             let kind = LineItem.LineItemKind(rawValue: itemSchema.kind?.lowercased() ?? "") ?? .unknown
+            let itemCategory = itemSchema.category?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let itemSku = itemSchema.sku?.trimmingCharacters(in: .whitespacesAndNewlines)
             return LineItem(
                 name: name,
                 amount: itemSchema.amount,
                 quantity: itemSchema.quantity ?? 1,
-                kind: kind
+                kind: kind,
+                category: (itemCategory?.isEmpty == false) ? itemCategory : nil,
+                sku: (itemSku?.isEmpty == false) ? itemSku : nil,
+                unitPrice: itemSchema.unitPrice
             )
         }
 
@@ -660,6 +717,12 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 value: schema.warrantyDurationMonths,
                 confidence: schema.warrantyDurationMonths != nil ? .medium : .none
             ),
+            vatId: field(schema.merchantTaxId, minLength: 4),
+            taxAmount: ExtractedField(
+                value: schema.taxAmount,
+                confidence: schema.taxAmount != nil ? .high : .none
+            ),
+            orderReference: field(schema.orderReference, minLength: 3),
             lineItems: mappedLineItems,
             source: .foundationModel,
             diagnostics: nil
@@ -757,6 +820,115 @@ struct FoundationModelExtractionService: FieldExtractionService {
     }
     #endif
 
+    /// Parse a model-produced purchase-date string into a sane `Date`, or nil.
+    ///
+    /// Tries ISO 8601 first (what we ask for), then explicit **day-first** and
+    /// **textual-month** formats so e.g. "23-Nov-25" parses as 2025-11-23 instead
+    /// of having its day and year swapped. `isLenient = false` prevents a bare
+    /// 2-digit "23" from becoming year 0023. Always passed through
+    /// `normalizePurchaseDate` for the final plausibility gate. `internal` so it
+    /// is unit-testable.
+    static func parsePurchaseDateString(
+        _ dateStr: String?,
+        convention: LocaleDateConvention = .current
+    ) -> Date? {
+        guard let dateStr else { return nil }
+        let trimmed = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let raw: Date? = {
+            // Textual-month dates ("23-Nov-25", "November 23, 2025") first — they
+            // assign day/year by token role so the two can't swap. This must run
+            // BEFORE ISO8601, which leniently misreads "23-Nov-25" as year 0023.
+            if let d = parseTextualDate(trimmed) { return d }
+
+            // Strict ISO 8601 (the format we ask the model for), but only when the
+            // string actually starts with a 4-digit year — ISO8601DateFormatter
+            // otherwise leniently misreads "23-..." as year 0023.
+            if trimmed.prefix(4).allSatisfy(\.isNumber),
+               trimmed.count >= 5, trimmed[trimmed.index(trimmed.startIndex, offsetBy: 4)] == "-" {
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withFullDate]
+                if let d = isoFormatter.date(from: trimmed) { return d }
+            }
+
+            // Purely numeric dates: unambiguous ISO-ish first, then ambiguous
+            // formats ordered by the region's convention so "03/05/2025" resolves
+            // the right way. `isLenient = false` avoids stray 2-digit "23" → 0023.
+            var formats = ["yyyy-MM-dd", "yyyy/MM/dd"]
+            if convention.prefersMonthBeforeDay {
+                formats += ["MM/dd/yyyy", "MM-dd-yyyy", "MM.dd.yyyy", "MM/dd/yy",
+                            "dd/MM/yyyy", "dd/MM/yy"]
+            } else {
+                formats += ["dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "dd/MM/yy",
+                            "MM/dd/yyyy", "MM/dd/yy"]
+            }
+
+            for fmt in formats {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.isLenient = false
+                f.dateFormat = fmt
+                if let d = f.date(from: trimmed) { return d }
+            }
+            return nil
+        }()
+
+        return normalizePurchaseDate(raw)
+    }
+
+    private static let monthNameIndex: [String: Int] = [
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    ]
+
+    /// Parse a textual-month date by token roles, so day and year can never be
+    /// swapped regardless of order: "23-Nov-25", "23 Nov 2025", "November 23,
+    /// 2025", "Nov 23 2025" all work. Rule: split into 3 tokens (one alphabetic
+    /// month + two numbers); the LAST numeric token is the year, the other is the
+    /// day. Nil if it isn't a 3-part textual-month date.
+    static func parseTextualDate(_ s: String) -> Date? {
+        let separators: Set<Character> = [" ", "-", ".", "/", ","]
+        let tokens = s.split(whereSeparator: { separators.contains($0) }).map(String.init)
+        guard tokens.count == 3 else { return nil }
+
+        let monthIdxs = tokens.indices.filter { tokens[$0].contains(where: \.isLetter) }
+        let numberIdxs = tokens.indices.filter { !tokens[$0].isEmpty && tokens[$0].allSatisfy(\.isNumber) }
+        guard monthIdxs.count == 1, numberIdxs.count == 2 else { return nil }
+
+        guard let month = monthNameIndex[String(tokens[monthIdxs[0]].lowercased().prefix(3))],
+              let dayIdx = numberIdxs.min(), let yearIdx = numberIdxs.max(),
+              let day = Int(tokens[dayIdx]), let rawYear = Int(tokens[yearIdx]) else { return nil }
+
+        var comps = DateComponents()
+        comps.day = day
+        comps.month = month
+        comps.year = rawYear < 100 ? 2000 + rawYear : rawYear
+        return Calendar(identifier: .gregorian).date(from: comps)
+    }
+
+    /// Repair and sanity-check a parsed purchase date.
+    ///
+    /// `DateFormatter`'s `yyyy` token leniently parses a 2-digit year like "23"
+    /// as year **0023**, which then prefilled the form with an absurd date. Here
+    /// we lift 2-digit years into the 2000s and reject anything implausible
+    /// (before 2015, or in the future) — "prefer blank over bad". `internal` so
+    /// it is unit-testable.
+    static func normalizePurchaseDate(_ date: Date?) -> Date? {
+        guard let date else { return nil }
+        let calendar = Calendar(identifier: .gregorian)
+        var comps = calendar.dateComponents([.year, .month, .day], from: date)
+        if let year = comps.year, year < 100 {
+            comps.year = 2000 + year
+        }
+        guard let fixed = calendar.date(from: comps) else { return nil }
+        let year = calendar.component(.year, from: fixed)
+        if year < 2015 || fixed > Date.now.addingTimeInterval(86_400) {
+            return nil
+        }
+        return fixed
+    }
+
     /// Returns the hardware model identifier (e.g. "iPhone17,1") instead of the generic "iPhone" from UIDevice.
     private static func deviceModelIdentifier() -> String {
         var systemInfo = utsname()
@@ -793,7 +965,15 @@ struct HeuristicFieldExtractor {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "extraction.heuristic")
 
     func extract(from text: String, learningContext: MerchantLearningContext? = nil) -> StructuredExtractionResult {
-        let docKind = classifyDocument(from: text)
+        var docKind = classifyDocument(from: text)
+        // Learned document-kind bias: when the text itself gives no signal but
+        // this merchant has consistently produced one kind, assume it (low
+        // confidence — surfaced as a hint, never a fact).
+        if docKind.value == nil || docKind.value == .unknown,
+           let learnedKind = learningContext?.likelyDocumentKind, learnedKind != .unknown,
+           (learningContext?.confidence ?? 0) >= 0.3 {
+            docKind = ExtractedField(value: learnedKind, confidence: .low)
+        }
 
         let rawProduct = extractProductName(from: text)
         let rawMerchant = extractMerchantName(from: text)
@@ -818,6 +998,21 @@ struct HeuristicFieldExtractor {
                 return nil
             }
             return v
+        }()
+
+        // Learned-product rescue: when heuristics found no usable product name
+        // but this merchant's profile remembers the typical main item, pick the
+        // transcript line that best matches it — low confidence, so the Review
+        // screen still flags it for confirmation.
+        let resolvedProduct: (value: String?, confidence: ExtractionConfidence) = {
+            if let productName { return (productName, .heuristic) }
+            guard let hinted = learningContext?.hintedProductName,
+                  (learningContext?.confidence ?? 0) >= 0.3,
+                  let match = Self.lineMatching(hinted, in: text),
+                  !looksLikeBoilerplate(match), !looksLikeOCRJunk(match),
+                  isValidProductName(match) else { return (nil, .none) }
+            Self.logger.info("Product name rescued from merchant hint")
+            return (match, .low)
         }()
 
         let merchantName: String? = {
@@ -868,14 +1063,14 @@ struct HeuristicFieldExtractor {
         let resolvedCategory = (learnedCategory?.isEmpty == false ? learnedCategory : nil)
         let resolvedWarrantyMonths = rawWarrantyMonths ?? learnedWarrantyMonths
 
-        let fieldCount = [productName, merchantName, resolvedCurrency, resolvedCategory].compactMap({ $0 }).count
+        let fieldCount = [resolvedProduct.value, merchantName, resolvedCurrency, resolvedCategory].compactMap({ $0 }).count
             + (purchaseDate != nil ? 1 : 0) + (amount != nil ? 1 : 0) + (resolvedWarrantyMonths != nil ? 1 : 0)
 
         Self.logger.info("Heuristic extraction: \(fieldCount, privacy: .public) fields, \(rejected.count, privacy: .public) rejected, \(lineItems.count, privacy: .public) line items")
 
         return StructuredExtractionResult(
             documentKind: docKind,
-            productName: ExtractedField(value: productName, confidence: productName != nil ? .heuristic : .none),
+            productName: ExtractedField(value: resolvedProduct.value, confidence: resolvedProduct.value != nil ? resolvedProduct.confidence : .none),
             merchantName: ExtractedField(value: merchantName, confidence: merchantName != nil ? .heuristic : .none),
             purchaseDate: ExtractedField(value: purchaseDate, confidence: purchaseDate != nil ? .heuristic : .none),
             amount: ExtractedField(value: amount, confidence: amount != nil ? .heuristic : .none),
@@ -956,6 +1151,24 @@ struct HeuristicFieldExtractor {
         keywords.filter { text.contains($0) }.count
     }
 
+    /// The transcript line sharing the most significant words with `target`
+    /// (at least half required) — used by the learned-product rescue.
+    /// `internal` so it is unit-testable.
+    static func lineMatching(_ target: String, in text: String) -> String? {
+        let words = ExtractionPipeline.significantWords(target)
+        guard !words.isEmpty else { return nil }
+        var best: (score: Int, line: String)?
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.count >= 3 else { continue }
+            let lower = line.lowercased()
+            let score = words.filter { lower.contains($0) }.count
+            if score > (best?.score ?? 0) { best = (score, line) }
+        }
+        guard let best, best.score * 2 >= words.count else { return nil }
+        return best.line
+    }
+
     // MARK: - Boilerplate / junk detection
 
     /// Detects legal boilerplate, footer text, copyright notices, terms & conditions, etc.
@@ -1002,12 +1215,8 @@ struct HeuristicFieldExtractor {
     ]
 
     /// Well-known short brand names that should be accepted despite being short/single-word.
-    private static let knownShortBrands: Set<String> = [
-        "3M", "HP", "LG", "BQ", "JBL", "UE",
-        "IKEA", "Sony", "Acer", "Asus", "Dell",
-        "Bose", "Dyson", "Nike", "Zara", "H&M",
-        "MUJI", "Braun", "Miele", "Smeg", "Bosch",
-    ]
+    /// Sourced from the shared `OCRVocabulary` so the lexicon stays in sync with `customWords`.
+    private static let knownShortBrands: Set<String> = OCRVocabulary.shortBrands
 
     /// Detects OCR junk: very short fragments, lines that are mostly punctuation/symbols,
     /// parenthetical fragments, single common English words, or text that doesn't form coherent words.
@@ -1107,17 +1316,8 @@ struct HeuristicFieldExtractor {
     // MARK: - Field extraction heuristics (migrated from VisionOCRService)
 
     /// Well-known consumer electronics/appliance brands for product detection.
-    private static let knownBrands: Set<String> = [
-        "samsung", "apple", "sony", "lg", "dyson", "panasonic", "philips",
-        "bosch", "siemens", "miele", "braun", "asus", "acer", "dell", "hp",
-        "lenovo", "microsoft", "google", "bose", "jbl", "harman",
-        "whirlpool", "electrolux", "hitachi", "toshiba", "sharp",
-        "daikin", "mitsubishi", "fujitsu", "nikon", "canon", "olympus",
-        "garmin", "fitbit", "xiaomi", "huawei", "oppo", "vivo",
-        "nintendo", "playstation", "xbox", "razer", "logitech",
-        "breville", "delonghi", "kitchenaid", "cuisinart", "tefal",
-        "ikea", "muji", "osim", "ogawa",
-    ]
+    /// Sourced from the shared `OCRVocabulary` so the lexicon stays in sync with `customWords`.
+    private static let knownBrands: Set<String> = OCRVocabulary.brands
 
     /// Extract product name with brand/model detection.
     ///
@@ -1820,7 +2020,44 @@ struct HeuristicFieldExtractor {
             }
         }
 
-        return items
+        // Reject "items" that are really order metadata (Order Date, Delivery
+        // Time, Salesperson, the SO-/ref code, etc.) — a common heuristic
+        // false-positive on order-confirmation layouts.
+        return items.filter { !isMetadataLineItem($0.name) }
+    }
+
+    /// True if a candidate line-item name is actually a receipt metadata label,
+    /// an order/reference code, or a salesperson line rather than a product.
+    /// `internal` so it is unit-testable.
+    func isMetadataLineItem(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        let labels = [
+            "order date", "delivery date", "delivery time", "manual order", "order no",
+            "order number", "sales order", "salesperson", "sales person", "payment term",
+            "payment method", "customer", "ref no", "reference", "invoice no", "invoice date",
+            "gst reg", "uen", "tax invoice", "subtotal", "sub total", "grand total", "total",
+            "balance", "amount due", "amount payable", "outstanding", "paid amount",
+            "rebate", "deposit", "redemption", "remarks", "signature",
+        ]
+        if labels.contains(where: { lower == $0 || lower.hasPrefix($0) }) { return true }
+
+        // Pure order/reference code, e.g. "SO-B0000142558": single token, has a
+        // dash, and is mostly digits.
+        if !trimmed.contains(" "), trimmed.contains("-"), trimmed.filter(\.isNumber).count >= 5 {
+            return true
+        }
+
+        // Person-with-code line, e.g. "KENNETH TAN/9295": "<name with space>/<digits>".
+        if trimmed.contains("/") {
+            let parts = trimmed.split(separator: "/")
+            if parts.count == 2, parts[0].contains(" "), parts[1].allSatisfy(\.isNumber) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /// Parse lines within a detected table section for line items.

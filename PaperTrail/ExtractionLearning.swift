@@ -6,6 +6,10 @@ final class MerchantProfile {
     var id: UUID = UUID()
     var normalizedName: String = ""
     var displayName: String = ""
+    /// Normalized merchant tax/registration ID (UEN / GST Reg / VAT ID). When
+    /// present this is a stable, unique business identity — the most reliable
+    /// merchant-matching key, beating name normalization and embeddings.
+    var uen: String?
     var aliasesRaw: String = ""
     var defaultCategory: String?
     var defaultCurrency: String?
@@ -24,6 +28,7 @@ final class MerchantProfile {
         id: UUID = UUID(),
         normalizedName: String,
         displayName: String,
+        uen: String? = nil,
         aliases: [String] = [],
         defaultCategory: String? = nil,
         defaultCurrency: String? = nil,
@@ -41,6 +46,7 @@ final class MerchantProfile {
         self.id = id
         self.normalizedName = normalizedName
         self.displayName = displayName
+        self.uen = uen
         self.aliasesRaw = aliases.joined(separator: "||")
         self.defaultCategory = defaultCategory
         self.defaultCurrency = defaultCurrency
@@ -60,11 +66,8 @@ final class MerchantProfile {
 extension MerchantProfile {
     var aliases: [String] {
         get {
-            aliasesRaw.split(separator: "|")
-                .map(String.init)
-                .joined(separator: "|")
-                .split(separator: "||")
-                .map(String.init)
+            aliasesRaw
+                .components(separatedBy: "||")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         }
@@ -86,6 +89,21 @@ extension MerchantProfile {
             documentKindsRaw = newValue.map(\.rawValue).joined(separator: ",")
         }
     }
+
+    /// Trust score for this profile's hints, in `[0, 1]`.
+    ///
+    /// Combines two signals:
+    ///   • **correction count** — a merchant corrected many times is more
+    ///     authoritative (saturates at ~10 corrections),
+    ///   • **recency** — exponential decay (~6-month time constant) so stale
+    ///     profiles fade rather than mislead after a store changes its layout.
+    var hintStrength: Double {
+        let countFactor = min(1.0, Double(max(0, correctionCount)) / 10.0)
+        let days = max(0.0, Date.now.timeIntervalSince(lastUsedAt) / 86_400.0)
+        let recency = exp(-days / 180.0)
+        // Weight evidence (count) more than recency, but let staleness pull it down.
+        return min(1.0, countFactor * 0.7 + recency * 0.3)
+    }
 }
 
 struct MerchantLearningContext: Sendable {
@@ -98,6 +116,84 @@ struct MerchantLearningContext: Sendable {
     let amountHint: String?
     let dateHint: String?
     let productHint: String?
+
+    /// The document kind this merchant has *consistently* produced (set only
+    /// when every learned kind agrees) — lets extraction assume "a Gain City
+    /// scan is a sales order" when the text itself is ambiguous.
+    var likelyDocumentKind: DocumentKind? = nil
+
+    /// How much to trust this profile's hints, in `[0, 1]`. Derived from the
+    /// number of corrections (a merchant corrected 10× is near-authoritative)
+    /// decayed by recency (stores change layout; old corrections weigh less).
+    /// Consumers phrase the model prompt more or less forcefully and decide
+    /// whether to auto-apply suggestions. See `MerchantProfile.hintStrength`.
+    var confidence: Double = 0
+
+    /// Whether the hints are strong enough to auto-apply without the user asking.
+    var isAuthoritative: Bool { confidence >= 0.6 }
+
+    /// The product name quoted inside `productHint` ("…similar to 'X'."), for
+    /// consumers that want the structured value rather than the prose — the
+    /// heuristic extractor uses it to rescue a blank product name.
+    var hintedProductName: String? {
+        guard let hint = productHint,
+              let open = hint.firstIndex(of: "'") else { return nil }
+        let afterOpen = hint.index(after: open)
+        guard let close = hint[afterOpen...].firstIndex(of: "'") else { return nil }
+        let name = String(hint[afterOpen..<close]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Whether `dateHint` records that this merchant prints day-first dates.
+    var prefersDayFirstDates: Bool {
+        dateHint?.localizedCaseInsensitiveContains("day-first") == true
+    }
+}
+
+// MARK: - Item-level category memory
+
+/// Learns `product → category` independent of where it was bought, so "AirPods"
+/// maps to Electronics whether purchased at the Apple Store or a corner shop.
+/// Complements `MerchantProfile` (which learns `merchant → category`).
+@Model
+final class ProductCategoryMemory {
+    var id: UUID = UUID()
+    var normalizedProduct: String = ""
+    var displayProduct: String = ""
+    var category: String = ""
+    var count: Int = 0
+    var lastUsedAt: Date = Date()
+    var createdAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        normalizedProduct: String,
+        displayProduct: String,
+        category: String,
+        count: Int = 1,
+        lastUsedAt: Date = Date(),
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.normalizedProduct = normalizedProduct
+        self.displayProduct = displayProduct
+        self.category = category
+        self.count = count
+        self.lastUsedAt = lastUsedAt
+        self.createdAt = createdAt
+    }
+
+    /// Confidence in this product → category memory, mirroring
+    /// `MerchantProfile.hintStrength`: evidence (count, saturating at ~5
+    /// sightings) weighted with recency (~6-month decay), so a one-off memory
+    /// from a year ago fades instead of mislabeling forever, while a
+    /// well-evidenced one stays authoritative. Computed — no schema change.
+    var hintStrength: Double {
+        let countFactor = min(1.0, Double(max(0, count)) / 5.0)
+        let days = max(0.0, Date.now.timeIntervalSince(lastUsedAt) / 86_400.0)
+        let recency = exp(-days / 180.0)
+        return min(1.0, countFactor * 0.6 + recency * 0.4)
+    }
 }
 
 struct LearningFeedbackPayload: Sendable {
@@ -119,13 +215,19 @@ struct MerchantLearningService {
     func learningContext(for structured: StructuredExtractionResult?) -> MerchantLearningContext? {
         guard let structured else { return nil }
 
+        // Prefer a UEN/tax-ID match — a stable, unique business identity — over
+        // name-based matching. Falls back to merchant/product name candidates.
+        let uenProfile = structured.vatId.value.flatMap { findProfile(byUEN: $0) }
         let merchantCandidates = [
             structured.merchantName.value,
             structured.productName.value
         ].compactMap { $0 }
 
-        for candidate in merchantCandidates {
-            guard let profile = findProfile(matching: candidate) else { continue }
+        let nameProfile = uenProfile == nil
+            ? merchantCandidates.compactMap { findProfile(matching: $0) }.first
+            : nil
+
+        if let profile = uenProfile ?? nameProfile {
             profile.lastUsedAt = .now
             profile.updatedAt = .now
             return MerchantLearningContext(
@@ -137,28 +239,54 @@ struct MerchantLearningService {
                 warrantySuggestionMonths: profile.commonWarrantyMonths,
                 amountHint: profile.amountHint,
                 dateHint: profile.dateHint,
-                productHint: profile.productHint
+                productHint: profile.productHint,
+                // Bias the document kind only when this merchant has been
+                // consistent — one kind seen across all corrections.
+                likelyDocumentKind: profile.documentKinds.count == 1 ? profile.documentKinds.first : nil,
+                confidence: profile.hintStrength
             )
+        }
+
+        // Community fallback: majority-learned merchant facts from OTHER
+        // installs (anonymized, opt-out). Capped well below authoritative so a
+        // personal profile — or the text itself — always outranks it.
+        if let merchantName = structured.merchantName.value {
+            let normalized = Self.normalizeMerchantName(merchantName)
+            if let hint = CommunityLearning.shared.hint(forNormalizedMerchant: normalized) {
+                return hint.learningContext()
+            }
         }
 
         return nil
     }
 
     func captureFeedback(_ payload: LearningFeedbackPayload) {
+        // Emit per-field correction metrics first — these matter even when the
+        // merchant name is blank (we still learn how often each field is edited).
+        emitCorrectionMetrics(payload)
+
         guard !payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let normalized = Self.normalizeMerchantName(payload.finalMerchantName)
         guard !normalized.isEmpty else { return }
 
-        let profile = findProfile(matchingNormalized: normalized) ?? MerchantProfile(
-            normalizedName: normalized,
-            displayName: payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        // Match by UEN/tax-ID first (stable unique business identity), then by
+        // fuzzy name so OCR variants of the same store ("Harvey Norman" vs
+        // "HARVEY NORMAN (Suntec)") aggregate into one profile instead of
+        // fragmenting the learning loop.
+        let normalizedUEN = payload.structured?.vatId.value.flatMap(Self.normalizeUEN)
+        let profile = (normalizedUEN.flatMap { findProfile(byUEN: $0) })
+            ?? findProfile(matching: payload.finalMerchantName)
+            ?? MerchantProfile(
+                normalizedName: normalized,
+                displayName: payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
 
         if profile.modelContext == nil {
             modelContext.insert(profile)
         }
 
+        if let normalizedUEN { profile.uen = normalizedUEN }
         profile.displayName = payload.finalMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.lastUsedAt = .now
         profile.updatedAt = .now
@@ -196,12 +324,30 @@ struct MerchantLearningService {
         profile.dateHint = inferDateHint(from: payload.finalPurchaseDate)
         profile.productHint = inferProductHint(from: payload.finalProductName)
         profile.notes = buildNotes(from: payload)
+
+        // Item-level learning: remember product → category independent of merchant.
+        let category = payload.finalCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !category.isEmpty {
+            recordProductCategory(product: payload.finalProductName, category: category)
+            for item in payload.structured?.lineItems ?? [] where item.kind.isRecordWorthy {
+                recordProductCategory(product: item.name, category: category)
+            }
+        }
     }
+
+    /// Similarity threshold for treating two merchant strings as the same store.
+    /// Sentence embeddings score near-duplicates very high; 0.82 avoids merging
+    /// genuinely different merchants while catching OCR/casing variants.
+    private static let fuzzyMerchantThreshold = 0.82
+
+    /// Similarity threshold for matching an unseen product to a learned one.
+    private static let fuzzyProductThreshold = 0.85
 
     private func findProfile(matching merchantName: String) -> MerchantProfile? {
         let normalized = Self.normalizeMerchantName(merchantName)
         guard !normalized.isEmpty else { return nil }
-        return findProfile(matchingNormalized: normalized)
+        if let exact = findProfile(matchingNormalized: normalized) { return exact }
+        return findProfileFuzzy(matching: merchantName)
     }
 
     private func findProfile(matchingNormalized normalized: String) -> MerchantProfile? {
@@ -211,6 +357,105 @@ struct MerchantLearningService {
             if profile.normalizedName == normalized { return true }
             return profile.aliases.contains { Self.normalizeMerchantName($0) == normalized }
         }
+    }
+
+    /// Deterministic match on the merchant's tax/registration ID (UEN/GST/VAT).
+    private func findProfile(byUEN rawUEN: String) -> MerchantProfile? {
+        guard let normalized = Self.normalizeUEN(rawUEN) else { return nil }
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor) else { return nil }
+        return profiles.first { $0.uen == normalized }
+    }
+
+    /// Embedding-based fallback: match by *meaning* when exact normalization
+    /// misses. Returns the most similar profile above the threshold, if any.
+    private func findProfileFuzzy(matching merchantName: String) -> MerchantProfile? {
+        let query = merchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 3, SemanticMatcher.shared.isAvailable else { return nil }
+
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor), !profiles.isEmpty else { return nil }
+
+        var best: (profile: MerchantProfile, score: Double)?
+        for profile in profiles {
+            let candidates = [profile.displayName] + profile.aliases
+            for candidate in candidates {
+                guard let score = SemanticMatcher.shared.similarity(query, candidate) else { continue }
+                if score >= Self.fuzzyMerchantThreshold, best == nil || score > best!.score {
+                    best = (profile, score)
+                }
+            }
+        }
+        return best?.profile
+    }
+
+    // MARK: - Item-level product → category
+
+    /// Upsert a learned `product → category` association.
+    private func recordProductCategory(product: String, category: String) {
+        let normalized = Self.normalizeProductName(product)
+        guard normalized.count >= 3 else { return }
+
+        var descriptor = FetchDescriptor<ProductCategoryMemory>(
+            predicate: #Predicate { $0.normalizedProduct == normalized }
+        )
+        descriptor.fetchLimit = 1
+        let existing = (try? modelContext.fetch(descriptor)) ?? []
+
+        if let memory = existing.first {
+            if memory.category.caseInsensitiveCompare(category) == .orderedSame {
+                memory.count += 1
+            } else {
+                // Category changed — latest correction wins, evidence resets.
+                memory.category = category
+                memory.count = 1
+            }
+            memory.displayProduct = product.trimmingCharacters(in: .whitespacesAndNewlines)
+            memory.lastUsedAt = .now
+        } else {
+            modelContext.insert(ProductCategoryMemory(
+                normalizedProduct: normalized,
+                displayProduct: product.trimmingCharacters(in: .whitespacesAndNewlines),
+                category: category
+            ))
+        }
+    }
+
+    /// Suggest a category for a product from item-level memory. Tries an exact
+    /// normalized-token match first, then an embedding fuzzy match.
+    func productCategorySuggestion(for product: String) -> String? {
+        let normalized = Self.normalizeProductName(product)
+        guard normalized.count >= 3 else { return nil }
+
+        let descriptor = FetchDescriptor<ProductCategoryMemory>()
+        guard let fetched = try? modelContext.fetch(descriptor), !fetched.isEmpty else { return nil }
+        // Staleness gate: only memories with enough evidence-and-recency may
+        // suggest. A fresh single sighting passes; the same sighting a year
+        // later has faded below threshold.
+        let memories = fetched.filter { $0.hintStrength >= 0.25 }
+        guard !memories.isEmpty else { return nil }
+
+        if let exact = memories.first(where: { $0.normalizedProduct == normalized }) {
+            return exact.category
+        }
+
+        guard SemanticMatcher.shared.isAvailable else { return nil }
+        let query = product.trimmingCharacters(in: .whitespacesAndNewlines)
+        var best: (category: String, score: Double)?
+        for memory in memories {
+            guard let score = SemanticMatcher.shared.similarity(query, memory.displayProduct) else { continue }
+            if score >= Self.fuzzyProductThreshold, best == nil || score > best!.score {
+                best = (memory.category, score)
+            }
+        }
+        return best?.category
+    }
+
+    /// All learned merchant display names — used to seed OCR `customWords`.
+    func learnedMerchantNames() -> [String] {
+        let descriptor = FetchDescriptor<MerchantProfile>()
+        guard let profiles = try? modelContext.fetch(descriptor) else { return [] }
+        return profiles.map(\.displayName).filter { $0.count >= 2 }
     }
 
     private func inferAmountHint(from payload: LearningFeedbackPayload) -> String? {
@@ -273,5 +518,61 @@ struct MerchantLearningService {
             .joined(separator: " ")
 
         return filtered.isEmpty ? collapsed : filtered
+    }
+
+    /// Normalize a product name for item-level memory keys: lowercased,
+    /// alphanumerics only, collapsed whitespace. Keeps model numbers intact.
+    static func normalizeProductName(_ name: String) -> String {
+        let lowered = name.lowercased()
+        let allowed = lowered.map { char -> Character in
+            (char.isLetter || char.isNumber || char.isWhitespace) ? char : " "
+        }
+        return String(allowed)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    /// Normalize a tax/registration ID for exact keying: uppercase, alphanumerics
+    /// only (drops dashes/spaces, so "M2-0116439-7" == "M2 0116439 7"). Returns
+    /// nil if fewer than 5 alphanumerics — too short to be a reliable identity.
+    static func normalizeUEN(_ raw: String) -> String? {
+        let cleaned = raw.uppercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map { String($0) }
+            .joined()
+        return cleaned.count >= 5 ? cleaned : nil
+    }
+
+    // MARK: - Correction metrics
+
+    /// Compare what extraction suggested against what the user saved, and emit
+    /// per-field correction outcomes (privacy-safe: field names + outcomes only).
+    private func emitCorrectionMetrics(_ payload: LearningFeedbackPayload) {
+        let sr = payload.structured
+        var outcomes: [String: ExtractionMetrics.FieldOutcome] = [:]
+
+        func outcome(extracted: String?, final: String) -> ExtractionMetrics.FieldOutcome {
+            let e = extracted?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let f = final.trimmingCharacters(in: .whitespacesAndNewlines)
+            if e.isEmpty { return f.isEmpty ? .empty : .filledBlank }
+            return e.caseInsensitiveCompare(f) == .orderedSame ? .kept : .corrected
+        }
+
+        outcomes["product"] = outcome(extracted: sr?.productName.value, final: payload.finalProductName)
+        outcomes["merchant"] = outcome(extracted: sr?.merchantName.value, final: payload.finalMerchantName)
+        outcomes["currency"] = outcome(extracted: sr?.currency.value, final: payload.finalCurrency)
+        outcomes["category"] = outcome(extracted: sr?.category.value, final: payload.finalCategory)
+
+        // Amount: numeric comparison with a cent of tolerance.
+        outcomes["amount"] = {
+            guard let final = payload.finalAmount else {
+                return sr?.amount.value == nil ? .empty : .corrected
+            }
+            guard let extracted = sr?.amount.value else { return .filledBlank }
+            return abs(extracted - final) < 0.01 ? .kept : .corrected
+        }()
+
+        ExtractionMetrics.recordCorrectionOutcomes(outcomes, source: sr?.source)
     }
 }
