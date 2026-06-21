@@ -42,8 +42,9 @@ struct VisionOCRService: OCRService {
             document = .plain(text)
         }
 
-        // 2. Run the structured extraction pipeline on the OCR document.
-        let structured = await pipeline.extract(from: document)
+        // 2. Run the structured extraction pipeline. iOS 27+: FM path uses the image
+        // directly via multimodal; iOS 26 and heuristic paths use the document text.
+        let structured = await pipeline.extract(from: document, image: image)
 
         // 3. Bridge back to the OCRExtractionResult format the rest of the app expects.
         return structured.toOCRExtractionResult(recognizedText: document.text)
