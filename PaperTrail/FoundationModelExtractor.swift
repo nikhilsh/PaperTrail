@@ -4,6 +4,13 @@ import UIKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
+#if PAPERTRAIL_IOS27_SDK
+// OCRTool and BarcodeReaderTool are declared in Vision (they conform to
+// FoundationModels.Tool); Attachment is in FoundationModels. All are iOS 27 SDK
+// symbols — see the PAPERTRAIL_IOS27_SDK note on extractMultimodal().
+import Vision
+import ImageIO
+#endif
 
 // MARK: - Document kind
 
@@ -477,6 +484,13 @@ struct FoundationModelExtractionService: FieldExtractionService {
         // internally (30+ languages, no locale errors) and BarcodeReaderTool picks up
         // serial numbers on warranty cards. If the multimodal call fails, fall through
         // to the text-based retry ladder below instead of giving up on FM entirely.
+        //
+        // Gated on PAPERTRAIL_IOS27_SDK (not just #available) because the symbols only
+        // exist in the iOS 27 SDK, which no GitHub-hosted Xcode ships yet — verified
+        // against the FoundationModels swiftinterface in Xcode 26.5 AND 26.6. To enable:
+        // add PAPERTRAIL_IOS27_SDK to SWIFT_ACTIVE_COMPILATION_CONDITIONS once CI has
+        // an Xcode with the iOS 27 SDK.
+        #if PAPERTRAIL_IOS27_SDK
         if #available(iOS 27, *), let image {
             let multimodal = await extractMultimodal(image: image, learningContext: learningContext)
             if multimodal.diagnostics?.foundationModelRan == true {
@@ -484,6 +498,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
             }
             Self.logger.warning("FM multimodal produced no result — falling back to text-based extraction")
         }
+        #endif
 
         let adaptiveHints = buildAdaptiveHints(from: learningContext)
 
@@ -698,9 +713,15 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     // MARK: - Multimodal extraction (iOS 27+)
 
+    #if PAPERTRAIL_IOS27_SDK
     /// Sends the scanned image directly to the on-device model using OCRTool and BarcodeReaderTool.
     /// This replaces the text-cleaning + retry loop used on iOS 26: the model handles OCR
     /// internally in 30+ languages, eliminating locale errors and spatial context loss.
+    ///
+    /// API surface verified against Apple docs (developer.apple.com/documentation/foundationmodels/
+    /// analyzing-images-with-multimodal-prompting): OCRTool/BarcodeReaderTool come from Vision,
+    /// Attachment takes CGImage/CIImage/CVPixelBuffer/URL (NOT UIImage), tools precede
+    /// instructions in the LanguageModelSession init.
     ///
     /// On failure this returns an empty result (with diagnostics); `extract()` then falls
     /// back to the text-based retry ladder so FM is never lost to a transient multimodal error.
@@ -723,12 +744,27 @@ struct FoundationModelExtractionService: FieldExtractionService {
             \(adaptiveHints)
             """
 
+        // Attachment has no UIImage initializer — only CGImage/CIImage/CVPixelBuffer/URL.
+        guard let cgImage = image.cgImage else {
+            Self.logger.error("FM multimodal skipped: UIImage has no CGImage backing")
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: false,
+                foundationModelSkipReason: "multimodal: no CGImage backing",
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
+        }
+
         do {
-            let session = LanguageModelSession(instructions: instructions, tools: [OCRTool(), BarcodeReaderTool()])
+            let session = LanguageModelSession(tools: [OCRTool(), BarcodeReaderTool()], instructions: instructions)
             let response = try await session.respond(
                 to: Prompt {
                     "Extract all structured fields from this receipt or purchase document."
-                    Attachment(image)
+                    Attachment(cgImage, orientation: Self.cgOrientation(image.imageOrientation)).label("scanned-document")
                 },
                 generating: ReceiptExtractionSchema.self
             )
@@ -769,6 +805,22 @@ struct FoundationModelExtractionService: FieldExtractionService {
             return result
         }
     }
+
+    /// Attachment orientation is CGImagePropertyOrientation; UIImage carries UIImage.Orientation.
+    private static func cgOrientation(_ o: UIImage.Orientation) -> CGImagePropertyOrientation {
+        switch o {
+        case .up: .up
+        case .down: .down
+        case .left: .left
+        case .right: .right
+        case .upMirrored: .upMirrored
+        case .downMirrored: .downMirrored
+        case .leftMirrored: .leftMirrored
+        case .rightMirrored: .rightMirrored
+        @unknown default: .up
+        }
+    }
+    #endif
 
     private func buildAdaptiveHints(from learningContext: MerchantLearningContext?) -> String {
         guard let context = learningContext else { return "" }
