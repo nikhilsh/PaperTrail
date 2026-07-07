@@ -35,6 +35,30 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
           xcodebuild -version
 
+      # TEMPORARY diagnostic — dump the FoundationModels API surface shipped in
+      # each Xcode's iOS SDK so we can wire the multimodal path to the real
+      # symbol names. Remove once extractMultimodal compiles.
+      - name: Probe FoundationModels SDK surface (temporary)
+        run: |
+          for XC in /Applications/Xcode_26.5.app /Applications/Xcode_26.6.app; do
+            SDK="$XC/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+            MOD="$SDK/System/Library/Frameworks/FoundationModels.framework/Modules/FoundationModels.swiftmodule"
+            echo "=== $XC ==="
+            ls "$MOD" 2>/dev/null || { echo "no FoundationModels swiftmodule"; continue; }
+            IFACE=$(ls "$MOD"/*.swiftinterface 2>/dev/null | head -1)
+            [ -n "$IFACE" ] || { echo "no swiftinterface"; continue; }
+            echo "--- tools/OCR/barcode symbols ---"
+            grep -hE "public (struct|class|final class|enum|protocol) [A-Za-z]*(Tool|OCR|Barcode)[A-Za-z]*" "$IFACE" | sort -u || true
+            echo "--- image/attachment symbols ---"
+            grep -hE "Attachment|UIImage|CGImage|image" "$IFACE" | grep -E "public|init|func" | sort -u | head -40 || true
+            echo "--- LanguageModelSession inits ---"
+            grep -hA2 "extension FoundationModels.LanguageModelSession" "$IFACE" | head -10 || true
+            grep -h "convenience init\|public init" "$IFACE" | grep -i "tool\|instruction" | sort -u | head -10 || true
+            echo "--- Prompt builder members ---"
+            grep -h "PromptRepresentable\|struct Prompt" "$IFACE" | sort -u | head -10 || true
+          done
+        continue-on-error: true
+
       # No signing on PRs: a simulator build needs no certs/profile, so this runs
       # on forks/branches without secrets. GeneratedSecrets.swift is committed
       # with an empty Sentry DSN, which the app handles gracefully.
