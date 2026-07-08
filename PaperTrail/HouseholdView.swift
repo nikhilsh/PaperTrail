@@ -36,8 +36,7 @@ struct HouseholdView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    (Text("Your\n").foregroundStyle(PT.txt)
-                     + Text("household.").foregroundStyle(PT.goldHi))
+                    Text("\(Text("Your\n").foregroundStyle(PT.txt))\(Text("household.").foregroundStyle(PT.goldHi))")
                         .font(PTFont.serif(34, weight: 600))
                     Text("The fridge, the TV, the sofa — shared things, shared proof. Everyone in your home stays covered, on their own phone.")
                         .font(.system(size: 14))

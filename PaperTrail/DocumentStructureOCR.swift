@@ -151,7 +151,7 @@ struct DocumentStructureOCRService: Sendable {
     /// Find the grand total structurally: the amount on a row whose label cell
     /// mentions "total" (preferring "grand total" / "total due" / "amount due"
     /// over "subtotal"). This replaces the `pickLargerAmount` guesswork.
-    static func detectTotal(in tables: [OCRTable]) -> Double? {
+    nonisolated static func detectTotal(in tables: [OCRTable]) -> Double? {
         let strongLabels = ["grand total", "total due", "amount due", "balance due", "total amount", "total"]
         let weakLabels = ["subtotal", "sub total", "sub-total"]
         // Rows that contain "total" but are NOT the grand total — a "Total Savings"
@@ -184,7 +184,7 @@ struct DocumentStructureOCRService: Sendable {
 
     /// Reconstruct line items from table rows: a name-ish cell + an amount cell.
     /// Skips total/subtotal/tax summary rows.
-    static func lineItems(from tables: [OCRTable]) -> [LineItem] {
+    nonisolated static func lineItems(from tables: [OCRTable]) -> [LineItem] {
         let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst", "vat", "balance", "change", "amount due", "rounding"]
         var items: [LineItem] = []
         for table in tables {
@@ -210,7 +210,7 @@ struct DocumentStructureOCRService: Sendable {
     }
 
     /// Parse a currency-ish string ("$1,299.00", "1299.00", "SGD 49.90") to a Double.
-    static func parseAmount(_ raw: String) -> Double? {
+    nonisolated static func parseAmount(_ raw: String) -> Double? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains(where: { $0.isNumber }) else { return nil }
         // Keep digits, dot, comma, minus; drop currency symbols/letters.

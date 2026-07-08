@@ -1017,7 +1017,7 @@ enum PrimaryItemBinding {
     }
 
     /// The 2-decimal text form of a line item's amount, or nil when it has none.
-    static func amountText(_ item: LineItem) -> String? {
+    nonisolated static func amountText(_ item: LineItem) -> String? {
         item.amount.map { String(format: "%.2f", $0) }
     }
 }

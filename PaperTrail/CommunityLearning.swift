@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Cross-user ("community") learning pipeline — no human curation anywhere.
 ///
@@ -30,8 +31,7 @@ final class CommunityLearning: @unchecked Sendable {
     private static let cacheFilename = "community_hints.json"
 
     private let session: URLSession
-    private var hintsByMerchant: [String: CommunityMerchantHint] = [:]
-    private let lock = NSLock()
+    private let hintsByMerchant = Mutex([String: CommunityMerchantHint]())
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -148,9 +148,7 @@ final class CommunityLearning: @unchecked Sendable {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode < 300 else { return }
             let hints = try Self.decodeHints(data)
-            lock.lock()
-            hintsByMerchant = hints
-            lock.unlock()
+            hintsByMerchant.withLock { $0 = hints }
             try? data.write(to: Self.cacheURL, options: .atomic)
             AppLogger.info("Community hints refreshed: \(hints.count) merchants", category: "community")
         } catch {
@@ -161,8 +159,7 @@ final class CommunityLearning: @unchecked Sendable {
     /// The community's majority-learned facts for a merchant, if any.
     func hint(forNormalizedMerchant merchant: String?) -> CommunityMerchantHint? {
         guard let merchant, !merchant.isEmpty, Self.isEnabled else { return nil }
-        lock.lock(); defer { lock.unlock() }
-        return hintsByMerchant[merchant]
+        return hintsByMerchant.withLock { $0[merchant] }
     }
 
     static func decodeHints(_ data: Data) throws -> [String: CommunityMerchantHint] {
@@ -178,7 +175,7 @@ final class CommunityLearning: @unchecked Sendable {
     private func loadCachedHints() {
         guard let data = try? Data(contentsOf: Self.cacheURL),
               let hints = try? Self.decodeHints(data) else { return }
-        hintsByMerchant = hints
+        hintsByMerchant.withLock { $0 = hints }
     }
 
     private static func request(path: String, method: String) -> URLRequest? {

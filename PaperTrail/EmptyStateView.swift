@@ -41,8 +41,7 @@ struct EmptyLibraryView: View {
             Text("PaperTrail").ptWordmark()
                 .padding(.bottom, 18)
 
-            (Text("Start your\n").foregroundStyle(PT.txt)
-             + Text("paper trail.").italic().foregroundStyle(PT.goldHi))
+            Text("\(Text("Start your\n").foregroundStyle(PT.txt))\(Text("paper trail.").italic().foregroundStyle(PT.goldHi))")
                 .font(PTFont.serif(32, weight: 600))
                 .multilineTextAlignment(.center)
 

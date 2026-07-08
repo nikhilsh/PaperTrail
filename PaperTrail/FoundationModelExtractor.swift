@@ -444,9 +444,6 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 reason = "available" // shouldn't reach here
             case .unavailable:
                 reason = "unavailable (device/region not supported)"
-            default:
-                // Capture ALL non-.available states with their raw description
-                reason = "non-available state: \(rawAvailability)"
             }
             Self.logger.warning("Foundation Models unavailable: \(reason, privacy: .public) [raw: \(rawAvailability, privacy: .public)]")
 

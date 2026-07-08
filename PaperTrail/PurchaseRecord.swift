@@ -186,7 +186,7 @@ extension PurchaseRecord {
     }
 }
 
-enum WarrantyStatus {
+nonisolated enum WarrantyStatus: Equatable, Sendable {
     case active, expiringSoon, expired, unknown
 
     var label: String {

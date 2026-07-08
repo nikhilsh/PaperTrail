@@ -294,7 +294,7 @@ struct ExtractionPipeline: Sendable {
 
     /// The value of a line that is a single money token and nothing else
     /// (optionally negative: "- 20.00"). Letters anywhere disqualify the line.
-    static func lineMoneyValue(_ line: String) -> Double? {
+    nonisolated static func lineMoneyValue(_ line: String) -> Double? {
         let compact = line.replacingOccurrences(of: " ", with: "")
         guard !compact.isEmpty, !compact.contains(where: { $0.isLetter }) else { return nil }
         let negative = compact.hasPrefix("-") || compact.hasPrefix("−") || compact.hasPrefix("(")
