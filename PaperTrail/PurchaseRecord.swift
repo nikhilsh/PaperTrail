@@ -29,6 +29,11 @@ final class PurchaseRecord {
     /// double-schedule on re-save. Mirrors `warrantyNotificationScheduled`.
     var returnWindowNotificationScheduled: Bool = false
 
+    /// Number of days after `purchaseDate` during which this item can be
+    /// returned/refunded. `nil` = not tracked ("None" in the picker). Additive +
+    /// optional so existing CloudKit records migrate via lightweight migration.
+    var returnWindowDays: Int? = nil
+
     // Trust / claim fields (added in the Settings & Trust wave). All optional or
     // defaulted so existing CloudKit records migrate via lightweight migration.
     /// Manufacturer serial / model-specific ID. Surfaced in Detail + Claim Packet.
@@ -66,6 +71,7 @@ final class PurchaseRecord {
         supportNote: String? = nil,
         warrantyNotificationScheduled: Bool = false,
         returnWindowNotificationScheduled: Bool = false,
+        returnWindowDays: Int? = nil,
         serialNumber: String? = nil,
         coverageSummary: String? = nil,
         isRegistered: Bool = false,
@@ -90,6 +96,7 @@ final class PurchaseRecord {
         self.supportNote = supportNote
         self.warrantyNotificationScheduled = warrantyNotificationScheduled
         self.returnWindowNotificationScheduled = returnWindowNotificationScheduled
+        self.returnWindowDays = returnWindowDays
         self.serialNumber = serialNumber
         self.coverageSummary = coverageSummary
         self.isRegistered = isRegistered
@@ -152,6 +159,31 @@ extension PurchaseRecord {
         if exp <= cutoff { return .expiringSoon }
         return .active
     }
+
+    /// End of the last day the item can be returned/refunded (`purchaseDate` +
+    /// `returnWindowDays`, at 23:59:59), or `nil` if no window is tracked or
+    /// there's no purchase date to anchor it to.
+    var returnDeadline: Date? {
+        guard let returnWindowDays, let purchaseDate else { return nil }
+        guard let dayOfDeadline = Calendar.current.date(byAdding: .day, value: returnWindowDays, to: purchaseDate) else {
+            return nil
+        }
+        return Calendar.current.date(
+            bySettingHour: 23, minute: 59, second: 59, of: dayOfDeadline
+        ) ?? dayOfDeadline
+    }
+
+    /// Return-window status for display, mirroring `warrantyStatus`.
+    var returnWindowStatus: ReturnWindowStatus {
+        guard returnWindowDays != nil, let deadline = returnDeadline else { return .none }
+        let now = Date.now
+        if deadline < now { return .closed }
+
+        let today = Calendar.current.startOfDay(for: now)
+        let deadlineDay = Calendar.current.startOfDay(for: deadline)
+        let daysLeft = max(0, Calendar.current.dateComponents([.day], from: today, to: deadlineDay).day ?? 0)
+        return daysLeft <= 3 ? .closingSoon(daysLeft: daysLeft) : .open(daysLeft: daysLeft)
+    }
 }
 
 enum WarrantyStatus {
@@ -173,5 +205,22 @@ enum WarrantyStatus {
         case .expired: "red"
         case .unknown: "secondary"
         }
+    }
+}
+
+/// Return-window status, mirroring `WarrantyStatus`'s shape.
+enum ReturnWindowStatus: Equatable {
+    /// No return window is tracked for this record.
+    case none
+    /// Still open, with more than 3 days left.
+    case open(daysLeft: Int)
+    /// Open but closing within 3 days (inclusive of the day it closes, `daysLeft == 0`).
+    case closingSoon(daysLeft: Int)
+    /// The deadline has passed.
+    case closed
+
+    var isClosingSoon: Bool {
+        if case .closingSoon = self { return true }
+        return false
     }
 }

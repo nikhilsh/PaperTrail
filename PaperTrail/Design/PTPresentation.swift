@@ -138,3 +138,57 @@ struct PTWarranty {
         }
     }
 }
+
+// MARK: - Return-window display model
+
+/// Presentational return-window info computed from a record. Colors reuse the
+/// exact same tones as `WarrantyStatus` (sage/amber/gray) so the two status
+/// systems read as one visual language.
+struct PTReturnWindow {
+    let status: ReturnWindowStatus
+
+    /// Full sentence for the detail view, e.g. "Return window: 12 days left
+    /// (until 21 Jul 2026)" or "Return window closed 3 Jul 2026". `nil` when
+    /// there's no window tracked.
+    let detailText: String?
+
+    /// Short badge text for library cards — only set when `closingSoon`.
+    let badgeText: String?
+
+    let tone: Color
+    let textColor: Color
+    let background: Color
+
+    init(record: PurchaseRecord) {
+        let status = record.returnWindowStatus
+        self.status = status
+        let until = record.returnDeadline.map { PTDate.dayMonthYear.string(from: $0) }
+
+        switch status {
+        case .none:
+            detailText = nil
+            badgeText = nil
+            tone = PT.txt3
+            textColor = PT.txt2
+            background = Color(hex: 0xE7DCC4, alpha: 0.07)
+        case .open(let daysLeft):
+            detailText = "Return window: \(daysLeft) day\(daysLeft == 1 ? "" : "s") left (until \(until ?? "—"))"
+            badgeText = nil
+            tone = PT.sage
+            textColor = Color(hex: 0xCFE0B0)
+            background = Color(hex: 0x93A86F, alpha: 0.14)
+        case .closingSoon(let daysLeft):
+            detailText = "Return window: \(daysLeft) day\(daysLeft == 1 ? "" : "s") left (until \(until ?? "—"))"
+            badgeText = "Return: \(daysLeft)d left"
+            tone = PT.amber
+            textColor = Color(hex: 0xF0D49A)
+            background = Color(hex: 0xD7A64C, alpha: 0.15)
+        case .closed:
+            detailText = "Return window closed \(until ?? "—")"
+            badgeText = nil
+            tone = PT.txt3
+            textColor = PT.txt2
+            background = Color(hex: 0xE7DCC4, alpha: 0.07)
+        }
+    }
+}
