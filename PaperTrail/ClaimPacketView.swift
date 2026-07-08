@@ -14,7 +14,6 @@ enum ClaimPacketAvailability {
 /// "Something's wrong with it", and Support step 1.
 struct ClaimPacketView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(AuthenticationManager.self) private var authManager
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Query private var allAttachments: [Attachment]
     let record: PurchaseRecord
@@ -99,7 +98,7 @@ struct ClaimPacketView: View {
         .sheet(isPresented: $showMailComposer) {
             if let mailAttachment {
                 MailComposeView(
-                    recipients: [authManager.userEmail].compactMap { $0 },
+                    recipients: [],
                     subject: "Claim packet · \(record.productName)",
                     body: "Attached is the proof-of-purchase & warranty claim packet for \(record.productName) (\(docNumber)).",
                     attachmentURL: mailAttachment
