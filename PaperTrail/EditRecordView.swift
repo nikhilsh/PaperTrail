@@ -21,6 +21,7 @@ struct EditRecordView: View {
     @State private var serialNumber: String
     @State private var coverageSummary: String
     @State private var isRegistered: Bool
+    @State private var showBarcodeScanner = false
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -81,9 +82,19 @@ struct EditRecordView: View {
             }
 
             Section("Proof & coverage") {
-                TextField("Serial number", text: $serialNumber)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.characters)
+                HStack {
+                    TextField("Serial number", text: $serialNumber)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.characters)
+                    if BarcodeScannerView.isSupported {
+                        Button {
+                            showBarcodeScanner = true
+                        } label: {
+                            Image(systemName: "barcode.viewfinder")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
                 TextField("Covers (e.g. Parts & labor)", text: $coverageSummary)
                 Toggle("Registered with manufacturer", isOn: $isRegistered)
             }
@@ -136,6 +147,11 @@ struct EditRecordView: View {
                 }
                 .fontWeight(.semibold)
                 .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .sheet(isPresented: $showBarcodeScanner) {
+            BarcodeScannerSheet { payload in
+                serialNumber = payload
             }
         }
     }

@@ -627,6 +627,15 @@ struct RecordDetailView: View {
             attachment.recordID = record.id
             modelContext.insert(attachment)
         }
+
+        // Passive barcode sweep: if this record has no serial yet and the new
+        // page(s) turned up a serial-like barcode, fill it in. Never overwrite
+        // an existing serial — the user may have entered/scanned one already.
+        if (record.serialNumber?.isEmpty ?? true), let candidate = result.ocr.serialCandidate {
+            record.serialNumber = candidate.payload
+            showToast("\(candidate.kind.label) added from barcode")
+        }
+
         record.updatedAt = .now
         let toUpload = result.attachments.map { AttachmentSyncInfo(id: $0.id, localFilename: $0.localFilename) }
         for info in toUpload {

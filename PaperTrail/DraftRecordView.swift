@@ -26,6 +26,10 @@ struct DraftRecordView: View {
     @State private var category: String = ""
     @State private var room: String = ""
     @State private var tagsText: String = ""
+    /// Suggested serial number from the passive barcode sweep (see
+    /// `BarcodeDetectionService`). Pre-filled only when a candidate was
+    /// found; the user can edit/clear it like any other field.
+    @State private var serialNumber: String = ""
 
     /// Existing records, used only to surface previously-used rooms in the picker.
     @Query private var allRecords: [PurchaseRecord]
@@ -98,6 +102,7 @@ struct DraftRecordView: View {
         _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
         _category = State(initialValue: seededOCR?.suggestedCategory ?? "")
         _room = State(initialValue: "")
+        _serialNumber = State(initialValue: seededOCR?.serialCandidate?.payload ?? "")
 
         // If Foundation Models extracted a warranty duration, pre-fill the warranty toggle and date.
         // Also auto-enable warranty if any line item is classified as a warranty.
@@ -123,6 +128,18 @@ struct DraftRecordView: View {
     private var amountConfidence: ExtractionConfidence? {
         guard let sr = structuredResult, sr.amount.value != nil else { return nil }
         return sr.amount.confidence
+    }
+
+    /// Confidence styling for the barcode-suggested serial number. A
+    /// `.serial`-shaped payload reads as "Auto" (barcode decoding is exact,
+    /// unlike OCR/FM guesses); a `.productCode` payload is flagged for
+    /// review since it's a lower-confidence fallback, not a true serial.
+    private var serialConfidence: ExtractionConfidence? {
+        switch seededOCR?.serialCandidate?.kind {
+        case .serial: .high
+        case .productCode: .medium
+        case nil: nil
+        }
     }
 
     private var dateConfidence: ExtractionConfidence? {
@@ -153,6 +170,8 @@ struct DraftRecordView: View {
                 }
 
                 fieldsCard
+
+                serialSuggestionCard
 
                 additionalItemCards
 
@@ -293,6 +312,22 @@ struct DraftRecordView: View {
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .paperCard(goldFold: true)
+    }
+
+    /// Suggested-serial card from the passive barcode sweep — only rendered
+    /// when a candidate was found on a scanned page. Editable/clearable like
+    /// any other review field; clearing it saves the record with no serial,
+    /// same as if no barcode had been found.
+    @ViewBuilder
+    private var serialSuggestionCard: some View {
+        if let candidate = seededOCR?.serialCandidate {
+            VStack(spacing: 0) {
+                PTReviewField(title: candidate.kind.label, text: $serialNumber, mono: true, confidence: serialConfidence)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperCard(goldFold: false)
+        }
     }
 
     /// One editable card per *additional* selected item (the primary is edited in
@@ -761,7 +796,13 @@ struct DraftRecordView: View {
         // its own warranty/category/amount). The primary item uses the edited
         // form fields; additional items use their receipt values. With 0–1
         // record-worthy items selected, this is exactly one record from the form.
-        func makeRecord(productName: String, amount: Double?, category: String?) -> PurchaseRecord {
+        // Only the primary record (the one edited in `fieldsCard`) gets the
+        // barcode-suggested serial — additional selected items are separate
+        // physical products that would need their own barcode.
+        let trimmedSerial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalSerialNumber: String? = trimmedSerial.isEmpty ? nil : trimmedSerial
+
+        func makeRecord(productName: String, amount: Double?, category: String?, serialNumber: String? = nil) -> PurchaseRecord {
             PurchaseRecord(
                 productName: productName,
                 merchantName: merchantName.isEmpty ? nil : merchantName,
@@ -772,7 +813,8 @@ struct DraftRecordView: View {
                 currency: currency,
                 category: (category?.isEmpty == false) ? category : nil,
                 room: room.isEmpty ? nil : room,
-                tags: parsedTags
+                tags: parsedTags,
+                serialNumber: serialNumber
             )
         }
 
@@ -781,11 +823,11 @@ struct DraftRecordView: View {
         if recordWorthySelected.count >= 2 {
             for (index, item) in recordWorthySelected.enumerated() {
                 records.append(index == 0
-                    ? makeRecord(productName: productName, amount: parsedAmount, category: category)
+                    ? makeRecord(productName: productName, amount: parsedAmount, category: category, serialNumber: finalSerialNumber)
                     : makeRecord(productName: editedName(for: item), amount: editedAmount(for: item), category: item.category ?? category))
             }
         } else {
-            records.append(makeRecord(productName: productName, amount: parsedAmount, category: category))
+            records.append(makeRecord(productName: productName, amount: parsedAmount, category: category, serialNumber: finalSerialNumber))
         }
 
         for record in records {
