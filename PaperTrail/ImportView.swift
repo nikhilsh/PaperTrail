@@ -30,8 +30,7 @@ struct ImportView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    (Text("Bring it\n").foregroundStyle(PT.txt)
-                     + Text("all in.").foregroundStyle(PT.goldHi))
+                    Text("\(Text("Bring it\n").foregroundStyle(PT.txt))\(Text("all in.").foregroundStyle(PT.goldHi))")
                         .font(PTFont.serif(34, weight: 600))
                     Text("Most of your receipts already live somewhere. Pull them in — we read each one on-device and let you confirm before saving.")
                         .font(.system(size: 14))

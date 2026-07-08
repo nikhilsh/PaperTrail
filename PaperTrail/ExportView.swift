@@ -23,8 +23,7 @@ struct ExportView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    (Text("Your data,\n").foregroundStyle(PT.txt)
-                     + Text("yours.").foregroundStyle(PT.goldHi))
+                    Text("\(Text("Your data,\n").foregroundStyle(PT.txt))\(Text("yours.").foregroundStyle(PT.goldHi))")
                         .font(PTFont.serif(34, weight: 600))
                     Text("Take a full copy with you anytime — no lock-in. If you ever leave PaperTrail, you leave with everything.")
                         .font(.system(size: 14))
