@@ -88,8 +88,8 @@ struct ScanningService {
             suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document.",
             documentKind: bestDocumentKind,
             lineItems: bestLineItems,
-            structuredResult: bestStructuredResult,
-            serialCandidate: SerialCandidateFilter.bestCandidate(from: allBarcodePayloads)
+            serialCandidate: SerialCandidateFilter.bestCandidate(from: allBarcodePayloads),
+            structuredResult: bestStructuredResult
         )
 
         return (attachments, combined)
