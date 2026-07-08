@@ -166,7 +166,6 @@ enum PaperTrailModelContainer {
 
 @main
 struct PaperTrailApp: App {
-    @State private var authManager = AuthenticationManager()
     let modelContainer: ModelContainer
 
     init() {
@@ -182,11 +181,9 @@ struct PaperTrailApp: App {
     var body: some Scene {
         WindowGroup {
             AppShellView()
-                .environment(authManager)
                 .environmentObject(CloudImageSyncManager.shared)
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
-                    await authManager.checkCredentialState()
                     await runCloudKitPreflight()
                     await syncCloudImages()
                     await CommunityLearning.shared.refreshCommunityHints()

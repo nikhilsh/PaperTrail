@@ -13,7 +13,6 @@ struct AdvancedDiagnosticsView: View {
     @Query private var attachments: [Attachment]
     @Query private var merchantProfiles: [MerchantProfile]
     @Query private var productMemories: [ProductCategoryMemory]
-    @Environment(AuthenticationManager.self) private var authManager
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Environment(\.dismiss) private var dismiss
 
@@ -54,7 +53,7 @@ struct AdvancedDiagnosticsView: View {
     }
 
     private var syncStatusText: String {
-        activeSyncBackend == "Local fallback" ? "Local fallback" : (authManager.isSignedIn ? "Active" : "Sign in required")
+        activeSyncBackend == "Local fallback" ? "Local fallback" : (cloudKitAccountStatus == "Available" ? "Active" : "iCloud required")
     }
 
     private var activeWarrantyCount: Int {

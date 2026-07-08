@@ -23,6 +23,9 @@ final class AppRouter {
 
 struct AppShellView: View {
     @State private var router = AppRouter()
+    @AppStorage("community.consentPrompted") private var communityConsentPrompted = false
+    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
+    @State private var showLearningConsent = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -56,6 +59,22 @@ struct AppShellView: View {
             }
             .tint(PT.gold)
             .preferredColorScheme(.dark)
+        }
+        .onAppear {
+            if !communityConsentPrompted {
+                showLearningConsent = true
+            }
+        }
+        .alert("Help improve extraction?", isPresented: $showLearningConsent) {
+            Button("Share anonymously") {
+                communityLearningEnabled = true
+                communityConsentPrompted = true
+            }
+            Button("Not now", role: .cancel) {
+                communityConsentPrompted = true
+            }
+        } message: {
+            Text("When you correct a scanned field, PaperTrail can share that correction anonymously (no account, no identifiers, a random install ID only) to improve extraction for everyone. You can change this anytime in Settings.")
         }
     }
 }
@@ -137,7 +156,6 @@ struct PTTabBar: View {
 
 #Preview {
     AppShellView()
-        .environment(AuthenticationManager())
         .environmentObject(CloudImageSyncManager.shared)
         .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

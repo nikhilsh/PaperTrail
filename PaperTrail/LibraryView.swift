@@ -314,7 +314,6 @@ private struct RoomRow: View {
 
 #Preview {
     AppShellView()
-        .environment(AuthenticationManager())
         .environmentObject(CloudImageSyncManager.shared)
         .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }

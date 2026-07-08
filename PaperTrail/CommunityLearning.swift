@@ -9,14 +9,16 @@ import Foundation
 /// `community_merchants` table back and use it as a low-confidence fallback when
 /// the user has no personal profile for a merchant.
 ///
-/// Privacy model (aggressive but anonymized, opt-OUT):
+/// Privacy model (anonymized, opt-IN):
 /// - Contributions are keyed by a random install UUID — generated locally,
 ///   never tied to the Apple ID, device id, or iCloud identity.
 /// - Only structured field values are sent (merchant key, field, original →
 ///   corrected), never transcripts or images. Values are scrubbed of
 ///   email/phone-shaped substrings and length-capped before upload.
 /// - The toggle lives in Settings → Your data ("Share anonymous learning
-///   data"), ON by default; turning it off stops uploads immediately.
+///   data"), OFF by default; a first-launch consent prompt (see
+///   `AppShellView`) offers to turn it on. Turning it off stops uploads
+///   immediately.
 /// - The whole pipeline is dormant until `BuildSecrets.supabaseURL` is
 ///   configured (CI injects it like the Sentry DSN).
 final class CommunityLearning: @unchecked Sendable {
@@ -33,7 +35,7 @@ final class CommunityLearning: @unchecked Sendable {
 
     init(session: URLSession = .shared) {
         self.session = session
-        UserDefaults.standard.register(defaults: [Self.optOutKey: true])
+        UserDefaults.standard.register(defaults: [Self.optOutKey: false])
         loadCachedHints()
     }
 
