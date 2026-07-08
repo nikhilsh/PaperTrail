@@ -4,6 +4,13 @@ import UIKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
+#if PAPERTRAIL_IOS27_SDK
+// OCRTool and BarcodeReaderTool are declared in Vision (they conform to
+// FoundationModels.Tool); Attachment is in FoundationModels. All are iOS 27 SDK
+// symbols — see the PAPERTRAIL_IOS27_SDK note on extractMultimodal().
+import Vision
+import ImageIO
+#endif
 
 // MARK: - Document kind
 
@@ -473,47 +480,27 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         Self.logger.info("Foundation Models available — running structured extraction")
 
-        // iOS 27 multimodal path (OCRTool + BarcodeReaderTool + Attachment(UIImage)) ships in
-        // Xcode 26.5+. Restore the extractMultimodal() early-exit when that SDK is available.
-        let adaptiveHints = learningContext.map { context in
-            var hints: [String] = []
-            if let displayName = context.displayMerchantName {
-                hints.append("Known merchant: \(displayName).")
+        // iOS 27+: pass the image straight to the model — OCRTool handles text extraction
+        // internally (30+ languages, no locale errors) and BarcodeReaderTool picks up
+        // serial numbers on warranty cards. If the multimodal call fails, fall through
+        // to the text-based retry ladder below instead of giving up on FM entirely.
+        //
+        // Gated on PAPERTRAIL_IOS27_SDK (not just #available) because the symbols only
+        // exist in the iOS 27 SDK, which no GitHub-hosted Xcode ships yet — verified
+        // against the FoundationModels swiftinterface in Xcode 26.5 AND 26.6. To enable:
+        // add PAPERTRAIL_IOS27_SDK to SWIFT_ACTIVE_COMPILATION_CONDITIONS once CI has
+        // an Xcode with the iOS 27 SDK.
+        #if PAPERTRAIL_IOS27_SDK
+        if #available(iOS 27, *), let image {
+            let multimodal = await extractMultimodal(image: image, learningContext: learningContext)
+            if multimodal.diagnostics?.foundationModelRan == true {
+                return multimodal
             }
-            if let category = context.categorySuggestion {
-                hints.append("This merchant often maps to category '\(category)'.")
-            }
-            if let currency = context.currencySuggestion {
-                hints.append("Preferred currency is usually \(currency).")
-            }
-            if let warranty = context.warrantySuggestionMonths {
-                hints.append("Common warranty duration is \(warranty) months.")
-            }
-            if let amountHint = context.amountHint {
-                hints.append(amountHint)
-            }
-            if let dateHint = context.dateHint {
-                hints.append(dateHint)
-            }
-            if let productHint = context.productHint {
-                hints.append(productHint)
-            }
-            // Few-shot (roadmap #5): replay the user's own recent corrections
-            // for THIS merchant as worked examples. Hard-capped at 2 truncated
-            // lines so the context window stays safe.
-            hints.append(contentsOf: CorrectionLogger.fewShotExamples(forNormalizedMerchant: context.normalizedMerchantName))
-            guard !hints.isEmpty else { return "" }
-            // Phrase the hints by how much we trust this profile: a merchant
-            // corrected many times recently is near-authoritative; a single old
-            // correction is only a gentle nudge (see MerchantProfile.hintStrength).
-            let header: String
-            switch context.confidence {
-            case 0.6...:   header = "Strongly trust these merchant-specific hints (consistently corrected before):"
-            case 0.3..<0.6: header = "Merchant-specific hints (use unless the text clearly disagrees):"
-            default:       header = "Tentative merchant-specific hints (low confidence — defer to the text):"
-            }
-            return "\n" + header + "\n" + hints.joined(separator: "\n")
-        } ?? ""
+            Self.logger.warning("FM multimodal produced no result — falling back to text-based extraction")
+        }
+        #endif
+
+        let adaptiveHints = buildAdaptiveHints(from: learningContext)
 
         let instructions = """
             You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
@@ -726,11 +713,18 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     // MARK: - Multimodal extraction (iOS 27+)
 
+    #if PAPERTRAIL_IOS27_SDK
     /// Sends the scanned image directly to the on-device model using OCRTool and BarcodeReaderTool.
     /// This replaces the text-cleaning + retry loop used on iOS 26: the model handles OCR
     /// internally in 30+ languages, eliminating locale errors and spatial context loss.
     ///
-    /// Verify Prompt builder / Attachment syntax against WWDC26 session 241 before shipping.
+    /// API surface verified against Apple docs (developer.apple.com/documentation/foundationmodels/
+    /// analyzing-images-with-multimodal-prompting): OCRTool/BarcodeReaderTool come from Vision,
+    /// Attachment takes CGImage/CIImage/CVPixelBuffer/URL (NOT UIImage), tools precede
+    /// instructions in the LanguageModelSession init.
+    ///
+    /// On failure this returns an empty result (with diagnostics); `extract()` then falls
+    /// back to the text-based retry ladder so FM is never lost to a transient multimodal error.
     @available(iOS 27, *)
     private func extractMultimodal(image: UIImage, learningContext: MerchantLearningContext?) async -> StructuredExtractionResult {
         let adaptiveHints = buildAdaptiveHints(from: learningContext)
@@ -740,34 +734,93 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Be precise: prefer exact values from the image over guesses. \
             If a field is not clearly present, leave it null. \
             Do NOT extract legal boilerplate, footer text, copyright notices, or terms & conditions as product names or merchant names. \
-            For dates, prefer DD/MM/YYYY (day-first) interpretation common in Singapore and APAC. \
-            Only extract dates that are clearly purchase/transaction dates — ignore copyright years, founding dates, or dates in legal text.\
+            For the purchase date, use the date from a clearly LABELED field such as "Order Date", "Invoice Date", "Tax Invoice Date", "Transaction Date", "Date of Purchase", or "Date". \
+            Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
+            Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
+            Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
+            A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
+            For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
+            If you cannot determine the purchase date confidently, leave it null rather than guessing.\
             \(adaptiveHints)
             """
 
-        // OCRTool, BarcodeReaderTool, and Attachment(UIImage) require Xcode 26.5+ SDK
-        // (WWDC 2026 additions; not present in Xcode 26.4.1). Restore full implementation once
-        // macos-26 runner ships Xcode 26.5. Wiring: re-add the early-exit in extract() above.
-        //
-        // When ready, replace this stub with:
-        //   let session = LanguageModelSession(
-        //       tools: [OCRTool(), BarcodeReaderTool()], instructions: instructions)
-        //   let response = try await session.respond(
-        //       to: Prompt { "Extract all structured fields from this receipt." ; Attachment(image) },
-        //       generating: ReceiptExtractionSchema.self)
-        _ = image
-        _ = adaptiveHints
-        var result = StructuredExtractionResult.empty
-        result.diagnostics = ExtractionDiagnostics(
-            foundationModelAvailable: true,
-            foundationModelRan: false,
-            foundationModelSkipReason: "pending Xcode 26.5 SDK",
-            foundationModelFieldCount: 0,
-            heuristicFieldCount: 0,
-            rejectedFields: []
-        )
-        return result
+        // Attachment has no UIImage initializer — only CGImage/CIImage/CVPixelBuffer/URL.
+        guard let cgImage = image.cgImage else {
+            Self.logger.error("FM multimodal skipped: UIImage has no CGImage backing")
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: false,
+                foundationModelSkipReason: "multimodal: no CGImage backing",
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
+        }
+
+        do {
+            let session = LanguageModelSession(tools: [OCRTool(), BarcodeReaderTool()], instructions: instructions)
+            let response = try await session.respond(
+                to: Prompt {
+                    "Extract all structured fields from this receipt or purchase document."
+                    Attachment(cgImage, orientation: Self.cgOrientation(image.imageOrientation)).label("scanned-document")
+                },
+                generating: ReceiptExtractionSchema.self
+            )
+            let schema = response.content
+            let fieldCount = [
+                schema.productName, schema.merchantName, schema.purchaseDate, schema.currency, schema.category
+            ].compactMap({ $0 }).count + (schema.amount != nil ? 1 : 0) + (schema.warrantyDurationMonths != nil ? 1 : 0)
+
+            Self.logger.info("FM multimodal succeeded with \(fieldCount, privacy: .public) fields")
+
+            var mapped = mapSchemaToResult(schema)
+            mapped.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: true,
+                foundationModelSkipReason: nil,
+                foundationModelFieldCount: fieldCount,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return mapped
+        } catch {
+            let errorDesc = error.localizedDescription
+            Self.logger.error("FM multimodal failed: \(errorDesc, privacy: .public)")
+            AppLogger.error(
+                "FM multimodal extraction failed: \(errorDesc)",
+                category: "extraction.fm.multimodal",
+                tags: ["fm_error": errorDesc]
+            )
+            var result = StructuredExtractionResult.empty
+            result.diagnostics = ExtractionDiagnostics(
+                foundationModelAvailable: true,
+                foundationModelRan: false,
+                foundationModelSkipReason: "multimodal error: \(errorDesc)",
+                foundationModelFieldCount: 0,
+                heuristicFieldCount: 0,
+                rejectedFields: []
+            )
+            return result
+        }
     }
+
+    /// Attachment orientation is CGImagePropertyOrientation; UIImage carries UIImage.Orientation.
+    private static func cgOrientation(_ o: UIImage.Orientation) -> CGImagePropertyOrientation {
+        switch o {
+        case .up: .up
+        case .down: .down
+        case .left: .left
+        case .right: .right
+        case .upMirrored: .upMirrored
+        case .downMirrored: .downMirrored
+        case .leftMirrored: .leftMirrored
+        case .rightMirrored: .rightMirrored
+        @unknown default: .up
+        }
+    }
+    #endif
 
     private func buildAdaptiveHints(from learningContext: MerchantLearningContext?) -> String {
         guard let context = learningContext else { return "" }
@@ -779,8 +832,21 @@ struct FoundationModelExtractionService: FieldExtractionService {
         if let amountHint = context.amountHint { hints.append(amountHint) }
         if let dateHint = context.dateHint { hints.append(dateHint) }
         if let productHint = context.productHint { hints.append(productHint) }
+        // Few-shot (roadmap #5): replay the user's own recent corrections for THIS
+        // merchant as worked examples. Hard-capped at 2 truncated lines so the
+        // context window stays safe.
+        hints.append(contentsOf: CorrectionLogger.fewShotExamples(forNormalizedMerchant: context.normalizedMerchantName))
         guard !hints.isEmpty else { return "" }
-        return "\nMerchant-specific hints:\n" + hints.joined(separator: "\n")
+        // Phrase the hints by how much we trust this profile: a merchant corrected
+        // many times recently is near-authoritative; a single old correction is only
+        // a gentle nudge (see MerchantProfile.hintStrength).
+        let header: String
+        switch context.confidence {
+        case 0.6...:   header = "Strongly trust these merchant-specific hints (consistently corrected before):"
+        case 0.3..<0.6: header = "Merchant-specific hints (use unless the text clearly disagrees):"
+        default:       header = "Tentative merchant-specific hints (low confidence — defer to the text):"
+        }
+        return "\n" + header + "\n" + hints.joined(separator: "\n")
     }
 
     /// Helper to create a string field with basic validation.
