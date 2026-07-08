@@ -21,6 +21,7 @@ struct DraftRecordView: View {
     @State private var purchaseDate: Date
     @State private var includeWarranty = false
     @State private var warrantyExpiryDate = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
+    @State private var returnWindowDays: Int?
     @State private var amountText: String
     @State private var currency: String
     @State private var category: String = ""
@@ -289,6 +290,8 @@ struct DraftRecordView: View {
             }
             paperDivider
             warrantyRow
+            paperDivider
+            returnWindowRow
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -341,6 +344,18 @@ struct DraftRecordView: View {
                     .labelsHidden()
                     .tint(PT.goldDeep)
             }
+        }
+        .padding(.vertical, 12)
+    }
+
+    private var returnWindowRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Return window")
+                .ptMonoLabel(9, tracking: 1.4)
+                .foregroundStyle(PT.onPaper3)
+            ReturnWindowPicker(returnWindowDays: $returnWindowDays)
+                .font(PTFont.serif(17, weight: 500))
+                .tint(PT.goldDeep)
         }
         .padding(.vertical, 12)
     }
@@ -772,7 +787,8 @@ struct DraftRecordView: View {
                 currency: currency,
                 category: (category?.isEmpty == false) ? category : nil,
                 room: room.isEmpty ? nil : room,
-                tags: parsedTags
+                tags: parsedTags,
+                returnWindowDays: returnWindowDays
             )
         }
 
@@ -818,7 +834,7 @@ struct DraftRecordView: View {
                 NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
             }
         }
-        if reminderPrefs.returnWindowRemindersEnabled {
+        if returnWindowDays != nil, reminderPrefs.returnWindowRemindersEnabled {
             for record in records {
                 record.returnWindowNotificationScheduled = true
                 NotificationManager.shared.scheduleReturnWindowReminder(for: record)

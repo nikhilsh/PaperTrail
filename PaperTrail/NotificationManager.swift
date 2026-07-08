@@ -79,39 +79,61 @@ struct NotificationManager {
 
     // MARK: - Return-window reminders (§6)
 
-    /// Schedule a single reminder a few days before a recent purchase's return /
-    /// refund window closes. The habit-forming hook: weekly value, not
-    /// once-a-year-warranty value.
-    func scheduleReturnWindowReminder(for record: PurchaseRecord, windowDays: Int = 30, leadDays: Int = 3) {
-        guard let purchaseDate = record.purchaseDate else { return }
-        let closeDate = Calendar.current.date(byAdding: .day, value: windowDays, to: purchaseDate) ?? purchaseDate
-        guard let triggerDate = Calendar.current.date(byAdding: .day, value: -leadDays, to: closeDate),
-              triggerDate > .now else { return }
+    /// Reminders fire this many days before `record.returnDeadline`, plus a
+    /// day-of reminder (`0`). Mirrors `scheduleWarrantyReminders`'s offset pattern.
+    private static let returnWindowOffsets = [3, 0]
 
-        let id = returnWindowIdentifier(for: record)
+    /// Schedule return-window reminders for a record, using its own
+    /// `returnWindowDays` (set via the return-window picker). No-ops if the
+    /// record has no window configured or purchase date to anchor it to.
+    func scheduleReturnWindowReminder(for record: PurchaseRecord) {
+        guard let deadline = record.returnDeadline, deadline > .now else { return }
+
+        let identifiers = returnWindowIdentifiers(for: record)
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
 
-        let content = UNMutableNotificationContent()
-        content.title = "Return window closing"
-        content.body = "\(record.productName): the return or refund window may be closing soon."
-        content.sound = .default
-        content.categoryIdentifier = "RETURN_WINDOW"
+        let merchantSuffix = record.merchantName.map { " — \($0)" } ?? ""
 
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-        center.add(request) { error in
-            if let error { print("NotificationManager: failed to schedule return-window reminder: \(error)") }
+        for days in Self.returnWindowOffsets {
+            guard let triggerDate = Calendar.current.date(byAdding: .day, value: -days, to: deadline),
+                  triggerDate > .now else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Return window closing"
+            if days > 0 {
+                content.body = "Return window for \(record.productName) closes in \(days) day\(days == 1 ? "" : "s")\(merchantSuffix)."
+            } else {
+                content.body = "Return window for \(record.productName) closes today\(merchantSuffix)."
+            }
+            content.sound = .default
+            content.categoryIdentifier = "RETURN_WINDOW"
+
+            let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+
+            let id = "\(recordIdentifier(record))-return-window-\(days)"
+            let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+            center.add(request) { error in
+                if let error { print("NotificationManager: failed to schedule \(id): \(error)") }
+            }
         }
     }
 
-    /// Remove the return-window reminder for a record.
+    /// Remove all return-window reminders for a record.
     func removeReturnWindowReminder(for record: PurchaseRecord) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [returnWindowIdentifier(for: record)])
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: returnWindowIdentifiers(for: record))
     }
 
-    private func returnWindowIdentifier(for record: PurchaseRecord) -> String {
-        "\(String(describing: record.persistentModelID))-return-window"
+    private func returnWindowIdentifiers(for record: PurchaseRecord) -> [String] {
+        let base = recordIdentifier(record)
+        // Includes the legacy single-reminder id ("-return-window", no offset
+        // suffix) so upgrading users don't keep a stale reminder scheduled
+        // under the old identifier scheme.
+        return Self.returnWindowOffsets.map { "\(base)-return-window-\($0)" } + ["\(base)-return-window"]
+    }
+
+    private func recordIdentifier(_ record: PurchaseRecord) -> String {
+        String(describing: record.persistentModelID)
     }
 }

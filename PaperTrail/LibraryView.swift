@@ -224,6 +224,7 @@ struct RecordFilingCard: View {
     let record: PurchaseRecord
 
     private var warranty: PTWarranty { PTWarranty(record: record) }
+    private var returnWindow: PTReturnWindow { PTReturnWindow(record: record) }
 
     private var metaLine: String {
         var parts: [String] = []
@@ -262,6 +263,9 @@ struct RecordFilingCard: View {
                 if record.warrantyExpiryDate != nil {
                     StatusPill(status: warranty.status, text: warranty.pillText)
                 }
+                if let badgeText = returnWindow.badgeText {
+                    TonedStatusPill(text: badgeText, tone: returnWindow.tone, textColor: returnWindow.textColor, background: returnWindow.background)
+                }
             }
         }
         .padding(16)
@@ -282,6 +286,7 @@ struct RecordFilingCard: View {
 private struct RoomRow: View {
     let record: PurchaseRecord
     private var warranty: PTWarranty { PTWarranty(record: record) }
+    private var returnWindow: PTReturnWindow { PTReturnWindow(record: record) }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -298,6 +303,9 @@ private struct RoomRow: View {
             Spacer(minLength: 8)
             if record.warrantyExpiryDate != nil {
                 Circle().fill(warranty.status.tone).frame(width: 7, height: 7)
+            }
+            if returnWindow.status.isClosingSoon {
+                Circle().fill(returnWindow.tone).frame(width: 7, height: 7)
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))

@@ -38,6 +38,7 @@ struct RecordDetailView: View {
     }
 
     private var warranty: PTWarranty { PTWarranty(record: record) }
+    private var returnWindow: PTReturnWindow { PTReturnWindow(record: record) }
 
     var body: some View {
         ScrollView {
@@ -48,6 +49,10 @@ struct RecordDetailView: View {
 
                 if record.warrantyExpiryDate != nil {
                     warrantyBlock
+                }
+
+                if record.returnWindowDays != nil {
+                    returnWindowLine
                 }
 
                 proofSection
@@ -345,6 +350,27 @@ struct RecordDetailView: View {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(warranty.status.tone.opacity(0.25), lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: Return window
+
+    /// Status line shown near the warranty block, styled to match it: a tinted,
+    /// rounded panel using the same tone palette (sage/amber/gray).
+    private var returnWindowLine: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.uturn.left.circle")
+                .font(.system(size: 15))
+                .foregroundStyle(returnWindow.tone)
+            Text(returnWindow.detailText ?? "")
+                .font(.system(size: 12))
+                .foregroundStyle(returnWindow.textColor)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(returnWindow.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(returnWindow.tone.opacity(0.3), lineWidth: 1))
     }
 
     // MARK: Proof
