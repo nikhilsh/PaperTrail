@@ -13,6 +13,7 @@ struct EditRecordView: View {
     @State private var purchaseDate: Date
     @State private var includeWarranty: Bool
     @State private var warrantyExpiryDate: Date
+    @State private var returnWindowDays: Int?
     @State private var amountText: String
     @State private var currency: String
     @State private var category: String
@@ -35,6 +36,7 @@ struct EditRecordView: View {
         _purchaseDate = State(initialValue: record.purchaseDate ?? .now)
         _includeWarranty = State(initialValue: record.warrantyExpiryDate != nil)
         _warrantyExpiryDate = State(initialValue: record.warrantyExpiryDate ?? Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now)
+        _returnWindowDays = State(initialValue: record.returnWindowDays)
 
         if let amount = record.amount {
             _amountText = State(initialValue: String(format: "%.2f", amount))
@@ -79,6 +81,10 @@ struct EditRecordView: View {
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
+            }
+
+            Section("Return window") {
+                ReturnWindowPicker(returnWindowDays: $returnWindowDays)
             }
 
             Section("Proof & coverage") {
@@ -187,13 +193,19 @@ struct EditRecordView: View {
             NotificationManager.shared.removeWarrantyReminders(for: record)
         }
 
-        // Return-window reminder (§6): schedule/refresh when enabled. When the
-        // global pref is off we leave any existing reminder untouched — turning the
-        // feature off globally is handled where the toggle lives, so an unrelated
-        // edit shouldn't silently cancel a still-valid pending reminder.
-        if reminderPrefs.returnWindowRemindersEnabled {
-            record.returnWindowNotificationScheduled = true
-            NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+        // Return window & its reminders — mirrors the warranty block above exactly.
+        let oldReturnWindowDays = record.returnWindowDays
+        record.returnWindowDays = returnWindowDays
+
+        if returnWindowDays != nil, reminderPrefs.returnWindowRemindersEnabled {
+            // Reschedule if the window changed
+            if oldReturnWindowDays != returnWindowDays || !record.returnWindowNotificationScheduled {
+                record.returnWindowNotificationScheduled = true
+                NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+            }
+        } else {
+            record.returnWindowNotificationScheduled = false
+            NotificationManager.shared.removeReturnWindowReminder(for: record)
         }
 
         dismiss()

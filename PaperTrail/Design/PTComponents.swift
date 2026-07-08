@@ -194,6 +194,30 @@ struct StatusPill: View {
     }
 }
 
+/// Small dot + mono label, styled identically to `StatusPill` but driven by an
+/// explicit tone/text/background rather than `WarrantyStatus` — used for
+/// return-window badges, which have their own status type.
+struct TonedStatusPill: View {
+    let text: String
+    var tone: Color
+    var textColor: Color
+    var background: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(tone)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .ptMonoLabel(10, tracking: 1.2)
+        }
+        .foregroundStyle(textColor)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(background, in: Capsule())
+    }
+}
+
 // MARK: - Stamp badge
 
 /// Rubber-stamp verdict: mono, letter-spaced, outlined, rotated ~-3°.
