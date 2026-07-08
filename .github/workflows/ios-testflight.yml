@@ -1,0 +1,188 @@
+name: Upload TestFlight Build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: papertrail-testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload-testflight:
+    runs-on: macos-26
+    env:
+      APP_NAME: PaperTrail
+      SCHEME: PaperTrail
+      PROJECT_PATH: PaperTrail.xcodeproj
+      CONFIGURATION: Release
+      EXPORT_METHOD: app-store-connect
+      BUNDLE_ID: nikhilsh.PaperTrail
+      TEAM_ID: EHW7L3679R
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      ARCHIVE_PATH: ${{ github.workspace }}/build/PaperTrail.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify App Store Connect API secrets
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_API_KEY_P8" ]; then
+            echo "::error::Add ASC_KEY_ID, ASC_ISSUER_ID, ASC_API_KEY_P8 repo secrets — see App Store Connect > Users and Access > Integrations"
+            exit 1
+          fi
+
+      - name: Select Xcode 26.4.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Decode signing assets
+        env:
+          IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          CERT_PATH="$RUNNER_TEMP/distribution.p12"
+          PROVISIONING_PROFILE_PATH="$RUNNER_TEMP/PaperTrail.mobileprovision"
+          echo "$IOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          echo "$IOS_PROFILE_BASE64" | base64 --decode > "$PROVISIONING_PROFILE_PATH"
+
+      - name: Install provisioning profile
+        run: |
+          PROVISIONING_PROFILE_PATH="$RUNNER_TEMP/PaperTrail.mobileprovision"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          security cms -D -i "$PROVISIONING_PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print Name' "$RUNNER_TEMP/profile.plist")
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          cp "$PROVISIONING_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+      - name: Create temporary keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/distribution.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Decode App Store Connect API key
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          echo "$ASC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc_key.p8"
+
+      - name: Generate export options
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>destination</key>
+            <string>upload</string>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Show signing identities
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Generate build secrets
+        run: |
+          cat > PaperTrail/GeneratedSecrets.swift <<EOF
+          import Foundation
+
+          enum BuildSecrets {
+              static let sentryDSN = "${SENTRY_DSN}"
+              static let supabaseURL = "${SUPABASE_URL}"
+              static let supabaseAnonKey = "${SUPABASE_ANON_KEY}"
+          }
+          EOF
+
+      - name: Show build settings
+        run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings
+
+      - name: Archive app
+        run: |
+          mkdir -p build
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -archivePath "$ARCHIVE_PATH" \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            SENTRY_DSN="$SENTRY_DSN" \
+            clean archive
+
+      - name: Export & upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Install sentry-cli
+        run: |
+          curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.40.0" sh
+
+      - name: Upload dSYMs to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          # Verify dSYM files exist
+          if [ -d "$ARCHIVE_PATH/dSYMs" ]; then
+            echo "Found dSYMs directory at $ARCHIVE_PATH/dSYMs"
+            ls -lh "$ARCHIVE_PATH/dSYMs"
+          else
+            echo "Warning: No dSYMs directory found at $ARCHIVE_PATH/dSYMs"
+            exit 1
+          fi
+
+          # Upload dSYMs with source context for better stack traces
+          sentry-cli debug-files upload \
+            --auth-token "$SENTRY_AUTH_TOKEN" \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --include-sources \
+            "$ARCHIVE_PATH/dSYMs"
+
+          echo "dSYMs uploaded successfully to Sentry"
