@@ -16,6 +16,11 @@ struct OCRExtractionResult: Hashable, Sendable {
     /// Individual line items extracted from the document.
     var lineItems: [LineItem]
 
+    /// Best barcode-derived serial/product-code candidate found while
+    /// sweeping the scanned page(s) — see `BarcodeDetectionService` and
+    /// `SerialCandidateFilter`. `nil` when no barcode looked serial-like.
+    var serialCandidate: SerialBarcodeCandidate? = nil
+
     /// The full structured extraction result, preserved for confidence-aware UI.
     /// Only available when the extraction pipeline was used (not for manually constructed results).
     var structuredResult: StructuredExtractionResult?

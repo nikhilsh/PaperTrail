@@ -20,6 +20,7 @@ struct ScanningService {
     func process(images: [UIImage], type: AttachmentType, learnedMerchants: [String] = []) async -> (attachments: [Attachment], ocr: OCRExtractionResult) {
         let ocrService = injectedOCRService
             ?? VisionOCRService(customWords: OCRVocabulary.customWords(learnedMerchants: learnedMerchants))
+        let barcodeService = BarcodeDetectionService()
 
         var attachments: [Attachment] = []
         var allText: [String] = []
@@ -34,6 +35,7 @@ struct ScanningService {
         var bestDocumentKind: DocumentKind?
         var bestStructuredResult: StructuredExtractionResult?
         var bestLineItems: [LineItem] = []
+        var allBarcodePayloads: [String] = []
 
         for image in images {
             guard let filename = ImageStorageManager.save(image) else { continue }
@@ -44,6 +46,11 @@ struct ScanningService {
             } catch {
                 print("OCR failed for \(filename): \(error)")
             }
+
+            // Passive barcode sweep: run alongside OCR so a serial encoded on
+            // the same page (asset tag, warranty card, product box) can be
+            // suggested even if it never appears in the OCR text.
+            allBarcodePayloads.append(contentsOf: await barcodeService.detectPayloads(in: image))
 
             let attachment = Attachment(
                 type: type,
@@ -81,6 +88,7 @@ struct ScanningService {
             suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document.",
             documentKind: bestDocumentKind,
             lineItems: bestLineItems,
+            serialCandidate: SerialCandidateFilter.bestCandidate(from: allBarcodePayloads),
             structuredResult: bestStructuredResult
         )
 
