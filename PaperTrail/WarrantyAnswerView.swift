@@ -40,8 +40,7 @@ struct WarrantyAnswerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.top, 12)
 
-                (Text(verdict.lead).foregroundStyle(PT.txt)
-                 + Text(verdict.emphasis).italic().foregroundStyle(verdict.tone))
+                Text("\(Text(verdict.lead).foregroundStyle(PT.txt))\(Text(verdict.emphasis).italic().foregroundStyle(verdict.tone))")
                     .font(PTFont.serif(38, weight: 600))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
