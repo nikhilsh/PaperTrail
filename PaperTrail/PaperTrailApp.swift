@@ -107,24 +107,27 @@ private func runCloudKitPreflight() async {
     }
 }
 
-@main
-struct PaperTrailApp: App {
-    let modelContainer: ModelContainer
+/// Single source of truth for the app's CloudKit-backed SwiftData store.
+///
+/// Both `PaperTrailApp.init()` and the App Intents (Siri/Shortcuts, in
+/// `PaperTrail/AppIntents/`) need a `ModelContainer` pointing at the exact same
+/// store, and App Intents may run in a process the OS launched just to service
+/// the intent (no guarantee `PaperTrailApp.init()` ran first in that process).
+/// A shared, lazily-created singleton means whichever entry point touches it
+/// first builds the one and only container for that process. **Do not**
+/// construct a second `ModelConfiguration` anywhere else; route every access
+/// through `PaperTrailModelContainer.shared`.
+enum PaperTrailModelContainer {
+    // Single-store approach: both PurchaseRecord and Attachment live in the same
+    // CloudKit-backed store. Attachment holds only lightweight metadata (filename,
+    // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.
+    // This avoids the multi-configuration + CloudKit bug that causes
+    // SwiftDataError.loadIssueModelContainer on iOS 17/18.
+    static let schema = Schema([PurchaseRecord.self, Attachment.self, MerchantProfile.self, ProductCategoryMemory.self])
 
-    init() {
-        configureSentry()
+    static let shared: ModelContainer = makeContainer()
 
-        // Register the bundled OFL fonts (Newsreader, IBM Plex Mono) before any
-        // view renders so the design-system type is available on first paint.
-        PTFont.registerIfNeeded()
-
-        // Single-store approach: both PurchaseRecord and Attachment live in the same
-        // CloudKit-backed store. Attachment holds only lightweight metadata (filename,
-        // type, OCR text); actual image blobs stay on-disk via ImageStorageManager.
-        // This avoids the multi-configuration + CloudKit bug that causes
-        // SwiftDataError.loadIssueModelContainer on iOS 17/18.
-        let schema = Schema([PurchaseRecord.self, Attachment.self, MerchantProfile.self, ProductCategoryMemory.self])
-
+    private static func makeContainer() -> ModelContainer {
         let cloudConfig = ModelConfiguration(
             "PaperTrail",
             schema: schema,
@@ -132,11 +135,12 @@ struct PaperTrailApp: App {
         )
 
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfig])
+            let container = try ModelContainer(for: schema, configurations: [cloudConfig])
             UserDefaults.standard.set(SyncBackendState.cloudKit, forKey: SyncBackendState.defaultsKey)
             UserDefaults.standard.removeObject(forKey: SyncBackendState.errorKey)
             addStartupBreadcrumb(level: .info, category: "sync", message: "CloudKit-backed ModelContainer initialized successfully")
             SentrySDK.configureScope { scope in scope.setTag(value: SyncBackendState.cloudKit, key: "sync_backend") }
+            return container
         } catch {
             let errorText = String(describing: error)
             UserDefaults.standard.set(SyncBackendState.localFallback, forKey: SyncBackendState.defaultsKey)
@@ -152,11 +156,26 @@ struct PaperTrailApp: App {
             )
 
             do {
-                modelContainer = try ModelContainer(for: schema, configurations: [localConfig])
+                return try ModelContainer(for: schema, configurations: [localConfig])
             } catch {
                 fatalError("Failed to create local ModelContainer: \(error)")
             }
         }
+    }
+}
+
+@main
+struct PaperTrailApp: App {
+    let modelContainer: ModelContainer
+
+    init() {
+        configureSentry()
+
+        // Register the bundled OFL fonts (Newsreader, IBM Plex Mono) before any
+        // view renders so the design-system type is available on first paint.
+        PTFont.registerIfNeeded()
+
+        modelContainer = PaperTrailModelContainer.shared
     }
 
     var body: some Scene {
