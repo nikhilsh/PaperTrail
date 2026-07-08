@@ -8,7 +8,6 @@ import CloudKit
 /// gated behind `HouseholdManager.recordSharingEnabled` until it's device-verified.
 struct HouseholdView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(AuthenticationManager.self) private var authManager
     @Query private var records: [PurchaseRecord]
 
     private var manager = HouseholdManager.shared
@@ -26,8 +25,8 @@ struct HouseholdView: View {
             }
         }
         return [HouseholdMember(id: "you",
-                                name: authManager.resolvedName ?? "You",
-                                email: authManager.userEmail,
+                                name: "You",
+                                email: nil,
                                 role: .owner)]
     }
 

@@ -1,26 +1,25 @@
 import SwiftUI
 import SwiftData
 import UIKit
-import AuthenticationServices
+import CloudKit
 
 /// Settings, rebuilt around outcomes (§1): a Library Card hero, then Reminders,
-/// Your data, Household, Your library, Help & about, and Sign out. Every raw
-/// diagnostic now lives in `AdvancedDiagnosticsView` (§2) — nothing technical
-/// greets a real person here, but nothing was deleted.
+/// Your data, Household, Your library, Help & about, and iCloud & Your Data.
+/// Every raw diagnostic now lives in `AdvancedDiagnosticsView` (§2) — nothing
+/// technical greets a real person here, but nothing was deleted.
 struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
-    @Environment(AuthenticationManager.self) private var authManager
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("lastCloudSyncDate") private var lastCloudSyncRaw = 0.0
-    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = true
+    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
 
     private let reminders = ReminderSettings.shared
 
-    @State private var showNameEditor = false
-    @State private var nameDraft = ""
     @State private var showLoggedValueInfo = false
+    @State private var iCloudStatusText = "Checking iCloud status…"
+    @State private var iCloudStatusTone: Color = PT.txt3
 
     // MARK: Derived
 
@@ -172,22 +171,18 @@ struct SettingsView: View {
                 }
                 .padding(.bottom, 22)
 
-                // Sign out / account
+                // iCloud & Your Data
+                SettingsSectionLabel(text: "iCloud & Your Data")
                 SettingsCard {
-                    if authManager.isSignedIn {
-                        SettingsRow(title: "Sign out", danger: true, action: { authManager.signOut() })
-                    } else {
-                        SignInWithAppleButton(.signIn) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
-                            authManager.handleSignInResult(result)
-                        }
-                        .signInWithAppleButtonStyle(.white)
-                        .frame(height: 44)
-                        .padding(16)
-                    }
+                    SettingsRow(icon: "icloud", iconColor: iCloudStatusTone, title: iCloudStatusText)
                 }
-                .padding(.bottom, 18)
+                .padding(.bottom, 10)
+                Text("Your records and images are stored on this device and in your private iCloud. Nobody else — including the developer — can access them.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(PT.txt3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 18)
 
                 // Footer
                 VStack(spacing: 4) {
@@ -207,13 +202,7 @@ struct SettingsView: View {
         }
         .ptScreen()
         .toolbar(.hidden, for: .navigationBar)
-        .alert("Your name", isPresented: $showNameEditor) {
-            TextField("Name", text: $nameDraft)
-            Button("Save") { authManager.setDisplayName(nameDraft) }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Apple only shares your name the first time you sign in, so set one here to show in the app.")
-        }
+        .task { await refreshICloudStatus() }
         .alert("Logged value", isPresented: $showLoggedValueInfo) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -237,41 +226,17 @@ struct SettingsView: View {
             }
             .padding(.bottom, 14)
 
-            if authManager.isSignedIn {
-                Button { startEditingName() } label: {
-                    HStack(spacing: 12) {
-                        PTAvatar(initials: authManager.resolvedName?.ptInitials, size: 48)
-                        VStack(alignment: .leading, spacing: 3) {
-                            if authManager.hasName {
-                                Text(authManager.displayName)
-                                    .font(PTFont.serif(20, weight: 600))
-                                    .foregroundStyle(PT.onPaper)
-                            } else {
-                                (Text("Add your name").foregroundStyle(PT.onPaper)
-                                 + Text(" ›").foregroundStyle(PT.goldDeep))
-                                    .font(PTFont.serif(20, weight: 600))
-                            }
-                            Text("Signed in with Apple")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(PT.onPaper2)
-                        }
-                        Spacer()
-                    }
+            HStack(spacing: 12) {
+                PTAvatar(size: 48)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Your library")
+                        .font(PTFont.serif(20, weight: 600))
+                        .foregroundStyle(PT.onPaper)
+                    Text("Synced privately via iCloud")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(PT.onPaper2)
                 }
-                .buttonStyle(.plain)
-            } else {
-                HStack(spacing: 12) {
-                    PTAvatar(size: 48)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Not signed in")
-                            .font(PTFont.serif(20, weight: 600))
-                            .foregroundStyle(PT.onPaper)
-                        Text("Sign in below to sync & share")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(PT.onPaper2)
-                    }
-                    Spacer()
-                }
+                Spacer()
             }
 
             GoldRule()
@@ -297,9 +262,30 @@ struct SettingsView: View {
 
     // MARK: - Actions
 
-    private func startEditingName() {
-        nameDraft = authManager.resolvedName ?? ""
-        showNameEditor = true
+    private func refreshICloudStatus() async {
+        let container = CKContainer(identifier: "iCloud.nikhilsh.PaperTrail")
+        let status: CKAccountStatus
+        do {
+            status = try await container.accountStatus()
+        } catch {
+            iCloudStatusText = "iCloud account not signed in — data stays on this device"
+            iCloudStatusTone = PT.txt3
+            return
+        }
+        switch status {
+        case .available:
+            iCloudStatusText = "Syncing with iCloud"
+            iCloudStatusTone = PT.sage
+        case .restricted:
+            iCloudStatusText = "iCloud restricted"
+            iCloudStatusTone = PT.amber
+        case .noAccount, .couldNotDetermine, .temporarilyUnavailable:
+            iCloudStatusText = "iCloud account not signed in — data stays on this device"
+            iCloudStatusTone = PT.txt3
+        @unknown default:
+            iCloudStatusText = "iCloud account not signed in — data stays on this device"
+            iCloudStatusTone = PT.txt3
+        }
     }
 
     private func retryBackup() {
@@ -322,7 +308,6 @@ struct SettingsView: View {
     }
     .tint(PT.gold)
     .preferredColorScheme(.dark)
-    .environment(AuthenticationManager())
     .environmentObject(CloudImageSyncManager.shared)
     .modelContainer(for: [PurchaseRecord.self, Attachment.self], inMemory: true)
 }
