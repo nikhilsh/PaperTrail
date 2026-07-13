@@ -49,7 +49,11 @@ final class HouseholdSyncEngine {
     /// server record from the error, and the retry succeeds.
     private var serverRecords: [String: CKRecord] = [:]
 
-    init(cache: HouseholdCache = HouseholdCache()) {
+    // .shared, not a fresh HouseholdCache() — the previous default was a
+    // private instance no view could ever observe (latent bug fixed in Phase
+    // 3; see HouseholdCache's doc comment). Tests keep injecting their own
+    // temp-directory cache via this same parameter.
+    init(cache: HouseholdCache = .shared) {
         self.cache = cache
     }
 
@@ -143,8 +147,7 @@ final class HouseholdSyncEngine {
     }
 
     /// Queue removal of a mirrored purchase record (unshare / delete from
-    /// `HouseholdZone`). Attachment un-mirroring follows the same shape but
-    /// isn't wired to any caller yet in Phase 1.
+    /// `HouseholdZone`).
     func unshare(id: UUID) {
         guard HouseholdManager.recordSharingEnabled else { return }
         guard let privateEngine else { return }
@@ -153,6 +156,19 @@ final class HouseholdSyncEngine {
         let recordID = CKRecord.ID(recordName: recordName, zoneID: HouseholdSchema.ownerZoneID)
         privateEngine.state.add(pendingRecordZoneChanges: [.deleteRecord(recordID)])
         AppLogger.info("Queued unshare for purchase record \(id)", category: "cloud.sharing")
+    }
+
+    /// Queue removal of a mirrored attachment (unshare / delete from
+    /// `HouseholdZone`) — same shape as `unshare(id:)` above, wired to
+    /// `HouseholdMirrorCoordinator` in Phase 3.
+    func unshareAttachment(id: UUID) {
+        guard HouseholdManager.recordSharingEnabled else { return }
+        guard let privateEngine else { return }
+        let recordName = HouseholdSchema.RecordName.attachment(id)
+        pendingAttachments.removeValue(forKey: recordName)
+        let recordID = CKRecord.ID(recordName: recordName, zoneID: HouseholdSchema.ownerZoneID)
+        privateEngine.state.add(pendingRecordZoneChanges: [.deleteRecord(recordID)])
+        AppLogger.info("Queued unshare for attachment \(id)", category: "cloud.sharing")
     }
 
     // MARK: - Event handling helpers

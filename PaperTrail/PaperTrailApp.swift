@@ -190,6 +190,7 @@ struct PaperTrailApp: App {
                     if HouseholdManager.recordSharingEnabled {
                         addStartupBreadcrumb(level: .info, category: "cloud.sharing", message: "Starting household sync engines at launch")
                         HouseholdSyncEngine.shared.start()
+                        HouseholdMirrorCoordinator.shared.start()
                     }
                     await CommunityLearning.shared.refreshCommunityHints()
                     CorrectionLogger.onLearningFeedback = { payload in

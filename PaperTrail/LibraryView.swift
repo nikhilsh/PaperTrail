@@ -16,8 +16,18 @@ struct LibraryView: View {
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @State private var sortMode: LibrarySortMode = .newest
 
+    private var householdCache = HouseholdCache.shared
+
     private func attachments(for record: PurchaseRecord) -> [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
+    }
+
+    /// Records mirrored *to* this device by another household member — cache
+    /// DTOs with no matching local `PurchaseRecord`. Excludes the owner's own
+    /// mirrors (those DO have a local record) so this only ever shows what a
+    /// MEMBER sees from the owner.
+    private var sharedWithMe: [SharedPurchaseRecordDTO] {
+        householdCache.purchaseRecords.filter { dto in !records.contains(where: { $0.id == dto.id }) }
     }
 
     private var attentionCount: Int {
@@ -81,6 +91,10 @@ struct LibraryView: View {
                     AttentionBanner(count: attentionCount) {
                         router.selectedTab = .warranty
                     }
+                }
+
+                if HouseholdManager.recordSharingEnabled && !sharedWithMe.isEmpty {
+                    sharedWithMeSection
                 }
 
                 if sortMode == .byRoom {
@@ -199,6 +213,30 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: Shared with me
+
+    private var sharedWithMeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                SectionLabel(text: "Shared with me", tone: PT.gold)
+                Text("\(sharedWithMe.count)")
+                    .font(PTFont.mono(10))
+                    .foregroundStyle(PT.txt3)
+                GoldRule()
+            }
+            VStack(spacing: 0) {
+                ForEach(sharedWithMe) { dto in
+                    NavigationLink {
+                        SharedRecordDetailView(record: dto)
+                    } label: {
+                        SharedRecordRow(record: dto)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func deleteRecord(_ record: PurchaseRecord) {
         let recordAttachments = attachments(for: record)
         let attachmentIDs = recordAttachments.map { $0.id }
@@ -307,6 +345,46 @@ private struct RoomRow: View {
             if returnWindow.status.isClosingSoon {
                 Circle().fill(returnWindow.tone).frame(width: 7, height: 7)
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(PT.txt3)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PT.hair).frame(height: 1)
+        }
+    }
+}
+
+// MARK: - Shared record row ("Shared with me")
+
+/// Row for a record mirrored in from another household member — styled after
+/// `RoomRow`, but reads a `SharedPurchaseRecordDTO` (never a `PurchaseRecord`)
+/// and swaps the trailing chevron area for a household glyph so it reads as
+/// distinct from the owner's own records.
+private struct SharedRecordRow: View {
+    let record: SharedPurchaseRecordDTO
+
+    private var glyph: String { ptGlyph(category: record.category, productName: record.productName) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            GlyphTile(symbol: glyph, size: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.productName)
+                    .font(PTFont.serif(16, weight: 500))
+                    .foregroundStyle(PT.txt)
+                    .lineLimit(1)
+                Text(record.merchantName ?? "Shared item")
+                    .font(PTFont.mono(10))
+                    .foregroundStyle(PT.txt3)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "house.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(PT.gold)
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(PT.txt3)

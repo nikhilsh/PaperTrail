@@ -49,6 +49,11 @@ final class HouseholdManager {
     @ObservationIgnored private lazy var container = CKContainer(identifier: containerID)
     @ObservationIgnored private var cachedShare: CKShare?
 
+    /// True once a zone-wide (or decoy) share has been created/found — used by
+    /// `HouseholdMirrorCoordinator` to gate reconciliation: mirroring only
+    /// makes sense once there's an actual share to mirror into.
+    var hasActiveShare: Bool { cachedShare != nil }
+
     private init() {}
 
     private var privateDB: CKDatabase { container.privateCloudDatabase }

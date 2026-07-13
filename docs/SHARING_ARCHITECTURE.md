@@ -102,6 +102,23 @@ ON mirrors every record; OFF mirrors only records marked shared (per-record
 toggle in record detail, Phase 3). Mirroring is one `PurchaseRecord` +
 its `Attachment` metadata; image assets follow in Phase 4.
 
+**The zone is the source of truth for "is this record shared?"** — no flag is
+persisted on `PurchaseRecord` (no schema change to the load-bearing store). A
+record is shared iff its mirror exists in `HouseholdZone`; the owner's own
+`HouseholdCache` (fed by the private engine fetching the zone) answers the
+question locally, and multiple owner devices converge automatically.
+
+**Mirroring is reconcile-based, not write-path-based.** A
+`HouseholdMirrorCoordinator` listens for `ModelContext.didSave` and app
+foreground, diffs SwiftData records against the cache's view of the zone, and
+queues mirror/unshare deltas — a couple of call sites instead of hooking every
+save path in the UI.
+
+**Members are read-only in v1.** The `CKShare` still grants `.allowReadWrite`
+(so no re-invite later), but member-side editing UI ships in a later phase —
+shared-in records render via a dedicated read-only detail view, never through
+`EditRecordView` (which edits SwiftData models).
+
 ## Feature flag
 
 `HouseholdManager.recordSharingEnabled` stays the master switch, still a

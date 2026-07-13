@@ -47,14 +47,20 @@ struct HouseholdView: View {
 
                 membersCard
 
-                Button { Task { await invite() } } label: {
-                    HStack(spacing: 8) {
-                        if preparing { ProgressView().tint(PT.inkStamp) }
-                        Label("Invite a household member", systemImage: "person.badge.plus")
+                // A member tapping "Invite" would create their OWN zone/share —
+                // wrong, invites only make sense from the owner. Stays visible
+                // on the plain flag-off decoy path (isHouseholdOwner defaults
+                // true there — see HouseholdManager).
+                if manager.isHouseholdOwner || manager.members.isEmpty {
+                    Button { Task { await invite() } } label: {
+                        HStack(spacing: 8) {
+                            if preparing { ProgressView().tint(PT.inkStamp) }
+                            Label("Invite a household member", systemImage: "person.badge.plus")
+                        }
                     }
+                    .buttonStyle(PTGoldButtonStyle())
+                    .disabled(preparing)
                 }
-                .buttonStyle(PTGoldButtonStyle())
-                .disabled(preparing)
 
                 whatTheySeeCard(reminders: reminders)
 
@@ -147,7 +153,10 @@ struct HouseholdView: View {
                 SettingsRow(icon: "books.vertical", iconColor: PT.gold,
                             title: "Share my whole library",
                             subtitle: "All \(records.count) records, proof & warranties",
-                            toggle: Binding(get: { shareWholeLibrary }, set: { shareWholeLibrary = $0 }))
+                            toggle: Binding(get: { shareWholeLibrary }, set: { newValue in
+                                shareWholeLibrary = newValue
+                                Task { await HouseholdMirrorCoordinator.shared.reconcile() }
+                            }))
                 SettingsRowDivider()
                 SettingsRow(icon: "bell", iconColor: PT.gold,
                             title: "Send reminders to everyone",

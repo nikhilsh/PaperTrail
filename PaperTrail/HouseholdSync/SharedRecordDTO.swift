@@ -67,15 +67,15 @@ struct SharedPurchaseRecordDTO: Codable, Sendable, Equatable, Identifiable {
         self.supportNote = supportNote
         self.serialNumber = serialNumber
         self.coverageSummary = coverageSummary
-        self.purchaseDate = purchaseDate
-        self.warrantyExpiryDate = warrantyExpiryDate
+        self.purchaseDate = purchaseDate?.householdWireQuantized
+        self.warrantyExpiryDate = warrantyExpiryDate?.householdWireQuantized
         self.amount = amount
         self.tagsRaw = tagsRaw
         self.returnWindowDays = returnWindowDays
         self.isRegistered = isRegistered
         self.productImageAttachmentID = productImageAttachmentID
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+        self.createdAt = createdAt.householdWireQuantized
+        self.updatedAt = updatedAt.householdWireQuantized
     }
 
     /// Mirror a local `PurchaseRecord` into a DTO ready to send to
@@ -171,7 +171,7 @@ struct SharedAttachmentDTO: Codable, Sendable, Equatable, Identifiable {
         self.typeRaw = typeRaw
         self.localFilename = localFilename
         self.ocrText = ocrText
-        self.createdAt = createdAt
+        self.createdAt = createdAt.householdWireQuantized
     }
 
     /// `@MainActor` because `Attachment` is a SwiftData `@Model` and the
@@ -200,5 +200,17 @@ struct SharedAttachmentDTO: Codable, Sendable, Equatable, Identifiable {
             ocrText: ocrText,
             createdAt: createdAt
         )
+    }
+}
+
+extension Date {
+    /// All DTO dates are quantized to whole milliseconds at construction.
+    /// DTO equality drives `HouseholdMirrorCoordinator.computeDiff` — if
+    /// CloudKit's wire encoding rounds a timestamp even slightly, a
+    /// full-precision local DTO would never equal its round-tripped cache
+    /// copy and every reconcile would re-mirror the entire library forever.
+    /// Quantizing both sides to the same grid makes the comparison stable.
+    var householdWireQuantized: Date {
+        Date(timeIntervalSinceReferenceDate: (timeIntervalSinceReferenceDate * 1000).rounded() / 1000)
     }
 }

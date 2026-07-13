@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import Observation
 
 /// Local persistence for records shared TO this device (the member side of
 /// household sharing, and the owner's own bookkeeping of `CKSyncEngine`
@@ -11,8 +12,19 @@ import Foundation
 ///
 /// Kept dependency-free (no CKContainer, no network) so it's trivially
 /// unit-testable: inject the directory URL in `init`.
+///
+/// `@Observable` (Phase 3) so views (`LibraryView`'s "Shared with me" section,
+/// `RecordDetailView`'s share toggle) re-render as mirrored/shared-in records
+/// change. `HouseholdSyncEngine`'s default-argument `HouseholdCache` used to be
+/// a private, unobservable instance no view could ever see — `.shared` fixes
+/// that; tests keep injecting their own temp-directory instance via `init`.
 @MainActor
+@Observable
 final class HouseholdCache {
+
+    /// The instance every view and sync engine should use. See the type doc
+    /// above — the previous per-engine private instance was a latent bug.
+    static let shared = HouseholdCache()
 
     private let directoryURL: URL
     private let purchaseRecordsFileURL: URL
@@ -84,6 +96,18 @@ final class HouseholdCache {
     func removeAttachment(id: UUID) {
         attachments.removeAll { $0.id == id }
         save()
+    }
+
+    /// Look up a mirrored purchase record by id — used by the per-record share
+    /// toggle (`RecordDetailView`) to answer "is this record shared?" without
+    /// the caller reaching into `purchaseRecords` directly.
+    func purchaseRecord(id: UUID) -> SharedPurchaseRecordDTO? {
+        purchaseRecords.first { $0.id == id }
+    }
+
+    /// All mirrored attachments for a given purchase record id.
+    func attachments(forRecordID id: UUID) -> [SharedAttachmentDTO] {
+        attachments.filter { $0.recordID == id }
     }
 
     /// Purge everything — used when the household zone is deleted upstream or
