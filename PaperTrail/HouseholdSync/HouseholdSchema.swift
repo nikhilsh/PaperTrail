@@ -55,8 +55,9 @@ enum HouseholdSchema {
         case updatedAt
     }
 
-    /// Field keys mirroring `Attachment` 1:1. No image bytes in Phase 1 — a
-    /// `CKAsset` field arrives in Phase 4.
+    /// Field keys mirroring `Attachment` 1:1, plus `asset` (Phase 4) — the
+    /// `CKAsset` field carrying the attachment's image, uploaded/downloaded
+    /// alongside the metadata below rather than through `CloudImageSyncManager`.
     enum AttachmentField: String {
         case id
         // "recordID" is a CKRecord reserved key name (NSInvalidArgumentException
@@ -66,6 +67,7 @@ enum HouseholdSchema {
         case localFilename
         case ocrText
         case createdAt
+        case asset
     }
 
     /// Deterministic `CKRecord.ID` record names, mirroring

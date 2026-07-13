@@ -148,9 +148,16 @@ All new code paths check it; the decoy-share behavior remains the fallback so
    member-side engine start.
 3. **UI** — per-record share toggle, whole-library toggle wiring, "Shared with
    me" Library section, shared-record detail (read/edit), ownership badges.
-4. **Images + hardening** — `CKAsset` images on `SharedAttachment`, conflict
-   polish, departure cleanup, Sentry breadcrumb sweep, device-verification
-   checklist.
+4. **Images + hardening** — images ride as a `CKAsset` field (`asset`) on
+   `SharedAttachment`. The owner's own private engine skips re-downloading
+   originals it already has on disk (`Documents/Attachments/<localFilename>`);
+   `HouseholdCache` stores everyone else's copies under its own `images/`
+   directory, keyed by attachment id. `SharedRecordDetailView` shows a
+   thumbnail once the asset lands, and a "syncing" caption fallback per
+   attachment until then. Also: zone-save/delete failure logging
+   (`.sentDatabaseChanges`), stuck-queue diagnostics in
+   `nextRecordZoneChangeBatch`. Conflict polish and departure cleanup remain
+   open for device testing.
 
 ## On-device verification checklist (per phase; CI only proves compilation)
 

@@ -167,4 +167,76 @@ struct HouseholdCacheTests {
         cache.setStateData(nil, for: .privateDB)
         #expect(cache.stateData(for: .privateDB) == nil)
     }
+
+    // MARK: - Shared images (Phase 4)
+
+    private func makeTempImageFile() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("HouseholdCacheTests-source-\(UUID().uuidString).jpg")
+        try? Data("fake-jpeg-bytes".utf8).write(to: url)
+        return url
+    }
+
+    @Test @MainActor func storeImageRoundTripsThroughImageURL() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        let attachmentID = UUID()
+        let sourceURL = makeTempImageFile()
+
+        #expect(cache.imageURL(attachmentID: attachmentID) == nil)
+
+        cache.storeImage(from: sourceURL, attachmentID: attachmentID)
+
+        let storedURL = cache.imageURL(attachmentID: attachmentID)
+        #expect(storedURL != nil)
+        if let storedURL {
+            #expect(FileManager.default.fileExists(atPath: storedURL.path))
+            #expect(try? Data(contentsOf: storedURL) == Data("fake-jpeg-bytes".utf8))
+        }
+
+        cache.removeImage(attachmentID: attachmentID)
+        #expect(cache.imageURL(attachmentID: attachmentID) == nil)
+    }
+
+    @Test @MainActor func storeImageReplacesExistingFile() throws {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        let attachmentID = UUID()
+
+        cache.storeImage(from: makeTempImageFile(), attachmentID: attachmentID)
+        let firstURL = try #require(cache.imageURL(attachmentID: attachmentID))
+        #expect(try? Data(contentsOf: firstURL) == Data("fake-jpeg-bytes".utf8))
+
+        let secondSource = FileManager.default.temporaryDirectory.appendingPathComponent("HouseholdCacheTests-source-\(UUID().uuidString).jpg")
+        try? Data("different-bytes".utf8).write(to: secondSource)
+        cache.storeImage(from: secondSource, attachmentID: attachmentID)
+
+        let secondURL = try #require(cache.imageURL(attachmentID: attachmentID))
+        #expect(try? Data(contentsOf: secondURL) == Data("different-bytes".utf8))
+    }
+
+    @Test @MainActor func removeAttachmentAlsoRemovesItsImage() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        let attachment = sampleAttachmentDTO()
+        cache.upsert(attachment)
+        cache.storeImage(from: makeTempImageFile(), attachmentID: attachment.id)
+        #expect(cache.imageURL(attachmentID: attachment.id) != nil)
+
+        cache.removeAttachment(id: attachment.id)
+
+        #expect(cache.imageURL(attachmentID: attachment.id) == nil)
+    }
+
+    @Test @MainActor func removeAllPurgesImagesDirectory() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        let attachment = sampleAttachmentDTO()
+        cache.upsert(attachment)
+        cache.storeImage(from: makeTempImageFile(), attachmentID: attachment.id)
+        #expect(cache.imageURL(attachmentID: attachment.id) != nil)
+
+        cache.removeAll()
+
+        #expect(cache.imageURL(attachmentID: attachment.id) == nil)
+    }
 }

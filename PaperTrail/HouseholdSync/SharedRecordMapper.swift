@@ -106,22 +106,33 @@ enum SharedRecordMapper {
 
     // MARK: - Attachment
 
-    static func makeCKRecord(from dto: SharedAttachmentDTO, zoneID: CKRecordZone.ID) -> CKRecord {
+    static func makeCKRecord(from dto: SharedAttachmentDTO, zoneID: CKRecordZone.ID, assetFileURL: URL? = nil) -> CKRecord {
         let recordID = CKRecord.ID(recordName: HouseholdSchema.RecordName.attachment(dto.id), zoneID: zoneID)
         let record = CKRecord(recordType: HouseholdSchema.RecordType.attachment, recordID: recordID)
-        apply(dto, to: record)
+        apply(dto, to: record, assetFileURL: assetFileURL)
         return record
     }
 
     /// See `apply(_:to:)` on the purchase-record side — same nil-clearing
-    /// contract, needed when updating a previously-fetched server record.
-    static func apply(_ dto: SharedAttachmentDTO, to record: CKRecord) {
+    /// contract for the metadata fields, needed when updating a
+    /// previously-fetched server record. `assetFileURL` is the one
+    /// deliberate exception: unlike every other optional field, passing
+    /// `nil` does NOT clear a previously-uploaded `asset`. The local image
+    /// file isn't always at hand when this is called (e.g. re-applying a
+    /// DTO onto the server record during a conflict retry, or on a device
+    /// that only has the metadata so far) — clearing the field then would
+    /// strip an already-uploaded image every time we resend metadata-only
+    /// changes. Only a non-nil URL ever touches the field.
+    static func apply(_ dto: SharedAttachmentDTO, to record: CKRecord, assetFileURL: URL? = nil) {
         record[HouseholdSchema.AttachmentField.id.rawValue] = dto.id.uuidString as CKRecordValue
         record[HouseholdSchema.AttachmentField.typeRaw.rawValue] = dto.typeRaw as CKRecordValue
         record[HouseholdSchema.AttachmentField.localFilename.rawValue] = dto.localFilename as CKRecordValue
         record[HouseholdSchema.AttachmentField.createdAt.rawValue] = dto.createdAt as CKRecordValue
         record[HouseholdSchema.AttachmentField.recordID.rawValue] = dto.recordID.map { $0.uuidString as CKRecordValue }
         record[HouseholdSchema.AttachmentField.ocrText.rawValue] = dto.ocrText.map { $0 as CKRecordValue }
+        if let assetFileURL {
+            record[HouseholdSchema.AttachmentField.asset.rawValue] = CKAsset(fileURL: assetFileURL)
+        }
     }
 
     static func makeAttachmentDTO(from record: CKRecord) -> SharedAttachmentDTO? {

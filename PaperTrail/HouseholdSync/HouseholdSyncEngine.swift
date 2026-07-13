@@ -191,10 +191,31 @@ final class HouseholdSyncEngine {
         case HouseholdSchema.RecordType.attachment:
             if let dto = SharedRecordMapper.makeAttachmentDTO(from: record) {
                 cache.upsert(dto)
+                storeSharedImageIfNeeded(dto: dto, record: record)
             }
         default:
             AppLogger.warn("Fetched unknown record type \(record.recordType)", category: "cloud.sharing")
         }
+    }
+
+    /// After upserting a fetched `SharedAttachment`, pull down its image
+    /// asset (if the record carries one) into `HouseholdCache`'s images
+    /// directory — UNLESS this device already has the original file at
+    /// `Documents/Attachments/<localFilename>`. That skip matters on the
+    /// owner's own device(s): the owner's private engine fetches back the
+    /// records it just mirrored, and without this check every one of its own
+    /// attachment images would get duplicated into the cache dir on every
+    /// fetch.
+    private func storeSharedImageIfNeeded(dto: SharedAttachmentDTO, record: CKRecord) {
+        guard let asset = record[HouseholdSchema.AttachmentField.asset.rawValue] as? CKAsset,
+              let assetFileURL = asset.fileURL else { return }
+        let originalURL = ImageStorageManager.url(for: dto.localFilename)
+        if FileManager.default.fileExists(atPath: originalURL.path) {
+            AppLogger.info("Skipped shared image, original present for attachment \(dto.id)", category: "cloud.sharing")
+            return
+        }
+        cache.storeImage(from: assetFileURL, attachmentID: dto.id)
+        AppLogger.info("Stored shared image for attachment \(dto.id)", category: "cloud.sharing")
     }
 
     private func applyFetchedDeletion(recordID: CKRecord.ID, recordType: CKRecord.RecordType) {
@@ -272,11 +293,16 @@ final class HouseholdSyncEngine {
             return SharedRecordMapper.makeCKRecord(from: dto, zoneID: recordID.zoneID)
         }
         if let dto = pendingAttachments[recordID.recordName] {
+            // Only pass a file URL through if the image is actually on disk —
+            // SharedRecordMapper.apply(_:to:assetFileURL:) treats `nil` as
+            // "leave the existing asset alone", not "clear it".
+            let localImageURL = ImageStorageManager.url(for: dto.localFilename)
+            let assetFileURL = FileManager.default.fileExists(atPath: localImageURL.path) ? localImageURL : nil
             if let base = serverRecords[recordID.recordName] {
-                SharedRecordMapper.apply(dto, to: base)
+                SharedRecordMapper.apply(dto, to: base, assetFileURL: assetFileURL)
                 return base
             }
-            return SharedRecordMapper.makeCKRecord(from: dto, zoneID: recordID.zoneID)
+            return SharedRecordMapper.makeCKRecord(from: dto, zoneID: recordID.zoneID, assetFileURL: assetFileURL)
         }
         return nil
     }
@@ -318,6 +344,23 @@ extension HouseholdSyncEngine: CKSyncEngineDelegate {
                 cache.removeAll()
             }
 
+        case .sentDatabaseChanges(let changes):
+            // Zone-creation failures (`ensureZone()`) are otherwise invisible
+            // — nothing downstream surfaces "the zone never got created", it
+            // just looks like sync silently does nothing.
+            for failure in changes.failedZoneSaves {
+                AppLogger.error(
+                    "Failed to save zone \(failure.zone.zoneID.zoneName): \(failure.error.localizedDescription)",
+                    category: "cloud.sharing"
+                )
+            }
+            for (zoneID, error) in changes.failedZoneDeletes {
+                AppLogger.error(
+                    "Failed to delete zone \(zoneID.zoneName): \(error.localizedDescription)",
+                    category: "cloud.sharing"
+                )
+            }
+
         case .sentRecordZoneChanges(let changes):
             for failure in changes.failedRecordSaves {
                 handleFailedRecordSave(record: failure.record, error: failure.error)
@@ -348,7 +391,17 @@ extension HouseholdSyncEngine: CKSyncEngineDelegate {
         guard !changes.isEmpty else { return nil }
 
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [weak self] recordID in
-            await self?.pendingRecord(for: recordID)
+            guard let record = await self?.pendingRecord(for: recordID) else {
+                // Helps diagnose a stuck queue on-device: CKSyncEngine thinks
+                // this record is pending but we have no DTO for it (e.g. it
+                // was unshared/cleared between being queued and being sent).
+                await AppLogger.info(
+                    "No pending DTO for \(recordID.recordName) in nextRecordZoneChangeBatch",
+                    category: "cloud.sharing"
+                )
+                return nil
+            }
+            return record
         }
     }
 }

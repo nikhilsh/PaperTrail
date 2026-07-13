@@ -4,8 +4,10 @@ import SwiftUI
 /// — see docs/SHARING_ARCHITECTURE.md). Renders a `SharedPurchaseRecordDTO`
 /// straight from `HouseholdCache`, never a SwiftData `PurchaseRecord` — this
 /// view must never be reachable for locally-owned records, and it must never
-/// feed a DTO into `EditRecordView` (members are read-only in v1). Images
-/// aren't mirrored yet (Phase 4); attachments show as metadata rows only.
+/// feed a DTO into `EditRecordView` (members are read-only in v1). Attachment
+/// images (Phase 4) are read from `HouseholdCache.imageURL(attachmentID:)`
+/// when present; an attachment whose asset hasn't arrived yet falls back to
+/// a "syncing" placeholder rather than blocking the rest of the view.
 struct SharedRecordDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -237,7 +239,7 @@ struct SharedRecordDetailView: View {
         }
     }
 
-    // MARK: Proof (metadata only — Phase 4 adds images)
+    // MARK: Proof (images ride as a CKAsset on SharedAttachment — Phase 4)
 
     private var proofSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -256,32 +258,23 @@ struct SharedRecordDetailView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(PT.txt3)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(attachments.enumerated()), id: \.element.id) { index, attachment in
-                        if index > 0 { Rectangle().fill(PT.hair).frame(height: 1) }
-                        HStack(spacing: 10) {
-                            Image(systemName: proofGlyph(attachment.typeRaw))
-                                .font(.system(size: 13))
-                                .foregroundStyle(PT.gold)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(proofLabel(attachment.typeRaw))
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(PT.txt)
-                                Text(attachment.localFilename)
-                                    .font(PTFont.mono(10))
-                                    .foregroundStyle(PT.txt3)
-                                    .lineLimit(1)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(attachments) { attachment in
+                            VStack(spacing: 8) {
+                                SharedProofThumbnail(attachment: attachment)
+                                HStack(spacing: 5) {
+                                    Image(systemName: proofGlyph(attachment.typeRaw))
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(PT.gold)
+                                    Text(proofLabel(attachment.typeRaw))
+                                        .font(.system(size: 10.5))
+                                        .foregroundStyle(PT.txt2)
+                                }
                             }
-                            Spacer(minLength: 8)
                         }
-                        .padding(.vertical, 9)
                     }
                 }
-
-                Text("Images sync arrives in a later update.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(PT.txt3)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
@@ -367,5 +360,49 @@ private extension SharedPurchaseRecordDTO {
         formatter.numberStyle = .currency
         formatter.currencyCode = cur
         return formatter.string(from: NSNumber(value: amount))
+    }
+}
+
+// MARK: - Shared proof thumbnail
+
+/// Styled like `RecordDetailView`'s (private) `ProofThumbnail` — same frame,
+/// dog-ear clip, and hairline border — but reads from `HouseholdCache`'s
+/// images directory instead of `ImageStorageManager`'s, since this attachment
+/// was never saved into this device's own Documents/Attachments. No tap-to-
+/// enlarge here: `ImageViewerView` loads by filename via `ImageStorageManager`
+/// and `CloudImageSyncManager`, neither of which knows about shared-in
+/// attachments, so reusing it isn't trivial — skipped for v1.
+private struct SharedProofThumbnail: View {
+    let attachment: SharedAttachmentDTO
+
+    private var image: UIImage? {
+        guard let url = HouseholdCache.shared.imageURL(attachmentID: attachment.id) else { return nil }
+        return UIImage(contentsOfFile: url.path)
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    PT.inkRaised
+                    VStack(spacing: 4) {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .font(.system(size: 16))
+                        Text("Image syncing…")
+                            .font(.system(size: 8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(PT.txt3)
+                    .padding(.horizontal, 6)
+                }
+            }
+        }
+        .frame(width: 78, height: 104)
+        .clipShape(DogEarShape(radius: 10, ear: 14))
+        .overlay(DogEarShape(radius: 10, ear: 14).stroke(PT.hair, lineWidth: 1))
     }
 }

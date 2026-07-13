@@ -95,6 +95,7 @@ final class HouseholdCache {
 
     func removeAttachment(id: UUID) {
         attachments.removeAll { $0.id == id }
+        removeImage(attachmentID: id)
         save()
     }
 
@@ -115,7 +116,53 @@ final class HouseholdCache {
     func removeAll() {
         purchaseRecords.removeAll()
         attachments.removeAll()
+        try? FileManager.default.removeItem(at: imagesDirectoryURL)
         save()
+    }
+
+    // MARK: - Shared images (Phase 4)
+
+    /// Where shared-in attachment images live, one JPEG per attachment id —
+    /// mirrors `ImageStorageManager`'s `Documents/Attachments/` convention but
+    /// under this cache's own directory (never the app's real Attachments
+    /// folder: these images belong to *other* people's records, not ours).
+    private var imagesDirectoryURL: URL {
+        directoryURL.appendingPathComponent("images", isDirectory: true)
+    }
+
+    private func imageFileURL(attachmentID: UUID) -> URL {
+        imagesDirectoryURL.appendingPathComponent("\(attachmentID.uuidString).jpg")
+    }
+
+    /// Copy a downloaded `CKAsset` file into the cache's images directory,
+    /// keyed by attachment id. Replaces any existing file for that id.
+    func storeImage(from sourceURL: URL, attachmentID: UUID) {
+        do {
+            try FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
+        } catch {
+            AppLogger.error("Failed to create HouseholdCache images directory: \(error.localizedDescription)", category: "cloud.sharing")
+            return
+        }
+        let destinationURL = imageFileURL(attachmentID: attachmentID)
+        do {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        } catch {
+            AppLogger.error("Failed to store shared image for attachment \(attachmentID): \(error.localizedDescription)", category: "cloud.sharing")
+        }
+    }
+
+    /// The on-disk URL for a shared-in attachment's cached image, or `nil` if
+    /// nothing has been stored for it yet.
+    func imageURL(attachmentID: UUID) -> URL? {
+        let url = imageFileURL(attachmentID: attachmentID)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func removeImage(attachmentID: UUID) {
+        try? FileManager.default.removeItem(at: imageFileURL(attachmentID: attachmentID))
     }
 
     // MARK: - Engine state

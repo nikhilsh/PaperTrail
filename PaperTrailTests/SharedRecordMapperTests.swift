@@ -154,6 +154,46 @@ struct SharedRecordMapperTests {
         #expect(record.recordID.recordName == "att-\(id.uuidString)")
     }
 
+    // MARK: - Asset field (Phase 4)
+
+    private func makeTempImageFile() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("SharedRecordMapperTests-\(UUID().uuidString).jpg")
+        try? Data("fake-jpeg-bytes".utf8).write(to: url)
+        return url
+    }
+
+    @Test func applyWithAssetFileURLSetsAssetField() throws {
+        let dto = fullyPopulatedAttachmentDTO()
+        let imageURL = makeTempImageFile()
+        let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID, assetFileURL: imageURL)
+
+        let asset = try #require(record[HouseholdSchema.AttachmentField.asset.rawValue] as? CKAsset)
+        #expect(asset.fileURL != nil)
+
+        // Metadata still round-trips unaffected by the asset field.
+        let decoded = try #require(SharedRecordMapper.makeAttachmentDTO(from: record))
+        #expect(decoded == dto)
+    }
+
+    @Test func applyWithNilAssetFileURLDoesNotClearExistingAsset() throws {
+        let dto = fullyPopulatedAttachmentDTO()
+        let imageURL = makeTempImageFile()
+        let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID, assetFileURL: imageURL)
+        #expect(record[HouseholdSchema.AttachmentField.asset.rawValue] != nil)
+
+        // A later apply without the file handy (assetFileURL defaults to nil)
+        // must NOT strip the asset already on the record — unlike every
+        // other optional field, which does clear on nil.
+        var updated = dto
+        updated.ocrText = "updated text"
+        SharedRecordMapper.apply(updated, to: record)
+
+        let asset = try #require(record[HouseholdSchema.AttachmentField.asset.rawValue] as? CKAsset)
+        #expect(asset.fileURL != nil)
+        let decoded = try #require(SharedRecordMapper.makeAttachmentDTO(from: record))
+        #expect(decoded.ocrText == "updated text")
+    }
+
     // MARK: - DTO ⇄ model conversion
 
     @Test @MainActor func purchaseRecordDTOToModelRoundTrip() throws {
