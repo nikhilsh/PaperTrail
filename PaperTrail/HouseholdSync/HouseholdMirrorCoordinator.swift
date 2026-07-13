@@ -226,7 +226,9 @@ final class HouseholdMirrorCoordinator {
     /// - Deletes fire only for cached records that no longer exist locally at
     ///   all (owner deleted them) — never merely because they fell outside
     ///   `shareWholeLibrary`'s target set.
-    static func computeDiff(
+    // nonisolated: pure function (no actor state) — also lets the sync,
+    // nonisolated unit tests call it directly.
+    nonisolated static func computeDiff(
         localRecords: [SharedPurchaseRecordDTO],
         localAttachments: [SharedAttachmentDTO],
         cachedRecords: [SharedPurchaseRecordDTO],
