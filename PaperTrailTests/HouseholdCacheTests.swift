@@ -239,4 +239,73 @@ struct HouseholdCacheTests {
 
         #expect(cache.imageURL(attachmentID: attachment.id) == nil)
     }
+
+    // MARK: - Batched saves (Fix 8)
+
+    @Test @MainActor func withBatchedSavesMutationsPersistAfterTheBlock() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+
+        let first = samplePurchaseDTO(productName: "First")
+        let second = samplePurchaseDTO(productName: "Second")
+
+        cache.withBatchedSaves {
+            cache.upsert(first)
+            cache.upsert(second)
+        }
+
+        // In-memory state is visible immediately...
+        #expect(cache.purchaseRecords.count == 2)
+
+        // ...and a fresh instance reading from disk sees both, proving the
+        // batch's single trailing save() actually persisted everything
+        // (not just the last mutation, and not zero if save() were
+        // accidentally suppressed forever).
+        let reloaded = HouseholdCache(directoryURL: dir)
+        reloaded.load()
+        #expect(Set(reloaded.purchaseRecords.map(\.id)) == Set([first.id, second.id]))
+    }
+
+    @Test @MainActor func withBatchedSavesStillPersistsWhenBodyMutatesNothing() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        cache.upsert(samplePurchaseDTO())
+
+        // An empty/no-op batch must not leave `suppressSave` stuck true and
+        // silently swallow every subsequent save() call.
+        cache.withBatchedSaves {}
+        cache.upsert(samplePurchaseDTO())
+
+        #expect(cache.purchaseRecords.count == 2)
+    }
+
+    // MARK: - Whole-library setting (Fix 9)
+
+    @Test @MainActor func shareWholeLibrarySettingRoundTripsThroughReload() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        #expect(cache.shareWholeLibrarySetting == nil)
+
+        cache.setShareWholeLibrarySetting(false)
+        #expect(cache.shareWholeLibrarySetting == false)
+
+        let reloaded = HouseholdCache(directoryURL: dir)
+        reloaded.load()
+        #expect(reloaded.shareWholeLibrarySetting == false)
+    }
+
+    @Test @MainActor func removeAllClearsShareWholeLibrarySetting() {
+        let dir = makeTempDirectory()
+        let cache = HouseholdCache(directoryURL: dir)
+        cache.setShareWholeLibrarySetting(true)
+        #expect(cache.shareWholeLibrarySetting == true)
+
+        cache.removeAll()
+
+        #expect(cache.shareWholeLibrarySetting == nil)
+
+        let reloaded = HouseholdCache(directoryURL: dir)
+        reloaded.load()
+        #expect(reloaded.shareWholeLibrarySetting == nil)
+    }
 }

@@ -70,13 +70,57 @@ Both engines persist their `CKSyncEngine.State.Serialization` (from
 `.stateUpdate` events) to disk so sync resumes incrementally across launches.
 Push notifications are handled by CKSyncEngine automatically; we additionally
 call `fetchChanges()` on foreground as a poll fallback (community consensus:
-CloudKit pushes are best-effort).
+CloudKit pushes are best-effort). **See "Before the flag flips" below — push
+notifications are not actually wired up yet**, so today this poll fallback is
+the *only* way either engine learns about changes.
+
+The private engine's fetches are scoped to `HouseholdZone` alone
+(`nextFetchChangesOptions` returns `.zoneIDs([HouseholdSchema.ownerZoneID])`).
+The private database also contains SwiftData's own
+`com.apple.coredata.cloudkit.zone` — without this scoping, the private
+engine's first fetch would download the entire `CD_*` SwiftData mirror into
+its own change-tracking state, alongside the actual household data it cares
+about. The shared engine has no such neighbor (it only ever sees zones
+explicitly shared to this account), so it fetches everything (`.all`).
+
+**Sends rebuild their `CKRecord` from SwiftData at send time, not from a
+queued snapshot.** `mirror(dto:)`/`unshare(id:)` only queue a record ID with
+`CKSyncEngine.state` (which CloudKit already persists durably across a
+relaunch); they do not stash the DTO content anywhere. When the engine
+actually asks for a batch to send (`nextRecordZoneChangeBatch`),
+`pendingRecord(for:)` re-fetches the live `PurchaseRecord`/`Attachment` from
+SwiftData by id and builds the outgoing `CKRecord` from *that*. Two failure
+modes this avoids: (1) an in-memory "pending DTO" map would silently lose the
+write if the app relaunched between queueing and sending — CKSyncEngine's own
+persisted pending-change list would still ask for the record, but the DTO
+content behind it would be gone; (2) a save confirmation for an older edit
+(v1) can never clobber a newer, still-queued edit (v2), because there's no
+stale snapshot sitting in a map to be cleared out by the v1 confirmation —
+the next send just re-reads SwiftData's current state. `pendingRecord(for:)`
+returns `nil` when the local record has since been deleted (the deletion hook
+already queued a `.deleteRecord` for it instead — see "Deletion" below), so a
+now-stale `.saveRecord` pending change sends nothing.
+
+**Confirmation-time cache truth, with rollback on terminal failure.** On
+`.sentRecordZoneChanges`, a `savedRecords` entry is parsed back into a DTO and
+upserted into `HouseholdCache` right there — the cache reflects what CloudKit
+actually confirmed, not an earlier optimistic write that a later edit might
+have superseded. A `failedRecordSaves` entry that isn't a
+`.serverRecordChanged` conflict (i.e. a terminal failure) rolls the
+optimistic cache entry back out (parsed by UUID from the record name) so the
+record looks unmirrored again and the next reconcile retries it, rather than
+the cache silently believing a write succeeded that never did.
+`failedRecordDeletes` is re-queued once per record name per launch, but only
+when the local SwiftData record genuinely no longer exists — otherwise
+something raced and re-queuing the delete would be actively wrong.
 
 **Conflict strategy (v1): server wins, then re-apply pending local edit.** On
 `.serverRecordChanged`, take the server record, overlay any still-pending local
-field changes, re-queue. Field-level merge is deliberately out of scope until
-device testing shows it's needed; `updatedAt` is carried on every record for
-diagnostics.
+field changes, re-queue onto the *originating* engine (private or shared —
+whichever the event came from). If the error carries no server record to
+re-apply onto, log and stop rather than re-queuing into a conflict loop.
+Field-level merge is deliberately out of scope until device testing shows
+it's needed; `updatedAt` is carried on every record for diagnostics.
 
 ## Share lifecycle
 
@@ -93,7 +137,22 @@ diagnostics.
   `container.accept(metadata)` → start the shared engine.
 - **Leave/stop**: member removes self via `UICloudSharingController`; owner
   stopping sharing deletes the zone share. Local mirrors/caches are purged on
-  departure events (`.fetchedDatabaseChanges` zone deletions).
+  departure events (`.fetchedDatabaseChanges` zone deletions) — but ONLY when
+  the deleted zone is actually `HouseholdZone`; the private database also
+  contains SwiftData's own `com.apple.coredata.cloudkit.zone`, and a deletion
+  notification for that (or any other unrelated zone) must never purge this
+  cache. Other zones' deletions are logged and ignored.
+- **Dual-role guard**: a device can be a household OWNER or a household
+  MEMBER, never both. `makeZoneShare()` checks for an existing shared-in zone
+  share first and refuses to create an owned share if one exists — without
+  this, a member creating their own household and a background `refresh()`
+  race could wipe the shared-in cache out from under them.
+- **Account change**: on `.accountChange`, `HouseholdSyncEngine` tears down
+  BOTH engines entirely (not just their cache/state files) and rebuilds them
+  via `start()`, and tells `HouseholdManager` to clear its cached
+  share/roster (`resetForAccountChange()`). Leaving the old engine objects
+  alive after an account switch meant their next `.stateUpdate` would write
+  the OLD account's serialization right back to disk.
 
 ## What gets shared
 
@@ -101,6 +160,33 @@ The existing `@AppStorage("household.shareWholeLibrary")` toggle becomes real:
 ON mirrors every record; OFF mirrors only records marked shared (per-record
 toggle in record detail, Phase 3). Mirroring is one `PurchaseRecord` +
 its `Attachment` metadata; image assets follow in Phase 4.
+
+**The whole-library policy itself is zone-resident, not per-device.** A
+per-device `UserDefaults` toggle alone would leak: if the owner sets
+selective sharing on device A, device B's own local default (`true`) would
+silently start mirroring the whole library the next time device B reconciles
+— an *un-consented* share. A singleton `HouseholdSettings` record
+(`household-settings`, no id suffix — one per zone) carries the real,
+zone-wide policy; `HouseholdCache.shareWholeLibrarySetting: Bool?` mirrors it
+locally, and `HouseholdMirrorCoordinator.effectiveShareWholeLibrary()` is
+what reconcile actually uses:
+- settings record has arrived (`shareWholeLibrarySetting` non-nil) →
+  authoritative, full stop.
+- no settings record yet, cache empty → brand-new share, safe to fall back to
+  this device's own local toggle.
+- no settings record yet, cache non-empty → some other device has state this
+  one hasn't fetched — default to **not** auto-mirroring new records rather
+  than guessing, since guessing "on" could re-share something another device
+  deliberately narrowed.
+
+The settings record isn't DTO-backed like purchase records/attachments —
+`HouseholdSyncEngine.mirrorSettings(shareWholeLibrary:)` just queues the
+write, and `pendingRecord(for:)` builds its content from `UserDefaults`'s
+current value at send time (via
+`HouseholdMirrorCoordinator.localShareWholeLibraryDefault()`), same
+always-current durability story as the DTO-backed sends. `makeZoneShare()`
+seeds the settings record immediately after creating a brand-new share, so
+a second owner device never has to guess from an empty cache.
 
 **The zone is the source of truth for "is this record shared?"** — no flag is
 persisted on `PurchaseRecord` (no schema change to the load-bearing store). A
@@ -111,8 +197,25 @@ question locally, and multiple owner devices converge automatically.
 **Mirroring is reconcile-based, not write-path-based.** A
 `HouseholdMirrorCoordinator` listens for `ModelContext.didSave` and app
 foreground, diffs SwiftData records against the cache's view of the zone, and
-queues mirror/unshare deltas — a couple of call sites instead of hooking every
-save path in the UI.
+queues mirror deltas — a couple of call sites instead of hooking every save
+path in the UI. Reconcile fetches SwiftData with a real `do`/`catch`, not
+`(try? ...) ?? []`: a fetch *failure* must never be treated as an empty
+library — it just aborts that reconcile pass and lets the next trigger retry.
+
+**Deletion requires positive evidence — it is never inferred from the
+reconcile diff.** `computeDiff` produces upserts only (`Diff` has no delete
+fields). Earlier revisions treated "present in the cache but absent from the
+local SwiftData fetch" as "the owner deleted it" and queued an unshare for
+the whole set — but that's indistinguishable from a partial/empty local
+library: a second owner device before its first sync, a fresh reinstall, or a
+transient `context.fetch` error all look exactly like "deleted everything,"
+and would mass-unshare the entire household zone. Deletion instead flows
+through two explicit hooks on `HouseholdMirrorCoordinator`,
+`recordDeleted(recordID:attachmentIDs:)` and `attachmentDeleted(id:)`, called
+directly from the app's actual delete call sites
+(`RecordDetailView.deleteRecord()`, `LibraryView.deleteRecord(_:)`) — a real
+`modelContext.delete` is the only evidence that ever removes a mirror from
+`HouseholdZone`.
 
 **Members are read-only in v1.** The `CKShare` still grants `.allowReadWrite`
 (so no re-invite later), but member-side editing UI ships in a later phase —
@@ -158,6 +261,37 @@ All new code paths check it; the decoy-share behavior remains the fallback so
    (`.sentDatabaseChanges`), stuck-queue diagnostics in
    `nextRecordZoneChangeBatch`. Conflict polish and departure cleanup remain
    open for device testing.
+
+## Before the flag flips — required setup
+
+**Push notifications are not configured.** There is no `aps-environment`
+entitlement and no `remote-notification` background mode in this app today —
+CKSyncEngine never receives a silent push telling it something changed. In
+practice this means sync currently only happens on app launch/foreground (the
+`fetchChanges()` poll fallback in `HouseholdMirrorCoordinator`'s foreground
+observer and `PaperTrailApp`'s launch `.task`) — a household member could sit
+in a backgrounded app for an hour and see nothing new until they bring it
+forward. Before `HouseholdManager.recordSharingEnabled` flips to `true` for
+real users, Nik needs to:
+1. Add the **Push Notifications** capability in the Apple Developer portal
+   for the app ID.
+2. Add the `aps-environment` entitlement and the `remote-notification`
+   background mode to the app's entitlements/Info.plist.
+3. Regenerate the Ad Hoc provisioning profile to include the new
+   capability — see the team-ID mismatch warning in
+   [`docs/OTA_DISTRIBUTION.md`](OTA_DISTRIBUTION.md) before touching signing.
+
+This is **deliberately not done in this PR** — entitlement changes risk
+breaking Ad Hoc signing/distribution, and the flag is still `false`, so there
+are no real users depending on push-driven sync yet.
+
+**Known cost, not yet optimized:** shared images double iCloud storage — an
+attachment's `CKAsset` lives once as `ImageAsset` (private, via
+`CloudImageSyncManager`) and again as the `asset` field on `SharedAttachment`
+(inside `HouseholdZone`, Phase 4) — and a metadata-only attachment edit
+(e.g. just the OCR text) re-uploads the full JPEG on the next mirror, because
+`SharedRecordMapper.apply(_:to:assetFileURL:)` has no way to send metadata
+without resending whatever asset accompanies it in the same `CKRecord` save.
 
 ## On-device verification checklist (per phase; CI only proves compilation)
 

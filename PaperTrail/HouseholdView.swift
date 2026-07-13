@@ -153,10 +153,26 @@ struct HouseholdView: View {
                 SettingsRow(icon: "books.vertical", iconColor: PT.gold,
                             title: "Share my whole library",
                             subtitle: "All \(records.count) records, proof & warranties",
-                            toggle: Binding(get: { shareWholeLibrary }, set: { newValue in
-                                shareWholeLibrary = newValue
-                                Task { await HouseholdMirrorCoordinator.shared.reconcile() }
-                            }))
+                            toggle: Binding(
+                                get: {
+                                    // Fix 9: once record sharing is on, the
+                                    // zone-resident settings record is
+                                    // authoritative if it's arrived — a
+                                    // per-device toggle must never silently
+                                    // override another device's choice.
+                                    // Flag off stays byte-identical to before.
+                                    HouseholdManager.recordSharingEnabled
+                                        ? (HouseholdCache.shared.shareWholeLibrarySetting ?? shareWholeLibrary)
+                                        : shareWholeLibrary
+                                },
+                                set: { newValue in
+                                    shareWholeLibrary = newValue
+                                    // shareWholeLibraryChanged no-ops when the
+                                    // flag is off, same as the bare
+                                    // reconcile() call it replaces.
+                                    HouseholdMirrorCoordinator.shared.shareWholeLibraryChanged(newValue)
+                                }
+                            ))
                 SettingsRowDivider()
                 SettingsRow(icon: "bell", iconColor: PT.gold,
                             title: "Send reminders to everyone",

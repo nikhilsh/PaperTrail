@@ -25,6 +25,10 @@ enum HouseholdSchema {
     enum RecordType {
         static let purchaseRecord = "SharedPurchaseRecord"
         static let attachment = "SharedAttachment"
+        /// Zone-resident settings record (Fix 9) — carries policy that must be
+        /// consistent across every owner device, not left to a per-device
+        /// `UserDefaults` toggle. See `HouseholdCache.shareWholeLibrarySetting`.
+        static let settings = "HouseholdSettings"
     }
 
     /// Field keys mirroring `PurchaseRecord` 1:1, minus the two device-local
@@ -75,5 +79,12 @@ enum HouseholdSchema {
     enum RecordName {
         static func purchaseRecord(_ id: UUID) -> String { "rec-\(id.uuidString)" }
         static func attachment(_ id: UUID) -> String { "att-\(id.uuidString)" }
+        /// Singleton settings record — one per zone, no id suffix.
+        static let settings = "household-settings"
+    }
+
+    /// Field keys for the zone-resident `HouseholdSettings` record (Fix 9).
+    enum SettingsField: String {
+        case shareWholeLibrary
     }
 }

@@ -17,6 +17,33 @@ struct HouseholdMember: Identifiable, Hashable {
     let role: HouseholdRole
 }
 
+/// Errors specific to the zone-wide share (flag-on) path — see
+/// `HouseholdManager.makeZoneShare()`.
+enum HouseholdError: LocalizedError {
+    /// Fix 6: dual-role guard. This device is already a household MEMBER
+    /// (found via the shared database); creating a second, owned zone share
+    /// would give one device two roles and risk a raced `refresh()` wiping
+    /// the shared-in cache.
+    case alreadyInHousehold
+    /// Fix 5: `modifyRecords` didn't return a save result for the share
+    /// record we asked it to save — treat as a failure rather than assuming
+    /// success.
+    case missingShareSaveResult
+    /// Fix 5: the saved record CloudKit handed back wasn't a `CKShare`.
+    case unexpectedShareRecordType
+
+    var errorDescription: String? {
+        switch self {
+        case .alreadyInHousehold:
+            "You're already in a household — leave it before creating your own."
+        case .missingShareSaveResult:
+            "CloudKit didn't confirm the household share was saved."
+        case .unexpectedShareRecordType:
+            "CloudKit returned an unexpected record for the household share."
+        }
+    }
+}
+
 /// Manages the household CKShare (§5) — the CloudKit-sharing primitive that backs
 /// invites and the member roster. It shares a dedicated lightweight "Household"
 /// record (NOT the SwiftData record zone), so it never forks the app's
@@ -71,6 +98,11 @@ final class HouseholdManager {
                     isHouseholdOwner = false
                     members = Self.members(from: share)
                 } else {
+                    // Fix 6: neither lookup found a share — the previous
+                    // code left `cachedShare` stale here, so `hasActiveShare`
+                    // kept lying "true" for the rest of the session after a
+                    // share was deleted/revoked upstream.
+                    cachedShare = nil
                     members = []
                 }
             } else if let share = try await fetchExistingShare() {
@@ -151,6 +183,19 @@ final class HouseholdManager {
             return (share, container)
         }
 
+        // Fix 6: dual-role guard. If this device is already a MEMBER of
+        // someone else's household (found via the shared database),
+        // creating our own zone-wide share here would give one device two
+        // roles — and a later raced `refresh()` (owner-lookup finding the
+        // share we're about to create, member-lookup finding the one we
+        // guarded against) could wipe the shared-in cache out from under it.
+        if try await fetchExistingSharedZoneShare() != nil {
+            let error = HouseholdError.alreadyInHousehold
+            lastError = error.errorDescription
+            AppLogger.error("makeZoneShare: device is already a household member, refusing to create a second share", category: "cloud.sharing")
+            throw error
+        }
+
         try await ensureHouseholdZoneExists()
 
         if let share = try await fetchExistingZoneShare() {
@@ -164,14 +209,50 @@ final class HouseholdManager {
         share[CKShare.SystemFieldKey.title] = "Household" as CKRecordValue
         share.publicPermission = .none
 
-        _ = try await privateDB.modifyRecords(saving: [share], deleting: [])
-        cachedShare = share
+        // Fix 5: `modifyRecords(saving:deleting:)` returns per-record
+        // Results that do NOT throw on a failed save — the call above only
+        // throws for request-level failures (network, auth). Without
+        // checking the per-record result, a rejected share save (e.g. a
+        // conflicting share already exists server-side) looked identical to
+        // success: `cachedShare` got set to our local, unsaved `CKShare`
+        // instance and the caller happily presented a share sheet for a
+        // share CloudKit never actually created.
+        let modifyResult = try await privateDB.modifyRecords(saving: [share], deleting: [])
+        guard let saveResult = modifyResult.saveResults[share.recordID] else {
+            let error = HouseholdError.missingShareSaveResult
+            lastError = error.errorDescription
+            AppLogger.error("makeZoneShare: CloudKit returned no save result for the share record", category: "cloud.sharing")
+            throw error
+        }
+        let savedRecord: CKRecord
+        do {
+            savedRecord = try saveResult.get()
+        } catch {
+            lastError = error.localizedDescription
+            AppLogger.error("makeZoneShare: failed to save zone-wide share: \(error.localizedDescription)", category: "cloud.sharing")
+            throw error
+        }
+        guard let savedShare = savedRecord as? CKShare else {
+            let error = HouseholdError.unexpectedShareRecordType
+            lastError = error.errorDescription
+            AppLogger.error("makeZoneShare: saved share record was not a CKShare", category: "cloud.sharing")
+            throw error
+        }
+
+        // Use the RETURNED server share (carries the real change tag), not
+        // the local `share` instance we constructed above.
+        cachedShare = savedShare
         isHouseholdOwner = true
-        members = Self.members(from: share)
+        members = Self.members(from: savedShare)
 
         await migrateDecoyShareIfNeeded()
 
-        return (share, container)
+        // Fix 9: seed the zone-resident settings record from day one, so a
+        // second owner device (or this same device after a relaunch) never
+        // has to guess the policy from an empty cache.
+        HouseholdSyncEngine.shared.mirrorSettings(shareWholeLibrary: HouseholdMirrorCoordinator.localShareWholeLibraryDefault())
+
+        return (savedShare, container)
     }
 
     private func ensureHouseholdZoneExists() async throws {
@@ -232,13 +313,37 @@ final class HouseholdManager {
             if let shareRef = root.share {
                 toDelete.append(shareRef.recordID)
             }
-            _ = try await privateDB.modifyRecords(saving: [], deleting: toDelete)
-            AppLogger.info("Migrated decoy household-root record to zone-wide share", category: "cloud.sharing")
+            // Fix 5: check per-record delete results (log-accurate) — still
+            // non-fatal either way, this function never throws.
+            let modifyResult = try await privateDB.modifyRecords(saving: [], deleting: toDelete)
+            let failures = modifyResult.deleteResults.compactMapValues { result -> Error? in
+                if case .failure(let error) = result { return error }
+                return nil
+            }
+            if failures.isEmpty {
+                AppLogger.info("Migrated decoy household-root record to zone-wide share", category: "cloud.sharing")
+            } else {
+                for (recordID, error) in failures {
+                    AppLogger.error("Decoy household-root migration: failed to delete \(recordID.recordName): \(error.localizedDescription)", category: "cloud.sharing")
+                }
+            }
         } catch let ckError as CKError where ckError.code == .unknownItem {
             // No decoy record to migrate — nothing to do.
         } catch {
             AppLogger.error("Decoy household-root migration failed (non-fatal): \(error.localizedDescription)", category: "cloud.sharing")
         }
+    }
+
+    /// Fix 7: called from `HouseholdSyncEngine.resetLocalState()` on
+    /// `.accountChange`. The previous account's cached share/roster must not
+    /// survive into the new account's session — without this, `refresh()`
+    /// wouldn't run again until something happened to trigger it, and until
+    /// then every `hasActiveShare`/`isHouseholdOwner` check would keep
+    /// answering with the OLD account's state.
+    func resetForAccountChange() {
+        cachedShare = nil
+        members = []
+        isHouseholdOwner = true
     }
 
     private static func members(from share: CKShare) -> [HouseholdMember] {

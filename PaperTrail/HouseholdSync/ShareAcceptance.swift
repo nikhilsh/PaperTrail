@@ -43,7 +43,9 @@ final class PaperTrailSceneDelegate: NSObject, UIWindowSceneDelegate {
 
 private func handleShareAcceptance(metadata: CKShare.Metadata, source: String) {
     guard HouseholdManager.recordSharingEnabled else {
-        AppLogger.info("Share link tapped but record sharing disabled (\(source))", category: "cloud.sharing")
+        // Fix 10: a user hit a dead end tapping a real invite link — this
+        // must be self-diagnosing from Sentry, not OSLog-only.
+        AppLogger.error("Share link tapped but record sharing disabled (\(source))", category: "cloud.sharing")
         return
     }
     AppLogger.info("Share link tapped, accepting household invite (\(source))", category: "cloud.sharing")

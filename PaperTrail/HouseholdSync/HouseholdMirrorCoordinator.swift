@@ -16,11 +16,20 @@ final class HouseholdMirrorCoordinator {
 
     /// Pure diff output — see `computeDiff`. No CloudKit/SwiftData types here
     /// so it's trivially unit-testable.
-    struct Diff: Equatable {
+    ///
+    /// **Deletion is not part of this diff.** Earlier versions inferred a
+    /// delete from "cached but not in the local SwiftData fetch," which is
+    /// indistinguishable from a partial/empty local library (a second owner
+    /// device before its first full sync, a reinstall, or a transient
+    /// `context.fetch` error) — that bug mass-unshared an entire household
+    /// zone from a merely-empty read. Deletion now requires **positive
+    /// evidence**: an actual local delete, routed through the explicit hooks
+    /// below (`recordDeleted`, `attachmentDeleted`), called directly from the
+    /// app's delete call sites (`RecordDetailView`, `LibraryView`). This type
+    /// only ever adds things to the zone.
+    nonisolated struct Diff: Equatable {
         var recordUpserts: [SharedPurchaseRecordDTO] = []
-        var recordDeletes: [UUID] = []
         var attachmentUpserts: [SharedAttachmentDTO] = []
-        var attachmentDeletes: [UUID] = []
     }
 
     private static let shareWholeLibraryDefaultsKey = "household.shareWholeLibrary"
@@ -109,9 +118,22 @@ final class HouseholdMirrorCoordinator {
             return
         }
 
+        // do/catch, not `(try? ...) ?? []`: a fetch FAILURE must never be
+        // treated as an empty library. `?? []` made every field-error /
+        // transient SwiftData hiccup look identical to "user deleted
+        // everything," which fed straight into a mass unshare. Bail out of
+        // this reconcile pass entirely and let the next trigger (debounced
+        // save, foreground, or the periodic poll) retry.
         let context = PaperTrailModelContainer.shared.mainContext
-        let localRecordModels = (try? context.fetch(FetchDescriptor<PurchaseRecord>())) ?? []
-        let localAttachmentModels = (try? context.fetch(FetchDescriptor<Attachment>())) ?? []
+        let localRecordModels: [PurchaseRecord]
+        let localAttachmentModels: [Attachment]
+        do {
+            localRecordModels = try context.fetch(FetchDescriptor<PurchaseRecord>())
+            localAttachmentModels = try context.fetch(FetchDescriptor<Attachment>())
+        } catch {
+            AppLogger.error("Reconcile aborted: SwiftData fetch failed: \(error.localizedDescription)", category: "cloud.sharing")
+            return
+        }
 
         let localRecords = localRecordModels.map { SharedPurchaseRecordDTO(record: $0) }
         let localAttachments = localAttachmentModels.map { SharedAttachmentDTO(attachment: $0) }
@@ -122,44 +144,78 @@ final class HouseholdMirrorCoordinator {
             localAttachments: localAttachments,
             cachedRecords: cache.purchaseRecords,
             cachedAttachments: cache.attachments,
-            shareWholeLibrary: Self.shareWholeLibrary()
+            shareWholeLibrary: Self.effectiveShareWholeLibrary()
         )
 
         apply(diff)
 
         AppLogger.info(
-            "Reconcile: \(diff.recordUpserts.count) record upserts, \(diff.recordDeletes.count) record deletes, "
-                + "\(diff.attachmentUpserts.count) attachment upserts, \(diff.attachmentDeletes.count) attachment deletes",
+            "Reconcile: \(diff.recordUpserts.count) record upserts, \(diff.attachmentUpserts.count) attachment upserts",
             category: "cloud.sharing"
         )
     }
 
     private func apply(_ diff: Diff) {
         let cache = HouseholdCache.shared
-        for dto in diff.recordUpserts {
-            HouseholdSyncEngine.shared.mirror(dto: dto)
-            cache.upsert(dto)
-        }
-        for id in diff.recordDeletes {
-            HouseholdSyncEngine.shared.unshare(id: id)
-            cache.removePurchaseRecord(id: id)
-        }
-        for dto in diff.attachmentUpserts {
-            HouseholdSyncEngine.shared.mirror(dto: dto)
-            cache.upsert(dto)
-        }
-        for id in diff.attachmentDeletes {
-            HouseholdSyncEngine.shared.unshareAttachment(id: id)
-            cache.removeAttachment(id: id)
+        cache.withBatchedSaves {
+            for dto in diff.recordUpserts {
+                HouseholdSyncEngine.shared.mirror(dto: dto)
+                cache.upsert(dto)
+            }
+            for dto in diff.attachmentUpserts {
+                HouseholdSyncEngine.shared.mirror(dto: dto)
+                cache.upsert(dto)
+            }
         }
     }
 
     /// `UserDefaults.bool(forKey:)` returns `false` when the key is unset, but
     /// `HouseholdView`'s `@AppStorage("household.shareWholeLibrary")` default
     /// is `true` — read via `object(forKey:)` to preserve that default instead
-    /// of silently treating "never opened Settings" as "share nothing".
-    private static func shareWholeLibrary() -> Bool {
+    /// of silently treating "never opened Settings" as "share nothing". Not
+    /// `private`: `HouseholdSyncEngine`'s zone-resident settings-record
+    /// builder (`mirrorSettings`/`pendingRecord(for:)`) reads this same
+    /// helper so the record's local-default fallback and this toggle's own
+    /// default can never diverge (Fix 9).
+    static func localShareWholeLibraryDefault() -> Bool {
         (UserDefaults.standard.object(forKey: shareWholeLibraryDefaultsKey) as? Bool) ?? true
+    }
+
+    /// The policy actually used to decide what mirrors (Fix 9 — see
+    /// docs/SHARING_ARCHITECTURE.md "zone-resident settings"). A per-device
+    /// `UserDefaults` toggle must never let one owner device silently
+    /// override another's choice once a share exists, so the zone-resident
+    /// `HouseholdSettings` record (mirrored from whichever device set it) is
+    /// authoritative once it's arrived. Until then: an empty cache means this
+    /// is a brand-new share — safe to fall back to this device's own local
+    /// toggle. A non-empty cache with no settings record yet means some other
+    /// device already has state we haven't fetched — default to NOT
+    /// auto-mirroring new records rather than guessing, since guessing "on"
+    /// could re-share something another device deliberately narrowed.
+    private static func effectiveShareWholeLibrary() -> Bool {
+        let cache = HouseholdCache.shared
+        if let setting = cache.shareWholeLibrarySetting {
+            return setting
+        }
+        if !cache.purchaseRecords.isEmpty {
+            return false
+        }
+        return localShareWholeLibraryDefault()
+    }
+
+    /// Called when the owner explicitly flips the whole-library toggle
+    /// (`HouseholdView`). Optimistically records the new policy in the cache
+    /// (so `effectiveShareWholeLibrary()` reflects it immediately, without
+    /// waiting on a round trip), queues the zone-resident settings record
+    /// write, then reconciles so the new policy takes effect right away.
+    /// No-op when record sharing is disabled — matches the pre-Fix-9
+    /// behavior of a bare `reconcile()` call, which itself no-ops when the
+    /// flag is off.
+    func shareWholeLibraryChanged(_ newValue: Bool) {
+        guard HouseholdManager.recordSharingEnabled else { return }
+        HouseholdCache.shared.setShareWholeLibrarySetting(newValue)
+        HouseholdSyncEngine.shared.mirrorSettings(shareWholeLibrary: newValue)
+        Task { await reconcile() }
     }
 
     // MARK: - Explicit per-record actions
@@ -212,10 +268,46 @@ final class HouseholdMirrorCoordinator {
         AppLogger.info("Unshared record \(recordID) (\(mirroredAttachments.count) attachment(s))", category: "cloud.sharing")
     }
 
+    // MARK: - Explicit deletion hooks (Fix 1)
+
+    /// The ONLY path that removes a mirrored record from `HouseholdZone` in
+    /// response to a local delete — deletion requires positive evidence (a
+    /// real `modelContext.delete`), never an inference from `computeDiff`.
+    /// Called from the app's two record-delete call sites,
+    /// `RecordDetailView.deleteRecord()` and `LibraryView.deleteRecord(_:)`.
+    /// No-op when record sharing is disabled.
+    func recordDeleted(recordID: UUID, attachmentIDs: [UUID]) {
+        guard HouseholdManager.recordSharingEnabled else { return }
+        HouseholdSyncEngine.shared.unshare(id: recordID)
+        for attachmentID in attachmentIDs {
+            HouseholdSyncEngine.shared.unshareAttachment(id: attachmentID)
+        }
+        let cache = HouseholdCache.shared
+        cache.withBatchedSaves {
+            cache.removePurchaseRecord(id: recordID)
+            for attachmentID in attachmentIDs {
+                cache.removeAttachment(id: attachmentID)
+            }
+        }
+        AppLogger.info("recordDeleted hook: unshared record \(recordID) (\(attachmentIDs.count) attachment(s))", category: "cloud.sharing")
+    }
+
+    /// Single-attachment counterpart to `recordDeleted` — wired wherever the
+    /// app removes one attachment from a record without deleting the whole
+    /// record (no such call site exists in the app today; kept for parity
+    /// with `recordDeleted` and future UI).
+    func attachmentDeleted(id: UUID) {
+        guard HouseholdManager.recordSharingEnabled else { return }
+        HouseholdSyncEngine.shared.unshareAttachment(id: id)
+        HouseholdCache.shared.removeAttachment(id: id)
+        AppLogger.info("attachmentDeleted hook: unshared attachment \(id)", category: "cloud.sharing")
+    }
+
     // MARK: - Pure diff (unit-testable, no CloudKit/SwiftData)
 
-    /// Compute the mirror/unshare delta between the local library and the
-    /// cache's current view of `HouseholdZone`.
+    /// Compute the mirror delta between the local library and the cache's
+    /// current view of `HouseholdZone`. **Upserts only** — see the `Diff`
+    /// doc comment above for why deletion is never inferred here.
     ///
     /// - wholeLibrary ON: every local record is a target.
     /// - wholeLibrary OFF: only records already present in the cache are
@@ -223,9 +315,6 @@ final class HouseholdMirrorCoordinator {
     ///   flipping the toggle OFF must never retroactively unshare records that
     ///   were explicitly shared per-record (only local delete / explicit
     ///   unshare removes a record from the zone).
-    /// - Deletes fire only for cached records that no longer exist locally at
-    ///   all (owner deleted them) — never merely because they fell outside
-    ///   `shareWholeLibrary`'s target set.
     // nonisolated: pure function (no actor state) — also lets the sync,
     // nonisolated unit tests call it directly.
     nonisolated static func computeDiff(
@@ -237,8 +326,11 @@ final class HouseholdMirrorCoordinator {
     ) -> Diff {
         var diff = Diff()
 
-        let localRecordsByID = Dictionary(uniqueKeysWithValues: localRecords.map { ($0.id, $0) })
-        let cachedRecordsByID = Dictionary(uniqueKeysWithValues: cachedRecords.map { ($0.id, $0) })
+        // uniquingKeysWith: a corrupted cache JSON (or a duplicate id in the
+        // local fetch) must not crash reconcile — last-one-wins is a safe,
+        // arbitrary tiebreak for data that's already inconsistent.
+        let localRecordsByID = Dictionary(localRecords.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let cachedRecordsByID = Dictionary(cachedRecords.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
 
         let targetIDs: Set<UUID> = shareWholeLibrary
             ? Set(localRecordsByID.keys)
@@ -251,29 +343,15 @@ final class HouseholdMirrorCoordinator {
             }
         }
 
-        for id in cachedRecordsByID.keys where localRecordsByID[id] == nil {
-            diff.recordDeletes.append(id)
-        }
-
         // Attachments only mirror for records that are both a target AND
-        // still present locally (a record queued for deletion above carries
-        // its attachments with it, handled by the orphan check below).
+        // still present locally.
         let sharedRecordIDs = targetIDs.intersection(localRecordsByID.keys)
-        let cachedAttachmentsByID = Dictionary(uniqueKeysWithValues: cachedAttachments.map { ($0.id, $0) })
-        let localAttachmentsByID = Dictionary(uniqueKeysWithValues: localAttachments.map { ($0.id, $0) })
+        let cachedAttachmentsByID = Dictionary(cachedAttachments.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
 
         for attachment in localAttachments {
             guard let recordID = attachment.recordID, sharedRecordIDs.contains(recordID) else { continue }
             if cachedAttachmentsByID[attachment.id] != attachment {
                 diff.attachmentUpserts.append(attachment)
-            }
-        }
-
-        for cachedAttachment in cachedAttachments {
-            let stillLocal = localAttachmentsByID[cachedAttachment.id] != nil
-            let recordStillShared = cachedAttachment.recordID.map { sharedRecordIDs.contains($0) } ?? false
-            if !stillLocal || !recordStillShared {
-                diff.attachmentDeletes.append(cachedAttachment.id)
             }
         }
 

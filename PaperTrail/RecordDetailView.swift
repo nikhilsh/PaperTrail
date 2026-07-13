@@ -722,6 +722,12 @@ struct RecordDetailView: View {
         NotificationManager.shared.removeReturnWindowReminder(for: record)
         modelContext.delete(record)
 
+        // Fix 1: deletion requires positive evidence, and this IS that
+        // evidence — unshare/purge the household mirror here rather than
+        // letting a reconcile diff infer it from local absence (see
+        // docs/SHARING_ARCHITECTURE.md). No-op when record sharing is off.
+        HouseholdMirrorCoordinator.shared.recordDeleted(recordID: record.id, attachmentIDs: attachmentIDs)
+
         Task {
             for id in attachmentIDs {
                 await cloudImageSync.delete(attachmentID: id)

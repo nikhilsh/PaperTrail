@@ -29,9 +29,20 @@ final class HouseholdCache {
     private let directoryURL: URL
     private let purchaseRecordsFileURL: URL
     private let attachmentsFileURL: URL
+    private let settingsFileURL: URL
 
     private(set) var purchaseRecords: [SharedPurchaseRecordDTO] = []
     private(set) var attachments: [SharedAttachmentDTO] = []
+
+    /// Zone-resident whole-library sharing policy (Fix 9 — see
+    /// docs/SHARING_ARCHITECTURE.md). `nil` means no `HouseholdSettings`
+    /// record has been seen yet (brand-new share, or this device hasn't
+    /// fetched it); callers must not treat that the same as `false`.
+    private(set) var shareWholeLibrarySetting: Bool?
+
+    /// Set by `withBatchedSaves` to coalesce a burst of `upsert`/`remove`
+    /// calls into a single disk write (Fix 8).
+    private var suppressSave = false
 
     // nonisolated: default arguments are evaluated outside the actor, so the
     // initializer chain must be callable from a nonisolated context. Both only
@@ -40,6 +51,7 @@ final class HouseholdCache {
         self.directoryURL = directoryURL
         purchaseRecordsFileURL = directoryURL.appendingPathComponent("purchase-records.json")
         attachmentsFileURL = directoryURL.appendingPathComponent("attachments.json")
+        settingsFileURL = directoryURL.appendingPathComponent("settings.json")
     }
 
     nonisolated static func defaultDirectoryURL() -> URL {
@@ -54,14 +66,29 @@ final class HouseholdCache {
     func load() {
         purchaseRecords = Self.loadJSON(from: purchaseRecordsFileURL) ?? []
         attachments = Self.loadJSON(from: attachmentsFileURL) ?? []
+        shareWholeLibrarySetting = (Self.loadJSON(from: settingsFileURL) as SettingsFile?)?.shareWholeLibrary
     }
 
     /// Persist current in-memory state to disk, creating the directory on
-    /// first save.
+    /// first save. No-op while a `withBatchedSaves` block is running — the
+    /// block calls this once itself when it finishes.
     func save() {
+        guard !suppressSave else { return }
         ensureDirectoryExists()
         Self.saveJSON(purchaseRecords, to: purchaseRecordsFileURL)
         Self.saveJSON(attachments, to: attachmentsFileURL)
+        Self.saveJSON(SettingsFile(shareWholeLibrary: shareWholeLibrarySetting), to: settingsFileURL)
+    }
+
+    /// Coalesce a burst of `upsert`/`remove` calls (e.g. a reconcile pass
+    /// touching many records) into a single disk write, rather than one
+    /// write per mutation (Fix 8 — perf). Mutations are visible in-memory
+    /// immediately either way; only the disk write is batched.
+    func withBatchedSaves(_ body: () -> Void) {
+        suppressSave = true
+        body()
+        suppressSave = false
+        save()
     }
 
     // MARK: - Purchase records
@@ -116,7 +143,20 @@ final class HouseholdCache {
     func removeAll() {
         purchaseRecords.removeAll()
         attachments.removeAll()
+        shareWholeLibrarySetting = nil
         try? FileManager.default.removeItem(at: imagesDirectoryURL)
+        save()
+    }
+
+    // MARK: - Zone-resident settings (Fix 9)
+
+    /// Record the zone's whole-library sharing policy, then persist. Called
+    /// both when a fetched `HouseholdSettings` record lands
+    /// (`HouseholdSyncEngine.applyFetchedModification`) and optimistically
+    /// when the owner flips the toggle locally
+    /// (`HouseholdMirrorCoordinator.shareWholeLibraryChanged`).
+    func setShareWholeLibrarySetting(_ value: Bool?) {
+        shareWholeLibrarySetting = value
         save()
     }
 
@@ -223,6 +263,12 @@ final class HouseholdCache {
 
     private func ensureDirectoryExists() {
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    }
+
+    /// Top-level JSON needs an object, not a bare `Bool?` fragment — this
+    /// small wrapper is `settings.json`'s on-disk shape.
+    private struct SettingsFile: Codable {
+        var shareWholeLibrary: Bool?
     }
 
     private static func loadJSON<T: Decodable>(from url: URL) -> T? {

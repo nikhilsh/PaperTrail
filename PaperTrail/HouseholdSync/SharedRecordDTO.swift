@@ -6,7 +6,7 @@ import Foundation
 /// notification bookkeeping, not shared state. Each device (owner or member)
 /// schedules its own local notifications from whatever copy of the record it
 /// holds, so those two flags never travel over the wire.
-struct SharedPurchaseRecordDTO: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct SharedPurchaseRecordDTO: Codable, Sendable, Equatable, Identifiable {
     var id: UUID
     var productName: String
     var merchantName: String?
@@ -150,7 +150,7 @@ struct SharedPurchaseRecordDTO: Codable, Sendable, Equatable, Identifiable {
 /// (Milestone 4 Phase 1). No image bytes here — a `CKAsset` field arrives in
 /// Phase 4; this DTO only carries the metadata `Attachment` itself stores in
 /// SwiftData.
-struct SharedAttachmentDTO: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct SharedAttachmentDTO: Codable, Sendable, Equatable, Identifiable {
     var id: UUID
     var recordID: UUID?
     var typeRaw: String
@@ -210,7 +210,7 @@ extension Date {
     /// full-precision local DTO would never equal its round-tripped cache
     /// copy and every reconcile would re-mirror the entire library forever.
     /// Quantizing both sides to the same grid makes the comparison stable.
-    var householdWireQuantized: Date {
+    nonisolated var householdWireQuantized: Date {
         Date(timeIntervalSinceReferenceDate: (timeIntervalSinceReferenceDate * 1000).rounded() / 1000)
     }
 }
