@@ -99,6 +99,25 @@ final class HouseholdSyncEngine {
         AppLogger.info("Queued HouseholdZone creation", category: "cloud.sharing")
     }
 
+    /// Poll fallback: ask both engines to fetch changes now. CloudKit push
+    /// notifications drive `CKSyncEngine` automatically, but pushes are
+    /// best-effort, so this is additionally called on app foreground (wired
+    /// in Phase 3) to close any gap. No-op unless record sharing is enabled
+    /// or an engine hasn't been started yet.
+    func fetchChanges() async {
+        guard HouseholdManager.recordSharingEnabled else { return }
+        do {
+            try await privateEngine?.fetchChanges()
+        } catch {
+            AppLogger.error("Private household sync engine fetchChanges failed: \(error.localizedDescription)", category: "cloud.sharing")
+        }
+        do {
+            try await sharedEngine?.fetchChanges()
+        } catch {
+            AppLogger.error("Shared household sync engine fetchChanges failed: \(error.localizedDescription)", category: "cloud.sharing")
+        }
+    }
+
     // MARK: - Outbound mirroring
 
     /// Queue a purchase-record mirror write to `HouseholdZone`.
