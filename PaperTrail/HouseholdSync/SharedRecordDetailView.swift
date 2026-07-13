@@ -17,6 +17,13 @@ struct SharedRecordDetailView: View {
 
     private var householdCache = HouseholdCache.shared
 
+    // Explicit init: the private householdCache stored property would
+    // otherwise demote the synthesized memberwise init to private, making
+    // the view unconstructible from LibraryView.
+    init(record: SharedPurchaseRecordDTO) {
+        self.record = record
+    }
+
     private var current: SharedPurchaseRecordDTO {
         householdCache.purchaseRecord(id: record.id) ?? record
     }
