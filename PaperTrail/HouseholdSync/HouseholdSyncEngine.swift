@@ -150,11 +150,11 @@ final class HouseholdSyncEngine {
         serverRecords[record.recordID.recordName] = record
         switch record.recordType {
         case HouseholdSchema.RecordType.purchaseRecord:
-            if let dto = SharedRecordMapper.makeDTO(from: record) {
+            if let dto = SharedRecordMapper.makePurchaseDTO(from: record) {
                 cache.upsert(dto)
             }
         case HouseholdSchema.RecordType.attachment:
-            if let dto = SharedRecordMapper.makeDTO(from: record) {
+            if let dto = SharedRecordMapper.makeAttachmentDTO(from: record) {
                 cache.upsert(dto)
             }
         default:

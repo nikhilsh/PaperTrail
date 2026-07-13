@@ -42,7 +42,7 @@ struct SharedRecordMapperTests {
     @Test func purchaseRecordFullRoundTrip() throws {
         let dto = fullyPopulatedPurchaseDTO()
         let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID)
-        let decoded = try #require(SharedRecordMapper.makeDTO(from: record))
+        let decoded = try #require(SharedRecordMapper.makePurchaseDTO(from: record))
         #expect(decoded == dto)
     }
 
@@ -54,7 +54,7 @@ struct SharedRecordMapperTests {
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID)
-        let decoded = try #require(SharedRecordMapper.makeDTO(from: record))
+        let decoded = try #require(SharedRecordMapper.makePurchaseDTO(from: record))
         #expect(decoded == dto)
         #expect(decoded.merchantName == nil)
         #expect(decoded.returnWindowDays == nil)
@@ -66,7 +66,7 @@ struct SharedRecordMapperTests {
         let recordID = CKRecord.ID(recordName: "rec-not-a-real-record", zoneID: zoneID)
         let record = CKRecord(recordType: HouseholdSchema.RecordType.purchaseRecord, recordID: recordID)
         // Missing id, productName, createdAt, updatedAt entirely.
-        #expect(SharedRecordMapper.makeDTO(from: record) == nil)
+        #expect(SharedRecordMapper.makePurchaseDTO(from: record) == nil)
     }
 
     @Test func purchaseRecordInvalidIDStringReturnsNil() {
@@ -76,7 +76,7 @@ struct SharedRecordMapperTests {
         record[HouseholdSchema.PurchaseField.productName.rawValue] = "Toaster" as CKRecordValue
         record[HouseholdSchema.PurchaseField.createdAt.rawValue] = Date() as CKRecordValue
         record[HouseholdSchema.PurchaseField.updatedAt.rawValue] = Date() as CKRecordValue
-        #expect(SharedRecordMapper.makeDTO(from: record) == nil)
+        #expect(SharedRecordMapper.makePurchaseDTO(from: record) == nil)
     }
 
     @Test func applyOntoExistingRecordClearsNilledFields() throws {
@@ -95,7 +95,7 @@ struct SharedRecordMapperTests {
         #expect(record[HouseholdSchema.PurchaseField.merchantName.rawValue] == nil)
         #expect(record[HouseholdSchema.PurchaseField.returnWindowDays.rawValue] == nil)
         #expect(record[HouseholdSchema.PurchaseField.productImageAttachmentID.rawValue] == nil)
-        let decoded = try #require(SharedRecordMapper.makeDTO(from: record))
+        let decoded = try #require(SharedRecordMapper.makePurchaseDTO(from: record))
         #expect(decoded == dto)
     }
 
@@ -122,7 +122,7 @@ struct SharedRecordMapperTests {
     @Test func attachmentFullRoundTrip() throws {
         let dto = fullyPopulatedAttachmentDTO()
         let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID)
-        let decoded = try #require(SharedRecordMapper.makeDTO(from: record))
+        let decoded = try #require(SharedRecordMapper.makeAttachmentDTO(from: record))
         #expect(decoded == dto)
     }
 
@@ -134,7 +134,7 @@ struct SharedRecordMapperTests {
             createdAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         let record = SharedRecordMapper.makeCKRecord(from: dto, zoneID: zoneID)
-        let decoded = try #require(SharedRecordMapper.makeDTO(from: record))
+        let decoded = try #require(SharedRecordMapper.makeAttachmentDTO(from: record))
         #expect(decoded == dto)
         #expect(decoded.recordID == nil)
         #expect(decoded.ocrText == nil)
@@ -144,7 +144,7 @@ struct SharedRecordMapperTests {
         let recordID = CKRecord.ID(recordName: "att-not-a-real-record", zoneID: zoneID)
         let record = CKRecord(recordType: HouseholdSchema.RecordType.attachment, recordID: recordID)
         // Missing id, typeRaw, localFilename, createdAt entirely.
-        #expect(SharedRecordMapper.makeDTO(from: record) == nil)
+        #expect(SharedRecordMapper.makeAttachmentDTO(from: record) == nil)
     }
 
     @Test func attachmentDeterministicRecordName() {

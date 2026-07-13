@@ -55,7 +55,7 @@ enum SharedRecordMapper {
     /// Parse a `SharedPurchaseRecordDTO` from a fetched `CKRecord`. Returns
     /// `nil` (and logs) if a required field is missing or malformed; optional
     /// fields tolerate absence.
-    static func makeDTO(from record: CKRecord) -> SharedPurchaseRecordDTO? {
+    static func makePurchaseDTO(from record: CKRecord) -> SharedPurchaseRecordDTO? {
         guard let idString = record[HouseholdSchema.PurchaseField.id.rawValue] as? String,
               let id = UUID(uuidString: idString) else {
             AppLogger.error("Malformed SharedPurchaseRecord: missing/invalid id on \(record.recordID.recordName)", category: "cloud.sharing")
@@ -124,7 +124,7 @@ enum SharedRecordMapper {
         record[HouseholdSchema.AttachmentField.ocrText.rawValue] = dto.ocrText.map { $0 as CKRecordValue }
     }
 
-    static func makeDTO(from record: CKRecord) -> SharedAttachmentDTO? {
+    static func makeAttachmentDTO(from record: CKRecord) -> SharedAttachmentDTO? {
         guard let idString = record[HouseholdSchema.AttachmentField.id.rawValue] as? String,
               let id = UUID(uuidString: idString) else {
             AppLogger.error("Malformed SharedAttachment: missing/invalid id on \(record.recordID.recordName)", category: "cloud.sharing")
