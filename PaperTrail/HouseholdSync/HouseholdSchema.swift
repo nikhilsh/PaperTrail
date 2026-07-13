@@ -59,7 +59,9 @@ enum HouseholdSchema {
     /// `CKAsset` field arrives in Phase 4.
     enum AttachmentField: String {
         case id
-        case recordID
+        // "recordID" is a CKRecord reserved key name (NSInvalidArgumentException
+        // at runtime), so the FK to PurchaseRecord.id travels as purchaseRecordID.
+        case recordID = "purchaseRecordID"
         case typeRaw
         case localFilename
         case ocrText
