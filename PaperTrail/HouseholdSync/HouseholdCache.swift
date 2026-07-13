@@ -21,13 +21,16 @@ final class HouseholdCache {
     private(set) var purchaseRecords: [SharedPurchaseRecordDTO] = []
     private(set) var attachments: [SharedAttachmentDTO] = []
 
-    init(directoryURL: URL = HouseholdCache.defaultDirectoryURL()) {
+    // nonisolated: default arguments are evaluated outside the actor, so the
+    // initializer chain must be callable from a nonisolated context. Both only
+    // touch stored properties / FileManager paths.
+    nonisolated init(directoryURL: URL = HouseholdCache.defaultDirectoryURL()) {
         self.directoryURL = directoryURL
         purchaseRecordsFileURL = directoryURL.appendingPathComponent("purchase-records.json")
         attachmentsFileURL = directoryURL.appendingPathComponent("attachments.json")
     }
 
-    static func defaultDirectoryURL() -> URL {
+    nonisolated static func defaultDirectoryURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport.appendingPathComponent("HouseholdSync", isDirectory: true)
     }
