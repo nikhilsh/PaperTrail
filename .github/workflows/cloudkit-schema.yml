@@ -1,0 +1,70 @@
+# Applies cloudkit/schema.ckdb to the DEVELOPMENT environment of
+# iCloud.nikhilsh.PaperTrail via cktool (needs a macOS runner for Xcode).
+#
+# Production cannot be written programmatically: after this succeeds, someone
+# signs in to the CloudKit Console (icloud.developer.apple.com), opens the
+# container, and clicks "Deploy Schema Changes" to promote development →
+# production. See cloudkit/schema.ckdb header for why (cloudkit.share).
+#
+# Requires repo secret CKTOOL_MANAGEMENT_TOKEN — a CloudKit "management token"
+# created in the Console (Account Settings → Tokens → Manage Tokens → New
+# Management Token). Valid ~1 year.
+
+name: CloudKit schema (development)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  import-schema:
+    runs-on: macos-26
+    env:
+      TEAM_ID: EHW7L3679R
+      CONTAINER_ID: iCloud.nikhilsh.PaperTrail
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Save management token
+        env:
+          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # cktool stores tokens in the keychain; argument form first, stdin
+          # as fallback (flag names have shifted across Xcode releases).
+          xcrun cktool save-token "$CKTOOL_MANAGEMENT_TOKEN" --type management \
+            || printf '%s' "$CKTOOL_MANAGEMENT_TOKEN" | xcrun cktool save-token --type management \
+            || { echo "save-token failed; help follows:"; xcrun cktool save-token --help; exit 1; }
+
+      - name: Validate schema file
+        run: xcrun cktool validate-schema --file cloudkit/schema.ckdb
+
+      - name: Export current development schema (before)
+        run: |
+          xcrun cktool export-schema \
+            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development > dev-schema-before.ckdb || true
+
+      - name: Import schema into development
+        run: |
+          xcrun cktool import-schema \
+            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --file cloudkit/schema.ckdb
+
+      - name: Export development schema (after) and verify
+        run: |
+          xcrun cktool export-schema \
+            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development > dev-schema-after.ckdb
+          for t in cloudkit.share SharedPurchaseRecord SharedAttachment HouseholdSettings; do
+            grep -q "$t" dev-schema-after.ckdb || { echo "MISSING type $t in development schema"; exit 1; }
+          done
+          echo "All household types present in development schema."
+
+      - name: Upload schema snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudkit-schema-snapshots
+          path: |
+            dev-schema-before.ckdb
+            dev-schema-after.ckdb
