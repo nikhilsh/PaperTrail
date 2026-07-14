@@ -58,7 +58,7 @@ final class HouseholdManager {
     /// Master switch for cross-account record visibility (the zone-sharing step).
     /// Off by default: the invite + roster work, but shared devices don't yet see
     /// each other's records until this is verified on a device.
-    static let recordSharingEnabled = false
+    static let recordSharingEnabled = true
 
     private let containerID = "iCloud.nikhilsh.PaperTrail"
     private let householdRecordType = "Household"
