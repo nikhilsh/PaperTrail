@@ -166,6 +166,7 @@ enum PaperTrailModelContainer {
 
 @main
 struct PaperTrailApp: App {
+    @UIApplicationDelegateAdaptor(PaperTrailAppDelegate.self) private var appDelegate
     let modelContainer: ModelContainer
 
     init() {
@@ -186,6 +187,11 @@ struct PaperTrailApp: App {
                     _ = await NotificationManager.shared.requestPermission()
                     await runCloudKitPreflight()
                     await syncCloudImages()
+                    if HouseholdManager.recordSharingEnabled {
+                        addStartupBreadcrumb(level: .info, category: "cloud.sharing", message: "Starting household sync engines at launch")
+                        HouseholdSyncEngine.shared.start()
+                        HouseholdMirrorCoordinator.shared.start()
+                    }
                     await CommunityLearning.shared.refreshCommunityHints()
                     CorrectionLogger.onLearningFeedback = { payload in
                         Task { @MainActor in

@@ -238,11 +238,54 @@ struct RecordDetailView: View {
             }
 
             registrationRow
+
+            householdShareRow
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+    }
+
+    // MARK: Household share toggle (Milestone 4 Phase 3)
+    //
+    // Only the owner can share individual records — a member toggling this
+    // would try to mirror into a zone it doesn't own. Also gated on an active
+    // share existing: sharing into a zone nobody can see yet is a no-op that
+    // would just confuse the toggle's state.
+
+    @ViewBuilder
+    private var householdShareRow: some View {
+        if HouseholdManager.recordSharingEnabled
+            && HouseholdManager.shared.isHouseholdOwner
+            && HouseholdManager.shared.hasActiveShare {
+            Rectangle().fill(PT.hair).frame(height: 1)
+            HStack(spacing: 10) {
+                Image(systemName: "house")
+                    .font(.system(size: 13))
+                    .foregroundStyle(PT.txt3)
+                Text("Household")
+                    .font(.system(size: 13))
+                    .foregroundStyle(PT.txt3)
+                Spacer(minLength: 8)
+                Toggle("", isOn: householdShareBinding)
+                    .labelsHidden()
+                    .tint(PT.sage)
+            }
+        }
+    }
+
+    private var householdShareBinding: Binding<Bool> {
+        Binding(
+            get: { HouseholdCache.shared.purchaseRecord(id: record.id) != nil },
+            set: { isShared in
+                if isShared {
+                    HouseholdMirrorCoordinator.shared.share(recordID: record.id)
+                } else {
+                    HouseholdMirrorCoordinator.shared.unshare(recordID: record.id)
+                }
+            }
+        )
     }
 
     private func detailRow(label: String, value: String) -> some View {
@@ -678,6 +721,12 @@ struct RecordDetailView: View {
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
         modelContext.delete(record)
+
+        // Fix 1: deletion requires positive evidence, and this IS that
+        // evidence — unshare/purge the household mirror here rather than
+        // letting a reconcile diff infer it from local absence (see
+        // docs/SHARING_ARCHITECTURE.md). No-op when record sharing is off.
+        HouseholdMirrorCoordinator.shared.recordDeleted(recordID: record.id, attachmentIDs: attachmentIDs)
 
         Task {
             for id in attachmentIDs {
