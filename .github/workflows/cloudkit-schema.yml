@@ -25,29 +25,52 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Validate schema file
-        env:
-          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
-        run: |
-          xcrun cktool validate-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
-            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
-            --environment development --file cloudkit/schema.ckdb
-
       - name: Export current development schema (before)
         env:
           CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
           xcrun cktool export-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
             --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
-            --environment development > dev-schema-before.ckdb || true
+            --environment development > dev-schema-before.ckdb
 
-      - name: Import schema into development
+      - name: Merge new types into existing schema
+        run: |
+          python3 - <<'PY'
+          import re
+          existing = open('dev-schema-before.ckdb').read()
+          delta = open('cloudkit/schema.ckdb').read()
+          # import-schema REPLACES the whole development schema; a delta-only
+          # file reads as deleting every existing type ("invalid attempt to
+          # delete a record type which is active in a production container").
+          # So: existing schema + any of our blocks it doesn't already have.
+          blocks = re.findall(r'( {4}RECORD TYPE .*?\n {4}\);)', delta, re.S)
+          assert len(blocks) == 4, f"expected 4 blocks in delta, got {len(blocks)}"
+          merged = existing.rstrip() + '\n'
+          for b in blocks:
+              name = re.match(r' {4}RECORD TYPE "?([\w.]+)"?', b).group(1)
+              if re.search(r'RECORD TYPE "?' + re.escape(name) + '"?[ (]', existing):
+                  print('already present, skipping:', name)
+                  continue
+              merged += '\n' + b + '\n'
+              print('adding:', name)
+          open('merged-schema.ckdb', 'w').write(merged)
+          PY
+
+      - name: Validate merged schema
+        env:
+          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
+        run: |
+          xcrun cktool validate-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
+            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --file merged-schema.ckdb
+
+      - name: Import merged schema into development
         env:
           CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
           xcrun cktool import-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
             --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
-            --environment development --file cloudkit/schema.ckdb
+            --environment development --file merged-schema.ckdb
 
       - name: Export development schema (after) and verify
         env:
@@ -62,9 +85,11 @@ jobs:
           echo "All household types present in development schema."
 
       - name: Upload schema snapshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cloudkit-schema-snapshots
           path: |
             dev-schema-before.ckdb
+            merged-schema.ckdb
             dev-schema-after.ckdb
