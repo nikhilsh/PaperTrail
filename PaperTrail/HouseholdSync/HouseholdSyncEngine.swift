@@ -350,9 +350,11 @@ final class HouseholdSyncEngine {
     /// serialization is scoped to the OLD account; simply clearing the cache
     /// and state files left the in-memory `CKSyncEngine` objects alive, and
     /// their very next `.stateUpdate` would write the old account's
-    /// serialization right back to disk. Discard both engines and rebuild
-    /// via `start()` (flag-guarded — it already is) so the new account gets
-    /// fresh, unserialized engines.
+    /// serialization right back to disk. Discard both engines; the caller
+    /// reschedules `start()` outside the delegate callback so the new account
+    /// gets fresh, unserialized engines. Only ever called for
+    /// signOut/switchAccounts — a first-start `.signIn` must NOT reset (see
+    /// the accountChange handler).
     private func resetLocalState() {
         serverRecords.removeAll()
         retriedDeletes.removeAll()
@@ -362,7 +364,10 @@ final class HouseholdSyncEngine {
         privateEngine = nil
         sharedEngine = nil
         HouseholdManager.shared.resetForAccountChange()
-        start()
+        // Deliberately no start() here: this runs inside a CKSyncEngine
+        // delegate event, and CKSyncEngine.init blocks on an internal queue
+        // that's busy delivering that event. The caller schedules the restart
+        // in a detached Task after the event returns.
     }
 
     private static func uuid(fromRecordName recordName: String, prefix: String) -> UUID? {
@@ -453,8 +458,28 @@ extension HouseholdSyncEngine: CKSyncEngineDelegate {
             AppLogger.info("Persisted sync state for \(kind.rawValue)", category: "cloud.sharing")
 
         case .accountChange(let accountChange):
-            AppLogger.warn("CloudKit account changed (\(String(describing: accountChange.changeType))), resetting local sync state", category: "cloud.sharing")
-            resetLocalState()
+            switch accountChange.changeType {
+            case .signIn:
+                // A fresh engine (nil stateSerialization) reports the current
+                // user as .signIn on its very first start. There is no previous
+                // account's data to purge — and resetting here recreated the
+                // engines with nil state, which re-emitted .signIn: an infinite
+                // engine-rebuild loop that hung the main thread (CKSyncEngine's
+                // init blocks on an internal queue that is busy delivering this
+                // very event) and grew memory until the watchdog killed the app
+                // (Sentry APPLE-IOS-8/9, build 25).
+                AppLogger.info("CloudKit account signed in — no reset needed", category: "cloud.sharing")
+            default:
+                // signOut / switchAccounts: purge this account's local sync
+                // state, then rebuild the engines OUTSIDE this delegate
+                // callback — creating a CKSyncEngine synchronously from inside
+                // handleEvent deadlocks (see above).
+                AppLogger.warn("CloudKit account changed (\(String(describing: accountChange.changeType))), resetting local sync state", category: "cloud.sharing")
+                resetLocalState()
+                Task { @MainActor [weak self] in
+                    self?.start()
+                }
+            }
 
         case .fetchedRecordZoneChanges(let changes):
             cache.withBatchedSaves {
