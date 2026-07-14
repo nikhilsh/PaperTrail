@@ -25,35 +25,35 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Save management token
+      - name: Validate schema file
         env:
           CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
-          set -euo pipefail
-          # cktool stores tokens in the keychain; argument form first, stdin
-          # as fallback (flag names have shifted across Xcode releases).
-          xcrun cktool save-token "$CKTOOL_MANAGEMENT_TOKEN" --type management \
-            || printf '%s' "$CKTOOL_MANAGEMENT_TOKEN" | xcrun cktool save-token --type management \
-            || { echo "save-token failed; help follows:"; xcrun cktool save-token --help; exit 1; }
-
-      - name: Validate schema file
-        run: xcrun cktool validate-schema --file cloudkit/schema.ckdb
+          xcrun cktool validate-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
+            --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --file cloudkit/schema.ckdb
 
       - name: Export current development schema (before)
+        env:
+          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
-          xcrun cktool export-schema \
+          xcrun cktool export-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
             --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
             --environment development > dev-schema-before.ckdb || true
 
       - name: Import schema into development
+        env:
+          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
-          xcrun cktool import-schema \
+          xcrun cktool import-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
             --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
             --environment development --file cloudkit/schema.ckdb
 
       - name: Export development schema (after) and verify
+        env:
+          CKTOOL_MANAGEMENT_TOKEN: ${{ secrets.CKTOOL_MANAGEMENT_TOKEN }}
         run: |
-          xcrun cktool export-schema \
+          xcrun cktool export-schema --token "$CKTOOL_MANAGEMENT_TOKEN" \
             --team-id "$TEAM_ID" --container-id "$CONTAINER_ID" \
             --environment development > dev-schema-after.ckdb
           for t in cloudkit.share SharedPurchaseRecord SharedAttachment HouseholdSettings; do
