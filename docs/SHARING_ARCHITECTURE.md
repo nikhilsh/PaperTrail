@@ -264,26 +264,19 @@ All new code paths check it; the decoy-share behavior remains the fallback so
 
 ## Before the flag flips — required setup
 
-**Push notifications are not configured.** There is no `aps-environment`
-entitlement and no `remote-notification` background mode in this app today —
-CKSyncEngine never receives a silent push telling it something changed. In
-practice this means sync currently only happens on app launch/foreground (the
-`fetchChanges()` poll fallback in `HouseholdMirrorCoordinator`'s foreground
-observer and `PaperTrailApp`'s launch `.task`) — a household member could sit
-in a backgrounded app for an hour and see nothing new until they bring it
-forward. Before `HouseholdManager.recordSharingEnabled` flips to `true` for
-real users, Nik needs to:
-1. Add the **Push Notifications** capability in the Apple Developer portal
-   for the app ID.
-2. Add the `aps-environment` entitlement and the `remote-notification`
-   background mode to the app's entitlements/Info.plist.
-3. Regenerate the Ad Hoc provisioning profile to include the new
-   capability — see the team-ID mismatch warning in
-   [`docs/OTA_DISTRIBUTION.md`](OTA_DISTRIBUTION.md) before touching signing.
-
-This is **deliberately not done in this PR** — entitlement changes risk
-breaking Ad Hoc signing/distribution, and the flag is still `false`, so there
-are no real users depending on push-driven sync yet.
+**Push notifications: CONFIGURED (2026-07-14).** The `PUSH_NOTIFICATIONS`
+capability is enabled on the bundle ID, the Ad Hoc profile was regenerated as
+"PaperTrail AdHoc Push" (same cert + devices; the CI secret
+`IOS_PROFILE_BASE64` was rotated, and the previous profile is backed up under
+`/root/.appstoreconnect/backups/` on the dev box), and this branch adds the
+`aps-environment` entitlement + `remote-notification` background mode.
+CKSyncEngine registers for and handles the silent CloudKit pushes itself — no
+app-side push code is needed. Two things remain unverifiable off-device:
+1. The first post-merge Ad Hoc OTA build proves signing against the new
+   profile (the TestFlight lane self-heals via `-allowProvisioningUpdates`).
+2. Actual push-driven sync (background silent push → engine fetch) is part of
+   the on-device checklist below. The launch/foreground `fetchChanges()` poll
+   remains as the fallback either way.
 
 **Known cost, not yet optimized:** shared images double iCloud storage — an
 attachment's `CKAsset` lives once as `ImageAsset` (private, via
