@@ -1,0 +1,99 @@
+// CloudKit schema for iCloud.nikhilsh.PaperTrail — household sharing types.
+//
+// Source of truth for field names: PaperTrail/HouseholdSync/HouseholdSchema.swift.
+// Applied to the DEVELOPMENT environment by .github/workflows/cloudkit-schema.yml
+// (cktool import-schema), then promoted to production via the CloudKit Console's
+// "Deploy Schema Changes" button — there is no programmatic production deploy.
+//
+// The explicit "cloudkit.share" block matters: production rejected the zone-wide
+// CKShare save with "Cannot create new type cloudkit.share in production schema"
+// because that system type is normally only just-in-time-created in development,
+// which this project (no Xcode anywhere) has never run against. Declaring it here
+// provisions it in development so the Console deploy carries it to production.
+//
+// NOTE: this file only ADDS types. SwiftData's CD_* types and ImageAsset already
+// live in the container and are intentionally absent here — import-schema is
+// additive against the existing development schema.
+
+DEFINE SCHEMA
+
+    RECORD TYPE "cloudkit.share" (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        "cloudkit.thumbnailImageData" BYTES,
+        "cloudkit.title" STRING,
+        "cloudkit.type" STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE SharedPurchaseRecord (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        id                       STRING QUERYABLE,
+        productName              STRING,
+        merchantName             STRING,
+        purchaseDate             TIMESTAMP,
+        warrantyExpiryDate       TIMESTAMP,
+        notes                    STRING,
+        amount                   DOUBLE,
+        currency                 STRING,
+        category                 STRING,
+        room                     STRING,
+        tagsRaw                  STRING,
+        supportProviderName      STRING,
+        supportPhoneNumber       STRING,
+        supportConfidence        STRING,
+        supportNote              STRING,
+        returnWindowDays         INT64,
+        serialNumber             STRING,
+        coverageSummary          STRING,
+        isRegistered             INT64,
+        productImageAttachmentID STRING,
+        createdAt                TIMESTAMP,
+        updatedAt                TIMESTAMP,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE SharedAttachment (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        id               STRING QUERYABLE,
+        purchaseRecordID STRING QUERYABLE,
+        typeRaw          STRING,
+        localFilename    STRING,
+        ocrText          STRING,
+        createdAt        TIMESTAMP,
+        asset            ASSET,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE HouseholdSettings (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        shareWholeLibrary INT64,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
