@@ -104,6 +104,12 @@ struct SettingsView: View {
                     )
                     SettingsRowDivider()
                     SettingsRow(
+                        icon: "calendar.badge.clock", iconColor: PT.gold, title: "Monthly coverage digest",
+                        subtitle: "One summary of what's expiring and closing",
+                        toggle: $reminders.digestEnabled
+                    )
+                    SettingsRowDivider()
+                    SettingsRow(
                         icon: "sparkles", iconColor: PT.gold, title: "Suggest support contacts",
                         subtitle: "Look up brand help lines when something breaks",
                         toggle: $reminders.suggestSupportContacts
