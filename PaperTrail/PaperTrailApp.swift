@@ -186,6 +186,7 @@ struct PaperTrailApp: App {
         WindowGroup {
             AppShellView()
                 .environmentObject(CloudImageSyncManager.shared)
+                .reviewPrompting()
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
                     await runCloudKitPreflight()

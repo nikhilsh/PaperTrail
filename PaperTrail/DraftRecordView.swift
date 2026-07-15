@@ -893,6 +893,9 @@ struct DraftRecordView: View {
             }
         }
 
+        // Delight moment: a successful scan→save, never on an error path.
+        ReviewPrompter.shared.recordsSaved(records.count)
+
         dismiss()
     }
 }

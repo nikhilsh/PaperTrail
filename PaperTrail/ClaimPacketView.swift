@@ -223,7 +223,12 @@ struct ClaimPacketView: View {
         // Make sure proof images are present locally before rendering.
         isGenerating = true
         defer { isGenerating = false }
-        return ClaimPacketPDF.generate(record: record, attachments: attachments)
+        let url = ClaimPacketPDF.generate(record: record, attachments: attachments)
+        // Delight moment: the claim-packet export completed, never on failure.
+        if url != nil {
+            ReviewPrompter.shared.claimPacketExported()
+        }
+        return url
     }
 
     private func share() async {
