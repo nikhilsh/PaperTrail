@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
-import PDFKit
 import UniformTypeIdentifiers
 
 /// "Bring it all in." (§4) — bulk backfill. Every imported image is routed
@@ -191,11 +190,7 @@ struct ImportView: View {
         for url in urls {
             let needsStop = url.startAccessingSecurityScopedResource()
             defer { if needsStop { url.stopAccessingSecurityScopedResource() } }
-            if url.pathExtension.lowercased() == "pdf" {
-                images.append(contentsOf: imagesFromPDF(url))
-            } else if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
-                images.append(image)
-            }
+            images.append(contentsOf: ImportPipeline.images(fromFileURL: url))
         }
         await processImages(images)
     }
@@ -213,27 +208,6 @@ struct ImportView: View {
         processingNote = ""
         reviewQueue = payloads
         advanceQueue()
-    }
-
-    private func imagesFromPDF(_ url: URL) -> [UIImage] {
-        guard let doc = PDFDocument(url: url) else { return [] }
-        var result: [UIImage] = []
-        for i in 0..<doc.pageCount {
-            guard let page = doc.page(at: i) else { continue }
-            let bounds = page.bounds(for: .mediaBox)
-            let scale: CGFloat = 2
-            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            let image = renderer.image { ctx in
-                UIColor.white.set()
-                ctx.fill(CGRect(origin: .zero, size: size))
-                ctx.cgContext.translateBy(x: 0, y: size.height)
-                ctx.cgContext.scaleBy(x: scale, y: -scale)
-                page.draw(with: .mediaBox, to: ctx.cgContext)
-            }
-            result.append(image)
-        }
-        return result
     }
 
     private func advanceQueue() {
