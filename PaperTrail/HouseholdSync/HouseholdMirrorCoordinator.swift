@@ -83,6 +83,11 @@ final class HouseholdMirrorCoordinator {
         // mirror until that screen was visited.
         Task { [weak self] in
             await HouseholdManager.shared.refresh()
+            // Cold launch never posts willEnterForeground, so the foreground
+            // poll above doesn't cover it — without this, a member who
+            // force-quit sees a stale (or empty) shared library until the
+            // first background→foreground cycle.
+            await HouseholdSyncEngine.shared.fetchChanges()
             await self?.reconcile()
         }
 

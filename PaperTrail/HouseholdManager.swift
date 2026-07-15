@@ -162,6 +162,12 @@ final class HouseholdManager {
             return
         }
         HouseholdSyncEngine.shared.start()
+        // start() is a no-op when the engines already exist (normal case —
+        // they're created at app launch), and no push is guaranteed for a
+        // zone that was shared BEFORE we became a participant. Without an
+        // explicit fetch here, the new member's library stays empty until
+        // the app happens to background-cycle.
+        await HouseholdSyncEngine.shared.fetchChanges()
         await refresh()
     }
 
@@ -409,9 +415,15 @@ final class HouseholdManager {
     }
 
     private static func members(from share: CKShare) -> [HouseholdMember] {
-        share.participants.compactMap { participant in
+        // "You" is the LOCAL participant, not the owner — on a member's
+        // device the owner is somebody else, and labeling them "You" made
+        // Vanessa's roster read "You (Owner) + Vanessa Ho".
+        let currentUserRecordName = share.currentUserParticipant?.userIdentity.userRecordID?.recordName
+        return share.participants.compactMap { participant in
             let identity = participant.userIdentity
             let email = identity.lookupInfo?.emailAddress
+            let isCurrentUser = currentUserRecordName != nil
+                && identity.userRecordID?.recordName == currentUserRecordName
             // iCloud usually withholds nameComponents until the invitee
             // accepts (and sometimes after) — fall back to the email or phone
             // the invite was addressed to before giving up on a placeholder.
@@ -419,14 +431,16 @@ final class HouseholdManager {
                 PersonNameComponentsFormatter().string(from: $0)
             } ?? ""
             let name: String
-            if !formatted.isEmpty {
+            if isCurrentUser {
+                name = "You"
+            } else if !formatted.isEmpty {
                 name = formatted
             } else if let email {
                 name = email
             } else if let phone = identity.lookupInfo?.phoneNumber {
                 name = phone
             } else {
-                name = participant.role == .owner ? "You" : "Member"
+                name = participant.role == .owner ? "Owner" : "Member"
             }
             let role: HouseholdRole
             switch (participant.role, participant.acceptanceStatus) {
