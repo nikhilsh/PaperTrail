@@ -16,6 +16,10 @@ struct ExportView: View {
     @State private var showFileExporter = false
     @State private var errorMessage: String?
 
+    @State private var isBuildingReport = false
+    @State private var reportURL: URL?
+    @State private var showReportShareSheet = false
+
     private var recordCount: Int { records.count }
     private var documentCount: Int { attachments.count }
 
@@ -51,6 +55,8 @@ struct ExportView: View {
                     .disabled(isBuilding || records.isEmpty)
                 }
 
+                insuranceReportCard
+
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "lock")
                         .font(.system(size: 11))
@@ -84,6 +90,9 @@ struct ExportView: View {
         }
         .sheet(isPresented: $showFileExporter) {
             if let bundleURL { DocumentExporter(url: bundleURL) }
+        }
+        .sheet(isPresented: $showReportShareSheet) {
+            if let reportURL { ShareSheetView(activityItems: [reportURL]) }
         }
         .alert("Export failed", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
@@ -139,6 +148,42 @@ struct ExportView: View {
         Rectangle().fill(PT.onPaperHair).frame(height: 1)
     }
 
+    /// The insurance-ready home inventory PDF — every local item, grouped by
+    /// room, with estimated current value. The app's anti-lock-in showcase:
+    /// the artifact a user hands their insurer after a burglary/fire/flood.
+    private var insuranceReportCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 13) {
+                Image(systemName: "house.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(PT.goldDeep)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Home Inventory Report")
+                        .font(PTFont.serif(16, weight: 600))
+                        .foregroundStyle(PT.onPaper)
+                    Text("Everything you own, by room — ready for your insurer")
+                        .font(.system(size: 12))
+                        .foregroundStyle(PT.onPaper2)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Button { Task { await buildAndShareReport() } } label: {
+                HStack(spacing: 8) {
+                    if isBuildingReport { ProgressView().tint(PT.inkStamp) }
+                    Text(isBuildingReport ? "Preparing…" : "Generate report")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PTOutlineButtonStyle())
+            .disabled(isBuildingReport || records.isEmpty)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(goldFold: false)
+    }
+
     // MARK: Actions
 
     @MainActor
@@ -166,6 +211,28 @@ struct ExportView: View {
         guard let url = await buildBundle() else { return }
         bundleURL = url
         showFileExporter = true
+    }
+
+    /// Builds the Home Inventory Report PDF. Stays on the main actor like
+    /// `buildBundle` above — `records`/`attachments` come straight from
+    /// `@Query` and, per this codebase's SwiftData rule, must not cross
+    /// actors, so generation isn't detached to a background task.
+    @MainActor
+    private func buildInsuranceReportPDF() async -> URL? {
+        isBuildingReport = true
+        defer { isBuildingReport = false }
+        let report = InsuranceReport.build(records: records, attachments: attachments)
+        guard let url = InsuranceReportPDF.generate(report) else {
+            errorMessage = "Couldn't build the report."
+            return nil
+        }
+        return url
+    }
+
+    private func buildAndShareReport() async {
+        guard let url = await buildInsuranceReportPDF() else { return }
+        reportURL = url
+        showReportShareSheet = true
     }
 }
 
