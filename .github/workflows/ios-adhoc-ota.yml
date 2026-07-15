@@ -150,6 +150,16 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
+      # Xcode's INFOPLIST_KEY_* mechanism silently drops keys it doesn't
+      # recognize — build 27 shipped without CKSharingSupported that way, so
+      # share invites bounced to the App Store on devices that HAD the app.
+      # Fail the build if the merged Info.plist ever loses these again.
+      - name: Verify required Info.plist keys
+        run: |
+          APP_PLIST="$ARCHIVE_PATH/Products/Applications/PaperTrail.app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print CKSharingSupported" "$APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Print UIBackgroundModes" "$APP_PLIST" | grep -q "remote-notification"
+
       - name: Read app version
         run: |
           APP_PLIST="$ARCHIVE_PATH/Products/Applications/PaperTrail.app/Info.plist"

@@ -410,8 +410,7 @@
 				DEVELOPMENT_TEAM = EHW7L3679R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CKSharingSupported = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_FILE = "PaperTrail-Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PaperTrail uses the camera to scan receipts and warranty documents.";
 				INFOPLIST_KEY_SENTRY_DSN = "$(SENTRY_DSN)";
@@ -451,8 +450,7 @@
 				DEVELOPMENT_TEAM = EHW7L3679R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CKSharingSupported = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_FILE = "PaperTrail-Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PaperTrail uses the camera to scan receipts and warranty documents.";
 				INFOPLIST_KEY_SENTRY_DSN = "$(SENTRY_DSN)";
