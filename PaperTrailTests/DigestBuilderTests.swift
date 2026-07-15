@@ -36,20 +36,22 @@ struct DigestBuilderTests {
     // MARK: - Singular / plural headline
 
     @Test func singularWarrantyHeadline() {
-        let record = DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10))
+        // isRegistered: true keeps this record out of the unregistered-count
+        // clause, so the headline is exactly the one warranty part.
+        let record = DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10), isRegistered: true)
         let summary = DigestBuilder.build(from: [record], now: now)
         #expect(summary.expiringWarrantyCount == 1)
-        #expect(summary.headline.contains("1 warranty ends within 60 days"))
+        #expect(summary.headline == "1 warranty ends within 60 days")
     }
 
     @Test func pluralWarrantyHeadline() {
         let records = [
-            DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10)),
-            DigestRecordSnapshot(productName: "Kettle", warrantyExpiryDate: daysFromNow(20)),
+            DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10), isRegistered: true),
+            DigestRecordSnapshot(productName: "Kettle", warrantyExpiryDate: daysFromNow(20), isRegistered: true),
         ]
         let summary = DigestBuilder.build(from: records, now: now)
         #expect(summary.expiringWarrantyCount == 2)
-        #expect(summary.headline.contains("2 warranties end within 60 days"))
+        #expect(summary.headline == "2 warranties end within 60 days")
     }
 
     @Test func singularReturnWindowHeadline() {
@@ -90,7 +92,7 @@ struct DigestBuilderTests {
 
     @Test func headlineJoinsMultiplePartsWithSeparator() {
         let records = [
-            DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10)),
+            DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10), isRegistered: true),
             DigestRecordSnapshot(productName: "Lamp", returnDeadline: daysFromNow(2)),
         ]
         let summary = DigestBuilder.build(from: records, now: now)
