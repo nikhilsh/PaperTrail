@@ -193,6 +193,7 @@ struct PaperTrailApp: App {
                 .reviewPrompting()
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
+                    await NotificationManager.shared.migrateIdentifiersIfNeeded(modelContext: modelContainer.mainContext)
                     await runCloudKitPreflight()
                     await syncCloudImages()
                     if HouseholdManager.recordSharingEnabled {
