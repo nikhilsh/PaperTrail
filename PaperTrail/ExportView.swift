@@ -213,16 +213,21 @@ struct ExportView: View {
         showFileExporter = true
     }
 
-    /// Builds the Home Inventory Report PDF. Stays on the main actor like
-    /// `buildBundle` above — `records`/`attachments` come straight from
-    /// `@Query` and, per this codebase's SwiftData rule, must not cross
-    /// actors, so generation isn't detached to a background task.
+    /// Builds the Home Inventory Report PDF. `records`/`attachments` come
+    /// straight from `@Query`, so the snapshot into `InsuranceReport.Report`
+    /// (pure value types — no SwiftData model references, see
+    /// `InsuranceReport.Item`) happens on the main actor; the actual PDF
+    /// rendering — full-res image decodes and PDF drawing — then runs off
+    /// the main actor in a detached task so it can't block the UI.
     @MainActor
     private func buildInsuranceReportPDF() async -> URL? {
         isBuildingReport = true
-        defer { isBuildingReport = false }
         let report = InsuranceReport.build(records: records, attachments: attachments)
-        guard let url = InsuranceReportPDF.generate(report) else {
+        let url = await Task.detached {
+            InsuranceReportPDF.generate(report)
+        }.value
+        isBuildingReport = false
+        guard let url else {
             errorMessage = "Couldn't build the report."
             return nil
         }

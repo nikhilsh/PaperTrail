@@ -96,6 +96,34 @@ struct DigestSummary: Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
+    /// Short headline for the push-notification body — no currency totals
+    /// (a lock-screen isn't the place to broadcast a household's coverage
+    /// value) and no day-precision phrasing ("today"/"tomorrow"/"in N days",
+    /// which goes stale between when the digest is scheduled and whenever
+    /// the user actually reads the notification). e.g. "3 warranties end
+    /// soon · 1 return window is closing". The in-app card keeps the full
+    /// `headline`.
+    var notificationHeadline: String {
+        var parts: [String] = []
+
+        if expiringWarrantyCount > 0 {
+            let noun = expiringWarrantyCount == 1 ? "warranty ends soon" : "warranties end soon"
+            parts.append("\(expiringWarrantyCount) \(noun)")
+        }
+
+        if closingReturnCount > 0 {
+            let noun = closingReturnCount == 1 ? "return window is closing" : "return windows are closing"
+            parts.append("\(closingReturnCount) \(noun)")
+        }
+
+        if unregisteredActiveCount > 0 {
+            let noun = unregisteredActiveCount == 1 ? "item is" : "items are"
+            parts.append("\(unregisteredActiveCount) unregistered \(noun) still under warranty")
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
     private static func dayLabel(daysLeft: Int) -> String {
         switch daysLeft {
         case 0: return "today"
@@ -163,10 +191,13 @@ enum DigestBuilder {
         }
 
         // Unregistered items whose warranty hasn't expired yet, regardless of
-        // whether they fall inside the 60-day expiring window.
+        // whether they fall inside the 60-day expiring window. Compared at
+        // day granularity — matching `daysBetween` above — so a warranty
+        // expiring today counts as still active here just like it counts in
+        // the expiring list.
         summary.unregisteredActiveCount = records.filter { record in
             guard !record.isRegistered, let expiry = record.warrantyExpiryDate else { return false }
-            return expiry >= now
+            return calendar.startOfDay(for: expiry) >= calendar.startOfDay(for: now)
         }.count
 
         return summary

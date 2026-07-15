@@ -36,7 +36,7 @@ enum DigestScheduler {
 
         let content = UNMutableNotificationContent()
         content.title = "Your coverage this month"
-        content.body = summary.headline
+        content.body = summary.notificationHeadline
         content.sound = .default
         content.userInfo = ["route": "expiringSoon"]
 

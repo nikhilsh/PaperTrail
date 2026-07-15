@@ -34,7 +34,7 @@ struct ProofScoreSnapshot {
 /// and the ordered list of what's missing.
 struct ProofScore: Equatable {
     enum Level: String, Equatable {
-        case claimReady = "Claim-ready"
+        case claimReady = "Proof complete"
         case nearlyThere = "Nearly there"
         case needsProof = "Needs proof"
 
@@ -63,7 +63,7 @@ struct ProofScore: Equatable {
 
     init(snapshot: ProofScoreSnapshot) {
         let components = [
-            Component(points: 30, missingLabel: "No receipt attached", isPresent: snapshot.hasAttachment),
+            Component(points: 30, missingLabel: "No document attached", isPresent: snapshot.hasAttachment),
             Component(points: 15, missingLabel: "No purchase date", isPresent: snapshot.purchaseDate != nil),
             Component(points: 15, missingLabel: "No purchase amount", isPresent: snapshot.amount != nil),
             Component(points: 15, missingLabel: "No warranty expiry date", isPresent: snapshot.warrantyExpiryDate != nil),

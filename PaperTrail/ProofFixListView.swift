@@ -8,13 +8,9 @@ struct ProofFixListView: View {
     @Query(sort: \PurchaseRecord.updatedAt, order: .reverse) private var records: [PurchaseRecord]
     @Query private var allAttachments: [Attachment]
 
-    private func attachments(for record: PurchaseRecord) -> [Attachment] {
-        allAttachments.filter { $0.recordID == record.id }
-    }
-
-    private func score(for record: PurchaseRecord) -> ProofScore {
+    private func score(for record: PurchaseRecord, attachmentsByRecord: [UUID?: [Attachment]]) -> ProofScore {
         let snapshot = ProofScoreSnapshot(
-            hasAttachment: !attachments(for: record).isEmpty,
+            hasAttachment: attachmentsByRecord[record.id] != nil,
             purchaseDate: record.purchaseDate,
             amount: record.amount,
             warrantyExpiryDate: record.warrantyExpiryDate,
@@ -26,9 +22,13 @@ struct ProofFixListView: View {
 
     /// Records needing proof, sorted by amount descending (records with no
     /// amount sort last), then by score ascending (least complete first).
+    /// Groups attachments by `recordID` once so scoring every record is
+    /// O(records + attachments) rather than scanning every attachment per
+    /// record.
     private var rows: [(record: PurchaseRecord, score: ProofScore)] {
-        records
-            .map { (record: $0, score: score(for: $0)) }
+        let attachmentsByRecord = Dictionary(grouping: allAttachments, by: \.recordID)
+        return records
+            .map { (record: $0, score: score(for: $0, attachmentsByRecord: attachmentsByRecord)) }
             .filter { $0.score.score < 90 }
             .sorted { lhs, rhs in
                 switch (lhs.record.amount, rhs.record.amount) {
@@ -80,7 +80,7 @@ struct ProofFixListView: View {
             Image(systemName: "checkmark.seal")
                 .font(.system(size: 30))
                 .foregroundStyle(PT.sageDeep)
-            Text("Every record is claim-ready.")
+            Text("Every record's proof is complete.")
                 .font(.system(size: 14))
                 .foregroundStyle(PT.txt3)
         }

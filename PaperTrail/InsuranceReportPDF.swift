@@ -48,6 +48,20 @@ enum InsuranceReportPDF {
             return formatter.string(from: NSNumber(value: amount)) ?? String(format: "%@ %.2f", currency, amount)
         }
 
+        // Items/totals with no currency on record are bucketed under
+        // `InsuranceReport.unspecifiedCurrency` — never fabricate a currency
+        // symbol for them; render a bare number instead.
+        func amountString(_ amount: Double, _ currency: String) -> String {
+            guard currency != InsuranceReport.unspecifiedCurrency else {
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .decimal
+                formatter.minimumFractionDigits = 2
+                formatter.maximumFractionDigits = 2
+                return formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount)
+            }
+            return money(amount, currency)
+        }
+
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("HomeInventoryReport-\(UUID().uuidString.prefix(8)).pdf")
         try? FileManager.default.removeItem(at: url)
@@ -104,6 +118,29 @@ enum InsuranceReportPDF {
                     Set(a.keys).union(b.keys).sorted()
                 }
 
+                // Fixed-position footer drawn on every page — the divider +
+                // disclaimer live inside `footerReserve`, a band content rows
+                // never draw into (see the overflow check below), so this is
+                // safe to call at any point while a page is still active.
+                func drawFooter() {
+                    let footY = pageHeight - margin - footerReserve
+                    ctx.cgContext.setFillColor(ink3.withAlphaComponent(0.25).cgColor)
+                    ctx.cgContext.fill(CGRect(x: margin, y: footY, width: contentWidth, height: 0.5))
+                    let attrs: [NSAttributedString.Key: Any] = [.font: monoRegular(8.5), .foregroundColor: ink2]
+                    let text = "Estimated values are straight-line depreciation estimates — not appraisals."
+                    (text as NSString).draw(
+                        with: CGRect(x: margin, y: footY + 8, width: contentWidth, height: footerReserve - 8),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil)
+                }
+
+                // Draws the footer on the outgoing page, then starts the next
+                // page — every page transition in this renderer goes through
+                // here so the disclaimer appears everywhere, not just the cover.
+                func newPage() {
+                    drawFooter()
+                    ctx.beginPage()
+                }
+
                 // MARK: Cover page
 
                 ctx.beginPage()
@@ -124,12 +161,12 @@ enum InsuranceReportPDF {
                            font: serif(15, .medium), color: ink)
                 y += 18
 
-                y += draw("ESTIMATED TOTAL VALUE", font: monoRegular(9), color: ink3)
+                y += draw("TOTALS", font: monoRegular(9), color: ink3)
                 y += 8
                 for currency in currencyUnion(report.grandPurchaseTotalsByCurrency, report.grandEstimatedTotalsByCurrency) {
                     let purchased = report.grandPurchaseTotalsByCurrency[currency] ?? 0
                     let estimated = report.grandEstimatedTotalsByCurrency[currency] ?? 0
-                    let line = "\(currency)  Purchased \(money(purchased, currency))  ·  Est. today \(money(estimated, currency))"
+                    let line = "\(currency)  Purchased \(amountString(purchased, currency))  ·  Est. today \(amountString(estimated, currency))"
                     y += draw(line, font: serif(14, .medium), color: ink)
                     y += 5
                 }
@@ -137,18 +174,10 @@ enum InsuranceReportPDF {
                     y += draw("No priced items yet.", font: serif(14, .medium), color: ink3)
                 }
 
-                let footY = pageHeight - margin - footerReserve
-                y = max(y, footY)
-                ctx.cgContext.setFillColor(ink3.withAlphaComponent(0.25).cgColor)
-                ctx.cgContext.fill(CGRect(x: margin, y: y, width: contentWidth, height: 0.5))
-                y += 8
-                _ = draw("Estimated values are straight-line depreciation estimates — not appraisals.",
-                         font: monoRegular(8.5), color: ink2, maxWidth: contentWidth)
-
                 // MARK: Room sections
 
                 for section in report.sections {
-                    ctx.beginPage()
+                    newPage()
                     drawRunningHeader(section.name.uppercased())
 
                     y += draw(section.name, font: serif(19), color: ink)
@@ -159,7 +188,7 @@ enum InsuranceReportPDF {
                     for currency in currencyUnion(section.purchaseTotalsByCurrency, section.estimatedTotalsByCurrency) {
                         let purchased = section.purchaseTotalsByCurrency[currency] ?? 0
                         let estimated = section.estimatedTotalsByCurrency[currency] ?? 0
-                        y += draw("\(currency) totals — purchased \(money(purchased, currency)) · est. today \(money(estimated, currency))",
+                        y += draw("\(currency) totals — purchased \(amountString(purchased, currency)) · est. today \(amountString(estimated, currency))",
                                    font: monoRegular(9), color: ink2)
                         y += 3
                     }
@@ -180,12 +209,12 @@ enum InsuranceReportPDF {
                             let subLine = [item.merchantName, item.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) }]
                                 .compactMap { $0 }.joined(separator: " · ")
                             if !subLine.isEmpty { lines.append((subLine, monoRegular(8.5), ink3)) }
-                            let currency = item.currency ?? InsuranceReport.defaultCurrency
+                            let currency = item.currency ?? InsuranceReport.unspecifiedCurrency
                             if let amount = item.amount {
-                                lines.append(("Paid \(money(amount, currency))", monoRegular(8.5), ink2))
+                                lines.append(("Paid \(amountString(amount, currency))", monoRegular(8.5), ink2))
                             }
                             if let estimated = item.estimatedCurrentValue {
-                                lines.append(("Est. today \(money(estimated, currency))", monoRegular(8.5), gold))
+                                lines.append(("Est. today \(amountString(estimated, currency))", monoRegular(8.5), gold))
                             }
                             if let serial = item.serialNumber, !serial.isEmpty {
                                 lines.append(("Serial \(serial)", monoRegular(8), ink3))
@@ -206,15 +235,22 @@ enum InsuranceReportPDF {
                             let rowHeight = max(thumb, textHeight) + 18
 
                             if y + rowHeight > pageHeight - margin - footerReserve {
-                                ctx.beginPage()
+                                newPage()
                                 drawRunningHeader("\(section.name.uppercased()) (CONT'D)")
                             }
 
                             let rowTop = y
                             let thumbRect = CGRect(x: margin, y: rowTop, width: thumb, height: thumb)
-                            if let image = item.thumbnailAttachment?.image {
-                                let fitted = aspectFit(image: image, in: thumbRect)
-                                image.draw(in: fitted)
+                            // Downsample off the full-res file on disk to a small
+                            // thumbnail before drawing — bounds both peak decode
+                            // memory and the bitmap size embedded in the PDF.
+                            if let filename = item.thumbnailFilename {
+                                let path = ImageStorageManager.url(for: filename).path
+                                if let full = UIImage(contentsOfFile: path),
+                                   let thumbImage = full.preparingThumbnail(of: CGSize(width: 320, height: 320)) {
+                                    let fitted = aspectFit(image: thumbImage, in: thumbRect)
+                                    thumbImage.draw(in: fitted)
+                                }
                             }
                             ctx.cgContext.setStrokeColor(ink3.withAlphaComponent(0.3).cgColor)
                             ctx.cgContext.stroke(thumbRect.insetBy(dx: -0.5, dy: -0.5))
@@ -230,6 +266,12 @@ enum InsuranceReportPDF {
                         }
                     }
                 }
+
+                // Footer for whichever page is still active when content ends
+                // — the cover page if there are no sections, otherwise the
+                // last room page. Every earlier page got its footer via
+                // `newPage()` above.
+                drawFooter()
             }
             return url
         } catch {

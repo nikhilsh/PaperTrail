@@ -83,11 +83,24 @@ struct InsuranceReportBuilderTests {
         #expect(office.purchaseTotalsByCurrency.count == 2)
     }
 
-    @Test func nilCurrencyFallsBackToDefaultCurrencyBucket() {
+    @Test func nilCurrencyBucketsUnderUnspecifiedNotFabricatedSGD() {
         let records = [record(name: "No Currency", room: "Office", amount: 50, currency: nil)]
         let report = InsuranceReport.build(records: records, attachments: [])
         let office = try! #require(report.sections.first { $0.name == "Office" })
-        #expect(office.purchaseTotalsByCurrency[InsuranceReport.defaultCurrency] == 50)
+        #expect(office.purchaseTotalsByCurrency[InsuranceReport.unspecifiedCurrency] == 50)
+        #expect(office.purchaseTotalsByCurrency["SGD"] == nil)
+    }
+
+    @Test func unspecifiedCurrencyBucketNeverMergesWithARealCurrencyTotal() {
+        let records = [
+            record(name: "No Currency", room: "Office", amount: 50, currency: nil),
+            record(name: "SGD Item", room: "Office", amount: 200, currency: "SGD"),
+        ]
+        let report = InsuranceReport.build(records: records, attachments: [])
+        let office = try! #require(report.sections.first { $0.name == "Office" })
+        #expect(office.purchaseTotalsByCurrency[InsuranceReport.unspecifiedCurrency] == 50)
+        #expect(office.purchaseTotalsByCurrency["SGD"] == 200)
+        #expect(office.purchaseTotalsByCurrency.count == 2)
     }
 
     @Test func grandTotalsAggregateAcrossRoomsPerCurrency() {
@@ -123,7 +136,7 @@ struct InsuranceReportBuilderTests {
         rec.productImageAttachmentID = productPhoto.id
         let report = InsuranceReport.build(records: [rec], attachments: [receipt, productPhoto])
         let item = report.sections.first?.items.first
-        #expect(item?.thumbnailAttachment?.id == productPhoto.id)
+        #expect(item?.thumbnailFilename == "product.jpg")
     }
 
     @Test func fallsBackToFirstAttachmentWhenNoProductImageSet() {
@@ -131,13 +144,13 @@ struct InsuranceReportBuilderTests {
         let receipt = Attachment(recordID: rec.id, type: .receipt, localFilename: "receipt.jpg")
         let report = InsuranceReport.build(records: [rec], attachments: [receipt])
         let item = report.sections.first?.items.first
-        #expect(item?.thumbnailAttachment?.id == receipt.id)
+        #expect(item?.thumbnailFilename == "receipt.jpg")
     }
 
     @Test func nilWhenRecordHasNoAttachments() {
         let rec = PurchaseRecord(productName: "Camera", room: "Office")
         let report = InsuranceReport.build(records: [rec], attachments: [])
         let item = report.sections.first?.items.first
-        #expect(item?.thumbnailAttachment == nil)
+        #expect(item?.thumbnailFilename == nil)
     }
 }
