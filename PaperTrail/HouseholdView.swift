@@ -11,7 +11,14 @@ struct HouseholdView: View {
     @Query private var records: [PurchaseRecord]
 
     private var manager = HouseholdManager.shared
+    private var cache = HouseholdCache.shared
     private let reminders = ReminderSettings.shared
+
+    /// True when this device joined someone else's household. The "what they
+    /// can see" card and its whole-library toggle control the OWNER's
+    /// mirroring — showing them to a member rendered "All 0 records" (the
+    /// member's own empty library) on Vanessa's phone.
+    private var isMemberDevice: Bool { !manager.isHouseholdOwner && !manager.members.isEmpty }
 
     @AppStorage("household.shareWholeLibrary") private var shareWholeLibrary = true
     @State private var preparing = false
@@ -62,11 +69,17 @@ struct HouseholdView: View {
                     .disabled(preparing)
                 }
 
-                whatTheySeeCard(reminders: reminders)
+                if isMemberDevice {
+                    memberSharedCard
+                } else {
+                    whatTheySeeCard(reminders: reminders)
+                }
 
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "lock").font(.system(size: 11)).foregroundStyle(PT.txt3)
-                    Text("Shared securely through iCloud — members sign in with their own Apple ID. They can view and add, but only you can remove records or end sharing.")
+                    Text(isMemberDevice
+                         ? "Shared securely through iCloud — you can view your household's records, and only the owner can remove them or end sharing."
+                         : "Shared securely through iCloud — members sign in with their own Apple ID. They can view and add, but only you can remove records or end sharing.")
                         .font(.system(size: 12))
                         .foregroundStyle(PT.txt3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -144,6 +157,19 @@ struct HouseholdView: View {
                 .foregroundStyle(member.role == .invited ? PT.amber : PT.onPaper3)
         }
         .padding(.vertical, 11)
+    }
+
+    private var memberSharedCard: some View {
+        VStack(spacing: 0) {
+            SettingsSectionLabel(text: "Shared with you")
+            SettingsCard {
+                SettingsRow(icon: "books.vertical", iconColor: PT.gold,
+                            title: "Household records",
+                            subtitle: cache.purchaseRecords.isEmpty
+                                ? "Nothing shared yet — records appear here as your household adds them"
+                                : "\(cache.purchaseRecords.count) shared record\(cache.purchaseRecords.count == 1 ? "" : "s") — in your Library under “Shared with me”")
+            }
+        }
     }
 
     private func whatTheySeeCard(reminders: ReminderSettings) -> some View {

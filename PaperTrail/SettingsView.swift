@@ -37,7 +37,14 @@ struct SettingsView: View {
 
     private var roomCount: Int { Set(records.compactMap(\.room).filter { !$0.isEmpty }).count }
 
-    private var householdSummary: String { "Set up" }
+    private var householdSummary: String {
+        let manager = HouseholdManager.shared
+        let members = manager.members
+        if members.isEmpty { return "Set up" }
+        if !manager.isHouseholdOwner { return "Joined" }
+        if members.contains(where: { $0.role == .invited }) { return "Invite sent" }
+        return "\(members.count) member\(members.count == 1 ? "" : "s")"
+    }
 
     private var storageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -203,6 +210,7 @@ struct SettingsView: View {
         .ptScreen()
         .toolbar(.hidden, for: .navigationBar)
         .task { await refreshICloudStatus() }
+        .task { await HouseholdManager.shared.refresh() }
         .alert("Logged value", isPresented: $showLoggedValueInfo) {
             Button("OK", role: .cancel) { }
         } message: {

@@ -47,6 +47,9 @@ private func configureSentry() {
         options.enableCaptureFailedRequests = true
         options.enableAutoSessionTracking = true
         options.attachScreenshot = false
+        // Structured logs: AppLogger.info/warn forward here so sync flows
+        // are diagnosable without waiting for something to crash.
+        options.experimental.enableLogs = true
     }
 
     AppLogger.info("Sentry initialized", category: "observability")
