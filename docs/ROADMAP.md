@@ -1,5 +1,18 @@
 # PaperTrail Roadmap
 
+Updated 2026-07-15. The app is **live on the App Store** (v1.0, build 22, READY_FOR_SALE
+since 2026-07-08) as "PaperTrail — Proof of Purchase". OTA/TestFlight channels run ahead
+of the store build. Monetization strategy: [`docs/MONETIZATION.md`](MONETIZATION.md).
+
+## North star
+
+Build a product users trust immaculately: no bugs, no dark patterns, no lock-in.
+Every wave ships through PR → CI → adversarial review → device verification before the
+flag flips or the store update goes out. Trust features (export, privacy, transparency)
+are never paywalled.
+
+---
+
 ## Completed
 
 ### Milestone 1 — App Shell (Mar 13)
@@ -25,171 +38,111 @@
 - Amount/currency fields with OCR price extraction
 - Category and tags system
 - Local warranty expiry notifications (30d, 7d, day-of)
-- Library sort (newest, oldest, name, warranty)
-- Library filter (all, active, expiring soon, expired)
-- Search includes OCR text + tags
-- Context menu delete in library
-- Warranty status badges (green/orange/red)
-- Smarter OCR: SG date formats, currency detection
+- Library sort/filter, search incl. OCR text + tags
+- Warranty status badges; SG date/currency OCR smarts
 
 ### Milestone 3 — Cloud & Identity (Mar 19, commits 256f16b, 1280af7)
 - CloudKit sync (SwiftData + automatic iCloud)
-- Image data synced via @Attribute(.externalStorage)
-- Sign in with Apple (AuthenticationManager)
-- Record export as .papertrail shareable packages
-- Share sheet integration (AirDrop, Messages, etc.)
-- iCloud + Sign in with Apple entitlements
+- Disk-based image storage synced as CKAssets (CloudImageSyncManager)
+- Record export as .papertrail shareable packages, share sheet integration
+
+### The Archive redesign + AI extraction overhaul (Jun–Jul)
+- Full visual/IA reskin (warm-dark, paper-archival identity)
+- Foundation Models on-device extraction + heuristic fallback, structured OCR
+- Community learning pipeline (Supabase, opt-in), correction logging
+- Sentry observability with dSYM upload in CI
+
+### App Store wave (Jul 8, builds 22–23, PRs #60–#64)
+- Return-window tracking, App Intents/Siri/Shortcuts, serial barcode scanning
+- Compliance: PrivacyInfo.xcprivacy, consent-gated community learning, privacy site
+- CI/CD complete: ad-hoc OTA (rolling `adhoc-latest` → papertrail.kaopeh.com),
+  TestFlight lane, website deploy, CloudKit schema workflow. Team ID unified (EHW7L3679R).
+- **v1.0 (build 22) shipped to the App Store**
+
+### Milestone 4 — Household sharing (Jul 13–15, PRs #67–#78, builds 24–31)
+- **Architecture: zone-wide CKShare + dual CKSyncEngine beside SwiftData** — the
+  roadmap's earlier hybrid Core Data plan was researched and REJECTED (CD_* record-type
+  collision risk with the load-bearing store). Design of record:
+  [`docs/SHARING_ARCHITECTURE.md`](SHARING_ARCHITECTURE.md).
+- Shared-in records live in HouseholdCache (JSON), never the SwiftData store
+- CKAsset image sync, read-only member views, "Shared with me" Library section
+- Push (aps-environment + remote-notification background mode), CloudKit schema
+  deployed to production, share-invite branding, member-perspective UI
+- Adversarially reviewed (3-lens panel, 12 fixes) + two-device verified
+- Store build is still flag-off; flag-on store update ships after Wave 1
 
 ---
 
-## In Progress
+## In Progress — Wave 1: "The day it breaks" (Jul 15)
 
-### CI/CD Pipeline
-- **Status**: Blocked on signing cert
-- **Blocker**: Uploaded .p12 is Apple Development cert, need Apple Distribution
-- **Team ID mismatch**: Profile uses EHW7L3679R, workflow uses 635A559UST
-- **Action needed**: Nik exports correct Apple Distribution .p12 from Keychain Access
-- **Once unblocked**: Update GitHub secret, change workflow TEAM_ID, verify pipeline
+All in-app, no new targets, no schema changes. One OTA build once green.
 
----
+- **Deep-link spine** (`papertrail://`), notification tap-through (taps land on the
+  record, not the app), Home Screen quick actions, OpenRecordIntent routing
+- **Spotlight indexing** — records + receipt OCR text searchable from iOS search
+- **Search fix** — serialNumber + room included in in-app search (bug-grade gap)
+- **Support-contact suggestions** — wire the dead Settings toggle to a curated
+  on-device brand→support directory (estimated-confidence, "verify before calling")
+- **Review prompting** — StoreKit requestReview at delight moments, once per version
+- **Mail/Files import** — CFBundleDocumentTypes: open PDFs/images from Mail, Files,
+  Safari straight into the import pipeline (80% of a share extension at 10% cost)
 
-## Planned — Near Term
+Also shipping: Rate link fix + Settings/Diagnostics cleanup (PR #79), member Library
+empty-state fix (PR #78).
 
-### Milestone 4 — Multi-User Sharing (High Priority)
-**Approach: Hybrid Core Data + SwiftData**
+## Next — Wave 2: "Money saved"
 
-The research concluded that CloudKit sharing via `NSPersistentCloudKitContainer` is the only serverless way to get real multi-user shared records on iOS. SwiftData doesn't support `CKShare` natively.
+- **Monthly Warranty Digest** — one notification/panel: expiring coverage total,
+  closing return windows, "check it for defects while repairs are free" nudges
+- **Insurance-Ready Report** — one-tap PDF: everything by room with photos, serials,
+  receipts, honest depreciation-based estimates; household-wide; doubles as the
+  anti-lock-in export guarantee and the moving-house inventory pack
+- **Proof Score** — per-record completeness (receipt? serial? warranty? photo?) and a
+  "worst offenders" fix-it list; feeds digest nudges
 
-**Architecture:**
-- Keep SwiftData for private records, drafts, settings
-- Add Core Data + NSPersistentCloudKitContainer for shared records
-- Shared records live in a separate CloudKit shared zone
-- UICloudSharingController for invite/manage participants (wrapped in UIViewControllerRepresentable)
+## Then — Wave 3: extensions (infra-heavy)
 
-**Implementation plan:**
-1. Define Core Data model (.xcdatamodeld) mirroring PurchaseRecord + Attachment
-2. Set up NSPersistentCloudKitContainer with private + shared store configs
-3. Build CoreDataSharingManager to handle share creation, acceptance, participant management
-4. CloudSharingView wrapping UICloudSharingController
-5. Handle share acceptance via scene delegate / universal links
-6. UI to distinguish "My Records" vs "Shared With Me"
-7. Conflict resolution strategy for concurrent edits
-8. Migrate existing export-based sharing to coexist with live sharing
+New targets = pbxproj surgery + App Group + new provisioning + CI signing changes,
+done blind (no local Xcode). Ship infra first as its own empty-but-compiling PR.
 
-**Complexity:** 10-20 days for production quality
-**Risk:** Two persistence systems add maintenance overhead
-**Prerequisite:** Sign in with Apple (done), iCloud entitlements (done)
+- **Widget extension** — Home/Lock Screen "expiring soon" widgets + Control Center
+  scan button. Widgets read a JSON snapshot in the App Group, NEVER the SwiftData
+  store (moving the CloudKit-backed store is a forbidden-risk migration)
+- **Share extension** — screenshots/images/PDFs shared from any app land in an App
+  Group inbox; main app drains it into the import pipeline (no OCR in-extension)
 
-### iCloud Sync Status UI
-- Add a `CloudSyncMonitor` for PaperTrail so users can see when records are uploading/downloading with iCloud
-- SwiftData does not expose sync progress directly, but `NSPersistentCloudKitContainer.eventChangedNotification` can be observed from the underlying Core Data / CloudKit stack
-- Planned states:
-  - idle
-  - syncing("Uploading to iCloud")
-  - syncing("Downloading from iCloud")
-  - success
-  - failed(error)
-- Surface this as a small status pill/banner in Settings and optionally after save/import actions
-- Nice follow-up: keep last sync timestamp + last error for debugging user reports
-- Reference: AzamSharp article on SwiftData iCloud sync status (2026-03-16)
-- Complexity: 1-2 days
+## Planned — Later
 
-### Spotlight Search Integration
-- Index records via CSSearchableItem
-- Search PaperTrail records from iOS home screen
-- Low complexity (1-2 days), high discoverability impact
-
-### Haptic Feedback
-- On save, delete, scan complete
-- Tiny effort, noticeable polish
-
----
-
-## Planned — Medium Term
-
-### Share Extension
-- Accept images/PDFs from other apps into PaperTrail
-- Key for daily workflow: screenshot receipt in WhatsApp → share to PaperTrail
-- Requires App Group for shared container access
-- Complexity: 3-5 days
-
-### Onboarding Flow
-- First-launch walkthrough: scan → OCR → save
-- Explain value proposition visually
-- Complexity: 2-3 days
-
-### Widget
-- Home screen widget showing expiring warranties
-- WidgetKit + App Intent
-- Complexity: 2-3 days
-
-### PDF Export
-- Generate PDF of a record with attachments
-- Useful for insurance claims, returns
-- Complexity: 1-2 days
-
----
-
-## Planned — Longer Term
-
-### Biometric Lock
-- Face ID / Touch ID to protect records
-- LAContext authentication
-- Complexity: 1-2 days
-
-### App Icon
-- Custom designed icon
-- Replace default Xcode icon
-
-### Receipt Amount Breakdown
-- Subtotal, tax, total as separate fields
-- Enhanced OCR to extract line items
-
-### Merchant Auto-Complete
-- Suggest previously used merchant names
-- Local dictionary from existing records
-
-### Accessibility Audit
-- VoiceOver labels on all custom views
-- Dynamic Type testing
-- Reduce motion support
-
-### Multiple Scan Sessions
-- Add more pages/photos to an existing record
-- Currently only at creation time
-
-### Dark Mode Audit
-- Verify all custom colors work in both modes
-- Test on OLED vs LCD displays
+- **Monetization v1** — StoreKit 2 subscription ("PaperTrail Plus"): household
+  sharing beyond 1 member, insurance report, advanced reminders. Scanning and export
+  stay free forever. Details: [`docs/MONETIZATION.md`](MONETIZATION.md)
+- **Warranty Brain** (big bet, deferred — hard): auto coverage stack — manufacturer
+  warranty length by brand, AppleCare detection, credit-card warranty extension,
+  split parts/labor warranties. Most-wished least-solved gap in the category
+- **Recall alerts** — local matching of owned items against public recall feeds
+  (CPSC/FDA); Centriq's orphaned killer feature; retention driver
+- **Visual intelligence / IndexedEntity** (iOS 26) — point the camera at the broken
+  appliance, PaperTrail surfaces the record; interactive Siri snippets
+- **"Year in Stuff"** — annual shareable wrapped, FM-written narrative, on-device
+- **Ask Your Archive** — FM Q&A over records ("which Samsung stuff is still covered?")
+- **Spending insights** — Swift Charts by room/category/merchant (per-currency)
+- Onboarding flow; iCloud sync status pill; biometric lock; accessibility audit;
+  merchant auto-complete; multiple scan sessions; receipt amount breakdown
 
 ---
 
 ## Architecture Notes
 
-### Current Stack
-- SwiftUI (iOS 26+)
-- SwiftData for persistence
-- CloudKit automatic sync (private)
-- Vision framework for OCR
-- VisionKit for document scanning
-- Apple Foundation Models for intelligent field extraction (with heuristic fallback)
-- AuthenticationServices (Sign in with Apple)
-- UserNotifications (warranty reminders)
+### Current stack
+- SwiftUI (iOS 26+), SwiftData + CloudKit automatic sync (private store)
+- CKSyncEngine ×2 (private + shared DB) for household sharing, beside SwiftData
+- Vision/VisionKit OCR + scanning; Foundation Models extraction w/ heuristic fallback
+- UserNotifications; App Intents; Sentry (events, breadcrumbs, structured logs)
+- CI: GitHub Actions (sim tests on PR; ad-hoc OTA on master push; TestFlight,
+  website, CloudKit schema on dispatch). No local Xcode — CI green = compiles only;
+  UI/runtime claims need on-device verification.
 
-### Future Stack Additions (for sharing)
-- Core Data + NSPersistentCloudKitContainer (shared records only)
-- CloudKit framework (CKShare, CKContainer)
-
-### Named Agent Setup (OpenClaw)
-- **main** (Codex 5.4) — orchestrator, user-facing
-- **coder** (Opus 4.6) — code writing, complex Swift
-- **ci-worker** (Sonnet 4.5) — GitHub Actions, CI/CD
-- **researcher** (Codex 5.4) — web research, planning
-
-### Key Identifiers
-- Bundle ID: nikhilsh.PaperTrail
-- iCloud container: iCloud.nikhilsh.PaperTrail
-- Team ID (profile): EHW7L3679R
-- Team ID (project): 635A559UST (needs alignment)
-- Repo: github.com:nikhilsh/PaperTrail
-- Branch: master
+### Key identifiers
+- Bundle ID: nikhilsh.PaperTrail · iCloud container: iCloud.nikhilsh.PaperTrail
+- Team ID: EHW7L3679R (unified — the old 635A559UST mismatch is resolved)
+- App Store: app id 6788663812 · Repo: github.com/nikhilsh/PaperTrail (master)
