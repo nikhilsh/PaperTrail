@@ -180,9 +180,12 @@ final class HouseholdManager {
     // MARK: - Zone-wide share (flag-on path)
 
     private func makeZoneShare() async throws -> (CKShare, CKContainer) {
-        if let share = cachedShare, isHouseholdOwner {
-            return (share, container)
-        }
+        // No cachedShare fast path here: the share sheet mutates the share
+        // (add/remove participants, stop sharing), and CloudKit rejects those
+        // saves with a silent conflict if the instance carries a stale change
+        // tag. Always hand the sheet a fresh server copy — `refresh()` may
+        // have cached this share long before the sheet opens. (This is also
+        // what guarantees ensureShareBranding actually runs.)
 
         // Fix 6: dual-role guard. If this device is already a MEMBER of
         // someone else's household (found via the shared database),
@@ -262,7 +265,7 @@ final class HouseholdManager {
     /// What the invite renders as on the receiving device. Without a type and
     /// thumbnail, iOS shows the anonymous "wants to collaborate" bubble with a
     /// generic document glyph — nothing says PaperTrail.
-    private static let shareTitle = "PaperTrail Household"
+    static let shareTitle = "PaperTrail Household"
     private static let shareTypeIdentifier = "nikhilsh.PaperTrail.household"
 
     private func brandShare(_ share: CKShare) {
@@ -300,7 +303,7 @@ final class HouseholdManager {
     /// The app icon, downscaled for the CKShare thumbnail. Resolved through
     /// `CFBundleIcons` because asset-catalog app icons aren't directly loadable
     /// by the catalog name.
-    private static func shareThumbnailData() -> Data? {
+    static func shareThumbnailData() -> Data? {
         guard let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
               let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
               let files = primary["CFBundleIconFiles"] as? [String],
@@ -408,16 +411,23 @@ final class HouseholdManager {
     private static func members(from share: CKShare) -> [HouseholdMember] {
         share.participants.compactMap { participant in
             let identity = participant.userIdentity
-            let components = identity.nameComponents
+            let email = identity.lookupInfo?.emailAddress
+            // iCloud usually withholds nameComponents until the invitee
+            // accepts (and sometimes after) — fall back to the email or phone
+            // the invite was addressed to before giving up on a placeholder.
+            let formatted = identity.nameComponents.map {
+                PersonNameComponentsFormatter().string(from: $0)
+            } ?? ""
             let name: String
-            if let components {
-                let formatter = PersonNameComponentsFormatter()
-                let formatted = formatter.string(from: components)
-                name = formatted.isEmpty ? "Member" : formatted
+            if !formatted.isEmpty {
+                name = formatted
+            } else if let email {
+                name = email
+            } else if let phone = identity.lookupInfo?.phoneNumber {
+                name = phone
             } else {
                 name = participant.role == .owner ? "You" : "Member"
             }
-            let email = identity.lookupInfo?.emailAddress
             let role: HouseholdRole
             switch (participant.role, participant.acceptanceStatus) {
             case (.owner, _): role = .owner
