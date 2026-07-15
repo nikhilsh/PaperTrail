@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("lastCloudSyncDate") private var lastCloudSyncRaw = 0.0
     @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
+    @AppStorage("spotlightIndexingEnabled") private var spotlightIndexingEnabled = true
 
     private let reminders = ReminderSettings.shared
 
@@ -126,6 +127,10 @@ struct SettingsView: View {
                     SettingsRow(icon: "brain", iconColor: PT.gold, title: "Share anonymous learning data",
                                 subtitle: "Merchant patterns only — never your purchases",
                                 toggle: $communityLearningEnabled)
+                    SettingsRowDivider()
+                    SettingsRow(icon: "magnifyingglass", iconColor: PT.gold, title: "Show records in iOS search",
+                                subtitle: "Find receipts from the Home Screen",
+                                toggle: $spotlightIndexingEnabled)
                     SettingsRowDivider()
                     SettingsRow(icon: "lock", iconColor: PT.sage, title: "Records are private",
                                 subtitle: "Stored in your iCloud — only you can see them")

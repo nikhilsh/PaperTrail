@@ -64,7 +64,13 @@ extension PaperTrailAppDelegate: UNUserNotificationCenterDelegate {
         defer { completionHandler() }
         guard let recordIDString = response.notification.request.content.userInfo["recordID"] as? String,
               let recordID = UUID(uuidString: recordIDString) else {
-            AppLogger.warn("Notification tapped with no recordID (\(response.notification.request.identifier))", category: "deeplink")
+            // Notifications scheduled by builds ≤30 predate the recordID
+            // stamp — route them to the expiring/warranty list instead of
+            // dropping the tap on the floor.
+            AppLogger.warn("Notification tapped with no recordID (\(response.notification.request.identifier)) — routing to expiring list", category: "deeplink")
+            Task { @MainActor in
+                AppRouter.shared.navigate(to: .expiringSoon)
+            }
             return
         }
         Task { @MainActor in
@@ -101,6 +107,9 @@ final class PaperTrailSceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         if let shortcutItem = connectionOptions.shortcutItem {
             handleShortcutItem(shortcutItem, source: "cold launch")
+        }
+        if let metadata = connectionOptions.cloudKitShareMetadata {
+            handleShareAcceptance(metadata: metadata, source: "cold launch")
         }
     }
 

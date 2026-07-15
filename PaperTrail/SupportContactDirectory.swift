@@ -124,7 +124,15 @@ enum SupportContactDirectory {
             let key = normalize(candidate)
             guard !key.isEmpty else { continue }
             for brandKey in orderedKeys {
-                if key.hasPrefix(brandKey) || brandKey.hasPrefix(key) {
+                // The forward direction (`key.hasPrefix(brandKey)`) is safe at
+                // any length — it's the brand's own full key being a prefix of
+                // a longer token (e.g. "boseheadphones" → "bose"). The reverse
+                // direction (a short typed/parsed token being a prefix of a
+                // longer brand key, e.g. "lg" via exact match, "mi" wrongly
+                // hitting "microsoft"/"miele") needs a minimum length so a
+                // two-letter token like "Le" (Le Creuset) or "Mi" (Mi Robot
+                // Vacuum) can't accidentally collide with an unrelated brand.
+                if key.hasPrefix(brandKey) || (key.count >= 4 && brandKey.hasPrefix(key)) {
                     return byKey[brandKey]
                 }
             }

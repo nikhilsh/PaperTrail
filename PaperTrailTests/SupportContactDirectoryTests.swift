@@ -48,6 +48,25 @@ struct SupportContactDirectoryTests {
         }
     }
 
+    @Test func shortTokenDoesNotMatchUnrelatedLongerBrand() {
+        // "Le" (Le Creuset) must not collide with "Lenovo" via the reverse
+        // prefix direction — a 2-letter token is too short to be confident.
+        let leCreuset = SupportContactDirectory.match(merchantName: nil, productName: "Le Creuset Pot")
+        #expect(leCreuset == nil)
+
+        // "Mi" (Mi Robot Vacuum) must not collide with "Microsoft" or "Miele".
+        let miRobot = SupportContactDirectory.match(merchantName: nil, productName: "Mi Robot Vacuum")
+        #expect(miRobot == nil)
+    }
+
+    @Test func exactShortKeyStillMatches() {
+        // "LG" still matches LG exactly — the exact-match stage (and the
+        // forward prefix direction) are untouched by the reverse-direction
+        // minimum-length guard.
+        let entry = SupportContactDirectory.match(merchantName: nil, productName: "LG TV")
+        #expect(entry?.key == "lg")
+    }
+
     @Test func phoneOnlyPresentWhereCurated() {
         // Spot-check a brand we intentionally left phone-less because there's
         // no single confident global number.

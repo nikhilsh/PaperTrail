@@ -21,9 +21,20 @@ enum SpotlightIndexer {
     /// a receipt's full text is rarely useful beyond the first page or two.
     static let maxTextContentBytes = 4096
 
+    /// Trust toggle backing key — Settings → "Your data" → "Show records in
+    /// iOS search" (default on). Read fresh on every call (not cached) since
+    /// it's cheap and can change between a debounce firing and it running.
+    private static let indexingEnabledKey = "spotlightIndexingEnabled"
+
+    nonisolated static var indexingEnabled: Bool {
+        (UserDefaults.standard.object(forKey: indexingEnabledKey) as? Bool) ?? true
+    }
+
     /// Reindex a single record — call after any save that changes fields
-    /// Spotlight surfaces.
+    /// Spotlight surfaces. No-ops when the user has turned Spotlight
+    /// indexing off in Settings.
     static func index(_ record: PurchaseRecord, attachments: [Attachment]) {
+        guard indexingEnabled else { return }
         let item = searchableItem(for: record, attachments: attachments)
         CSSearchableIndex.default().indexSearchableItems([item]) { error in
             if let error {
@@ -49,39 +60,62 @@ enum SpotlightIndexer {
     /// Debounced full reindex — coalesces rapid foreground/background flips
     /// into one pass and runs off the render path (the fetch + `Task` hop
     /// happen after the current view update completes).
-    static func reindexAllDebounced(modelContext: ModelContext) {
+    static func reindexAllDebounced() {
         reindexTask?.cancel()
         reindexTask = Task {
             try? await Task.sleep(for: debounceInterval)
             guard !Task.isCancelled else { return }
-            reindexAll(modelContext: modelContext)
+            reindexAll()
         }
     }
 
-    static func reindexAll(modelContext: ModelContext) {
-        do {
-            let records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
-            let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
-            let attachmentsByRecord = Dictionary(grouping: attachments) { $0.recordID }
-            let items = records.map { record in
-                searchableItem(for: record, attachments: attachmentsByRecord[record.id] ?? [])
+    /// Full reindex: fetch + `CSSearchableItem` construction happen entirely
+    /// off the main actor, in a detached task with its own `ModelContext`
+    /// (never the caller's — SwiftData models don't cross actors). Always
+    /// deletes the existing "records" domain first, then indexes the fresh
+    /// batch in the delete's completion — so a record deleted on another
+    /// device and pulled down by CloudKit sync doesn't leave a stale,
+    /// unopenable Spotlight entry behind. When the user has turned Spotlight
+    /// indexing off, the delete still runs (purging the index) but nothing
+    /// gets re-indexed.
+    static func reindexAll() {
+        Task.detached(priority: .utility) {
+            let enabled = indexingEnabled
+            let context = ModelContext(PaperTrailModelContainer.shared)
+            let items: [CSSearchableItem]
+            do {
+                let records = try context.fetch(FetchDescriptor<PurchaseRecord>())
+                let attachments = try context.fetch(FetchDescriptor<Attachment>())
+                let attachmentsByRecord = Dictionary(grouping: attachments) { $0.recordID }
+                items = enabled ? records.map { record in
+                    searchableItem(for: record, attachments: attachmentsByRecord[record.id] ?? [])
+                } : []
+            } catch {
+                AppLogger.error("Spotlight full reindex fetch failed: \(error)", category: "spotlight")
+                return
             }
-            guard !items.isEmpty else { return }
-            CSSearchableIndex.default().indexSearchableItems(items) { error in
+
+            CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [domainIdentifier]) { error in
                 if let error {
-                    AppLogger.error("Spotlight full reindex failed: \(error)", category: "spotlight")
-                } else {
-                    AppLogger.info("Spotlight full reindex completed (\(items.count) records)", category: "spotlight")
+                    AppLogger.error("Spotlight domain delete failed: \(error)", category: "spotlight")
+                }
+                guard enabled, !items.isEmpty else { return }
+                CSSearchableIndex.default().indexSearchableItems(items) { error in
+                    if let error {
+                        AppLogger.error("Spotlight full reindex failed: \(error)", category: "spotlight")
+                    } else {
+                        AppLogger.info("Spotlight full reindex completed (\(items.count) records)", category: "spotlight")
+                    }
                 }
             }
-        } catch {
-            AppLogger.error("Spotlight full reindex fetch failed: \(error)", category: "spotlight")
         }
     }
 
     // MARK: - Item construction
 
-    private static func searchableItem(for record: PurchaseRecord, attachments: [Attachment]) -> CSSearchableItem {
+    /// `nonisolated` so `reindexAll()`'s detached task can build items
+    /// without hopping back to the main actor per record.
+    nonisolated private static func searchableItem(for record: PurchaseRecord, attachments: [Attachment]) -> CSSearchableItem {
         let set = CSSearchableItemAttributeSet(contentType: .text)
         set.title = record.productName
         set.contentDescription = contentDescription(for: record)

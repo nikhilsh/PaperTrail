@@ -158,7 +158,14 @@ struct AppShellView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                SpotlightIndexer.reindexAllDebounced(modelContext: modelContext)
+                SpotlightIndexer.reindexAllDebounced()
+            }
+        }
+        .onChange(of: router.selectedTab) { _, newTab in
+            // A deep-linked/notification/Spotlight-tapped record push shouldn't
+            // ghost-reappear if the user leaves the Library tab and comes back.
+            if newTab != .library {
+                router.pendingRecordID = nil
             }
         }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
@@ -178,15 +185,28 @@ struct AppShellView: View {
 
     private func handleOpenURL(_ url: URL) {
         if url.isFileURL {
-            AppLogger.info("Incoming file: \(url.lastPathComponent)", category: "import")
+            guard router.pendingImportPayload == nil else {
+                AppLogger.warn("Import ignored — another import is in review", category: "import")
+                return
+            }
+            AppLogger.info("Incoming file: \(fileDescription(for: url))", category: "import")
             Task { await importIncomingFile(url) }
             return
         }
         guard let route = Route(url: url) else {
-            AppLogger.warn("Unrecognized URL: \(url.absoluteString)", category: "deeplink")
+            AppLogger.warn("Unrecognized URL: \(url.scheme ?? "nil")", category: "deeplink")
             return
         }
         router.navigate(to: route)
+    }
+
+    /// File extension + byte size only — never the filename or full path,
+    /// which can carry PII (a scanned document's original name) into Sentry.
+    private func fileDescription(for url: URL) -> String {
+        let ext = url.pathExtension.isEmpty ? "unknown" : url.pathExtension.lowercased()
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
+        let sizeText = bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "unknown size"
+        return "\(ext), \(sizeText)"
     }
 
     /// Mail/Files "Open in PaperTrail": the URL is only guaranteed valid for
@@ -198,18 +218,27 @@ struct AppShellView: View {
         defer { if needsStop { url.stopAccessingSecurityScopedResource() } }
 
         guard let localCopy = DocumentInbox.copy(url) else {
-            AppLogger.error("Failed to copy incoming file to inbox: \(url.lastPathComponent)", category: "import")
+            AppLogger.error("Failed to copy incoming file to inbox: \(fileDescription(for: url))", category: "import")
             return
         }
+        defer { DocumentInbox.delete(localCopy) }
 
         let images = ImportPipeline.images(fromFileURLs: [localCopy])
         guard !images.isEmpty else {
-            AppLogger.error("No images extracted from incoming file: \(url.lastPathComponent)", category: "import")
+            AppLogger.error("No images extracted from incoming file: \(fileDescription(for: url))", category: "import")
             return
         }
 
         let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
         let result = await ScanningService().process(images: images, type: .receipt, learnedMerchants: learned)
+
+        if router.showCapture {
+            // Let the capture cover's dismissal animation settle before
+            // presenting the import review cover — two full-screen covers
+            // fighting over presentation at once breaks SwiftUI's transition.
+            router.showCapture = false
+            try? await Task.sleep(for: .milliseconds(600))
+        }
         router.pendingImportPayload = DraftPayload(type: .receipt, attachments: result.attachments, ocr: result.ocr)
         AppLogger.info("Incoming file routed to review", category: "import")
     }
