@@ -228,6 +228,11 @@ struct CloudSharingController: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UICloudSharingController {
         let controller = UICloudSharingController(share: share, container: container)
         controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+        // System UI we can't restyle wholesale — but the app's identity is
+        // fixed warm-dark (PTTheme), so pin the sheet dark and tint its
+        // controls gold instead of leaving stock blue-on-whatever-mode.
+        controller.overrideUserInterfaceStyle = .dark
+        controller.view.tintColor = UIColor(PT.gold)
         return controller
     }
 
