@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import CoreSpotlight
 
 // MARK: - Tabs
 
@@ -10,30 +11,102 @@ enum AppTab: Hashable {
     case settings
 }
 
-/// Shared navigation state so any screen can deep-link to another tab
-/// (e.g. the Library attention banner jumps to the Warranty tab).
+// MARK: - Routes
+
+/// Every place outside normal in-app navigation that can ask PaperTrail to
+/// jump somewhere: a `papertrail://` deep link, a tapped notification, a
+/// Home Screen quick action, a Spotlight search result, or an App Intent.
+/// All of them funnel through `AppRouter.navigate(to:)` so there's one
+/// choke point to log from and one place to extend.
+enum Route: Hashable {
+    case record(UUID)
+    case capture
+    case expiringSoon
+}
+
+extension Route {
+    /// Parses a `papertrail://` URL. Recognized forms:
+    /// `papertrail://record/<uuid>`, `papertrail://capture`,
+    /// `papertrail://expiring`. Returns `nil` for anything else, including a
+    /// malformed or missing UUID on a `record` link.
+    init?(url: URL) {
+        guard url.scheme == "papertrail" else { return nil }
+        switch url.host {
+        case "capture":
+            self = .capture
+        case "expiring":
+            self = .expiringSoon
+        case "record":
+            guard let uuidString = url.pathComponents.dropFirst().first,
+                  let uuid = UUID(uuidString: uuidString) else { return nil }
+            self = .record(uuid)
+        default:
+            return nil
+        }
+    }
+}
+
+/// Shared navigation state so any screen — or any non-view entry point
+/// (notifications, quick actions, Spotlight, App Intents) — can deep-link
+/// into the app. `.shared` is the single instance: it's created before
+/// `AppShellView` necessarily exists (an App Intent can set a pending route
+/// while the app is still launching), so every caller reads/writes the same
+/// object rather than one scoped to a view's lifetime.
 @Observable
 @MainActor
 final class AppRouter {
+    static let shared = AppRouter()
+
     var selectedTab: AppTab = .library
     var showCapture = false
+
+    /// A record to push onto the Library tab's stack, consumed by
+    /// `navigationDestination(item:)` in `AppShellView`.
+    var pendingRecordID: UUID?
+
+    /// A document handed to PaperTrail via Mail/Files "Open in PaperTrail",
+    /// already run through extraction — consumed by a full-screen cover that
+    /// presents the same review screen a manual scan would.
+    var pendingImportPayload: DraftPayload?
+
+    func navigate(to route: Route) {
+        switch route {
+        case .record(let id):
+            pendingRecordID = id
+            selectedTab = .library
+        case .capture:
+            showCapture = true
+        case .expiringSoon:
+            selectedTab = .warranty
+        }
+        AppLogger.info("Routed to \(route)", category: "deeplink")
+    }
 }
 
 // MARK: - Shell
 
 struct AppShellView: View {
-    @State private var router = AppRouter()
+    @State private var router = AppRouter.shared
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("community.consentPrompted") private var communityConsentPrompted = false
     @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
     @State private var showLearningConsent = false
 
     var body: some View {
+        @Bindable var router = router
+
         ZStack(alignment: .bottom) {
             // Active tab content. Each destination keeps its own NavigationStack.
             Group {
                 switch router.selectedTab {
                 case .library:
-                    NavigationStack { LibraryView() }
+                    NavigationStack {
+                        LibraryView()
+                            .navigationDestination(item: $router.pendingRecordID) { recordID in
+                                RecordDetailByIDView(recordID: recordID)
+                            }
+                    }
                 case .warranty:
                     NavigationStack { WarrantyView() }
                 case .search:
@@ -60,9 +133,32 @@ struct AppShellView: View {
             .tint(PT.gold)
             .preferredColorScheme(.dark)
         }
+        .fullScreenCover(item: $router.pendingImportPayload) { payload in
+            NavigationStack {
+                DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr)
+            }
+            .tint(PT.gold)
+            .preferredColorScheme(.dark)
+        }
         .onAppear {
             if !communityConsentPrompted {
                 showLearningConsent = true
+            }
+        }
+        .onOpenURL { url in
+            handleOpenURL(url)
+        }
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let uniqueID = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+                  let recordID = UUID(uuidString: uniqueID) else {
+                AppLogger.warn("Spotlight activity missing/invalid identifier", category: "deeplink")
+                return
+            }
+            router.navigate(to: .record(recordID))
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                SpotlightIndexer.reindexAllDebounced(modelContext: modelContext)
             }
         }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
@@ -75,6 +171,70 @@ struct AppShellView: View {
             }
         } message: {
             Text("When you correct a scanned field, PaperTrail can share that correction anonymously (no account, no identifiers, a random install ID only) to improve extraction for everyone. You can change this anytime in Settings.")
+        }
+    }
+
+    // MARK: Deep links
+
+    private func handleOpenURL(_ url: URL) {
+        if url.isFileURL {
+            AppLogger.info("Incoming file: \(url.lastPathComponent)", category: "import")
+            Task { await importIncomingFile(url) }
+            return
+        }
+        guard let route = Route(url: url) else {
+            AppLogger.warn("Unrecognized URL: \(url.absoluteString)", category: "deeplink")
+            return
+        }
+        router.navigate(to: route)
+    }
+
+    /// Mail/Files "Open in PaperTrail": the URL is only guaranteed valid for
+    /// this callback, so it's copied into a local inbox before the security
+    /// scope is released, then run through the same extraction pipeline as
+    /// manual Photos/Files import (`ImportPipeline`, shared with `ImportView`).
+    private func importIncomingFile(_ url: URL) async {
+        let needsStop = url.startAccessingSecurityScopedResource()
+        defer { if needsStop { url.stopAccessingSecurityScopedResource() } }
+
+        guard let localCopy = DocumentInbox.copy(url) else {
+            AppLogger.error("Failed to copy incoming file to inbox: \(url.lastPathComponent)", category: "import")
+            return
+        }
+
+        let images = ImportPipeline.images(fromFileURLs: [localCopy])
+        guard !images.isEmpty else {
+            AppLogger.error("No images extracted from incoming file: \(url.lastPathComponent)", category: "import")
+            return
+        }
+
+        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+        let result = await ScanningService().process(images: images, type: .receipt, learnedMerchants: learned)
+        router.pendingImportPayload = DraftPayload(type: .receipt, attachments: result.attachments, ocr: result.ocr)
+        AppLogger.info("Incoming file routed to review", category: "import")
+    }
+}
+
+/// Resolves a `pendingRecordID` (from a deep link, notification, quick
+/// action, or Spotlight tap) to a live `PurchaseRecord` and pushes
+/// `RecordDetailView` — or a not-found state if the record doesn't exist on
+/// this device (e.g. it was deleted, or it's a household member's own record
+/// that's only mirrored, not stored locally).
+private struct RecordDetailByIDView: View {
+    @Query private var records: [PurchaseRecord]
+
+    init(recordID: UUID) {
+        _records = Query(filter: #Predicate<PurchaseRecord> { $0.id == recordID })
+    }
+
+    var body: some View {
+        if let record = records.first {
+            RecordDetailView(record: record)
+        } else {
+            ContentUnavailableView("Record not found", systemImage: "questionmark.folder")
+                .onAppear {
+                    AppLogger.warn("Deep-linked record not found locally", category: "deeplink")
+                }
         }
     }
 }

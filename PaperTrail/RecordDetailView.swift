@@ -720,6 +720,7 @@ struct RecordDetailView: View {
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
+        SpotlightIndexer.deindex(recordID: record.id)
         modelContext.delete(record)
 
         // Fix 1: deletion requires positive evidence, and this IS that

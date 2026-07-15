@@ -1,5 +1,6 @@
 import CloudKit
 import UIKit
+import UserNotifications
 
 /// The app has no app/scene delegate under the pure SwiftUI lifecycle used
 /// elsewhere in PaperTrail. CloudKit share acceptance (tapping a household
@@ -10,8 +11,19 @@ import UIKit
 /// driving the window/scene exactly as it does today, this file exists only
 /// to catch the share-acceptance callback and forward it to
 /// `HouseholdManager.acceptShare(metadata:)` (Milestone 4 Phase 2 — see
-/// docs/SHARING_ARCHITECTURE.md).
+/// docs/SHARING_ARCHITECTURE.md). It's also the natural home for the other
+/// UIKit-only entry points the deep-link spine needs: notification
+/// tap-through (`UNUserNotificationCenterDelegate`) and Home Screen quick
+/// actions (the scene delegate's `performActionFor` / `connectionOptions`).
 final class PaperTrailAppDelegate: NSObject, UIApplicationDelegate {
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
 
     func application(
         _ application: UIApplication,
@@ -28,9 +40,51 @@ final class PaperTrailAppDelegate: NSObject, UIApplicationDelegate {
     // UIKit delivers the UIWindowSceneDelegate callback below instead.
 }
 
-/// Exists only to receive `userDidAcceptCloudKitShareWith:` — it must NOT
-/// create or manage a `UIWindow`; SwiftUI's `WindowGroup` continues to own
-/// the window/scene lifecycle entirely.
+// MARK: - Notification tap-through
+
+/// Routes a tapped warranty/return-window notification to its record (§1 —
+/// see NotificationManager, which stamps `userInfo["recordID"]` on every
+/// request it schedules) and lets notifications banner+sound while the app
+/// is foregrounded, which UIKit suppresses by default.
+extension PaperTrailAppDelegate: UNUserNotificationCenterDelegate {
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        defer { completionHandler() }
+        guard let recordIDString = response.notification.request.content.userInfo["recordID"] as? String,
+              let recordID = UUID(uuidString: recordIDString) else {
+            AppLogger.warn("Notification tapped with no recordID (\(response.notification.request.identifier))", category: "deeplink")
+            return
+        }
+        Task { @MainActor in
+            AppRouter.shared.navigate(to: .record(recordID))
+        }
+    }
+}
+
+// MARK: - Home Screen quick actions
+
+/// `UIApplicationShortcutItemType` values — must match `PaperTrail-Info.plist`'s
+/// static `UIApplicationShortcutItems`.
+enum ShortcutItemType {
+    static let scan = "nikhilsh.PaperTrail.scan"
+    static let expiringSoon = "nikhilsh.PaperTrail.expiringSoon"
+}
+
+/// Exists only to receive `userDidAcceptCloudKitShareWith:` and quick-action
+/// callbacks — it must NOT create or manage a `UIWindow`; SwiftUI's
+/// `WindowGroup` continues to own the window/scene lifecycle entirely.
 final class PaperTrailSceneDelegate: NSObject, UIWindowSceneDelegate {
 
     func windowScene(
@@ -38,6 +92,42 @@ final class PaperTrailSceneDelegate: NSObject, UIWindowSceneDelegate {
         userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
     ) {
         handleShareAcceptance(metadata: cloudKitShareMetadata, source: "scene delegate")
+    }
+
+    /// Cold launch via a quick action: the shortcut item arrives in
+    /// `connectionOptions` instead of `performActionFor` below. Reads only
+    /// `connectionOptions` — never touches `scene.windows` — so SwiftUI's own
+    /// window setup is untouched.
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        if let shortcutItem = connectionOptions.shortcutItem {
+            handleShortcutItem(shortcutItem, source: "cold launch")
+        }
+    }
+
+    /// Warm launch via a quick action: the app was already running.
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        handleShortcutItem(shortcutItem, source: "quick action")
+        completionHandler(true)
+    }
+
+    private func handleShortcutItem(_ shortcutItem: UIApplicationShortcutItem, source: String) {
+        let route: Route?
+        switch shortcutItem.type {
+        case ShortcutItemType.scan: route = .capture
+        case ShortcutItemType.expiringSoon: route = .expiringSoon
+        default: route = nil
+        }
+        guard let route else {
+            AppLogger.warn("Unrecognized shortcut item type: \(shortcutItem.type) (\(source))", category: "deeplink")
+            return
+        }
+        Task { @MainActor in
+            AppRouter.shared.navigate(to: route)
+        }
     }
 }
 

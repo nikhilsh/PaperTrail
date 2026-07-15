@@ -13,5 +13,62 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+
+	<!-- Deep-link scheme: papertrail://record/<uuid>, papertrail://capture,
+	     papertrail://expiring — parsed by AppShellView.Route(url:). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>nikhilsh.PaperTrail</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>papertrail</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Home Screen quick actions — handled in PaperTrailSceneDelegate
+	     (ShareAcceptance.swift). Types must match ShortcutItemType there. -->
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>nikhilsh.PaperTrail.scan</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Scan Receipt</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeCapturePhoto</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>nikhilsh.PaperTrail.expiringSoon</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Expiring Soon</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeTime</string>
+		</dict>
+	</array>
+
+	<!-- Mail/Files "Open in PaperTrail" — routed through onOpenURL's file-URL
+	     branch (AppShellView) into the same import pipeline as ImportView. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Receipt Document</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+				<string>public.image</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

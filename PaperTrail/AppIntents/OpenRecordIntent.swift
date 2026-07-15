@@ -2,16 +2,12 @@
 //  OpenRecordIntent.swift
 //  PaperTrail
 //
-//  "Open <item> in PaperTrail." READ-ONLY: just foregrounds the app.
-//
-//  The app has no deep-link mechanism to jump straight to a record today —
-//  there's no `onOpenURL` handler and no shared `NavigationPath`/route enum;
-//  `AppShellView.AppRouter` (AppShellView.swift) only tracks which tab is
-//  selected and whether the capture sheet is up, nothing record-specific.
-//  Building that plumbing is out of scope for this read-only App Intents
-//  pass, so this intent opens the app plainly and stops there. See the PR
-//  description for the follow-up if deep-linking to a specific record is
-//  wanted later.
+//  "Open <item> in PaperTrail." READ-ONLY: routes to the specific record via
+//  `AppRouter.shared` (AppShellView.swift) and foregrounds the app.
+//  `AppRouter` is a singleton specifically so an App Intent — which may run
+//  in a process the OS launched just to service it, before `AppShellView`
+//  exists — can set the pending route immediately; the shell picks it up as
+//  soon as it appears.
 //
 
 import AppIntents
@@ -27,7 +23,9 @@ struct OpenRecordIntent: AppIntent {
         Summary("Open \(\.$record) in PaperTrail")
     }
 
+    @MainActor
     func perform() async throws -> some IntentResult {
-        .result()
+        AppRouter.shared.navigate(to: .record(record.id))
+        return .result()
     }
 }

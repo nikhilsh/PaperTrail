@@ -854,18 +854,28 @@ struct DraftRecordView: View {
         // records, duplicate the metadata pointing at the same on-disk image files
         // so every record shows the receipt.
         let allAttachments = seededAttachments + extraAttachments
+        var attachmentsByRecord: [UUID: [Attachment]] = [:]
         if let primary = records.first {
             for attachment in allAttachments {
                 attachment.recordID = primary.id
                 modelContext.insert(attachment)
             }
+            attachmentsByRecord[primary.id] = allAttachments
             for record in records.dropFirst() {
+                var dups: [Attachment] = []
                 for attachment in allAttachments {
                     let dup = Attachment(type: attachment.type, localFilename: attachment.localFilename, ocrText: attachment.ocrText)
                     dup.recordID = record.id
                     modelContext.insert(dup)
+                    dups.append(dup)
                 }
+                attachmentsByRecord[record.id] = dups
             }
+        }
+
+        // Index every new record for on-device Spotlight search.
+        for record in records {
+            SpotlightIndexer.index(record, attachments: attachmentsByRecord[record.id] ?? [])
         }
 
         // Schedule reminders per the user's preferences (§1-B, §6).

@@ -49,6 +49,7 @@ struct NotificationManager {
             }
             content.sound = .default
             content.categoryIdentifier = "WARRANTY_EXPIRY"
+            content.userInfo = ["recordID": record.id.uuidString]
 
             let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
@@ -108,6 +109,7 @@ struct NotificationManager {
             }
             content.sound = .default
             content.categoryIdentifier = "RETURN_WINDOW"
+            content.userInfo = ["recordID": record.id.uuidString]
 
             let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
