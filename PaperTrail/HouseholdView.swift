@@ -97,7 +97,7 @@ struct HouseholdView: View {
                 }
             }
         }
-        .sheet(item: $sharePrep) { prep in
+        .sheet(item: $sharePrep, onDismiss: { Task { await manager.refresh() } }) { prep in
             CloudSharingController(share: prep.share, container: prep.container)
                 .ignoresSafeArea()
         }
@@ -225,9 +225,12 @@ struct CloudSharingController: UIViewControllerRepresentable {
     let share: CKShare
     let container: CKContainer
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIViewController(context: Context) -> UICloudSharingController {
         let controller = UICloudSharingController(share: share, container: container)
         controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+        controller.delegate = context.coordinator
         // System UI we can't restyle wholesale — but the app's identity is
         // fixed warm-dark (PTTheme), so pin the sheet dark and tint its
         // controls gold instead of leaving stock blue-on-whatever-mode.
@@ -237,4 +240,33 @@ struct CloudSharingController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UICloudSharingController, context: Context) {}
+
+    /// Without a delegate, a failed save inside the sheet (remove
+    /// participant, stop sharing) is swallowed whole — the row just stays
+    /// and nothing reaches Sentry. The refreshes keep our roster in step
+    /// with whatever the sheet actually persisted.
+    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+        func itemTitle(for csc: UICloudSharingController) -> String? {
+            HouseholdManager.shareTitle
+        }
+
+        func itemThumbnailData(for csc: UICloudSharingController) -> Data? {
+            HouseholdManager.shareThumbnailData()
+        }
+
+        func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
+            AppLogger.error("Share sheet failed to save share changes: \(error.localizedDescription)", category: "cloud.sharing")
+            Task { await HouseholdManager.shared.refresh() }
+        }
+
+        func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
+            AppLogger.info("Share sheet saved share changes", category: "cloud.sharing")
+            Task { await HouseholdManager.shared.refresh() }
+        }
+
+        func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {
+            AppLogger.info("Share sheet stopped sharing", category: "cloud.sharing")
+            Task { await HouseholdManager.shared.refresh() }
+        }
+    }
 }
