@@ -179,6 +179,10 @@ struct PaperTrailApp: App {
         // view renders so the design-system type is available on first paint.
         PTFont.registerIfNeeded()
 
+        // Copies left behind by a killed/crashed "Open in PaperTrail" import
+        // shouldn't accumulate in the temp inbox forever.
+        DocumentInbox.purgeAll()
+
         modelContainer = PaperTrailModelContainer.shared
     }
 

@@ -114,8 +114,16 @@ private struct ReviewPromptModifier: ViewModifier {
         content
             .onChange(of: prompter.shouldPrompt) { _, shouldPrompt in
                 guard shouldPrompt else { return }
-                requestReview()
-                prompter.didPrompt()
+                Task {
+                    // A delight moment (save/export) often fires right as a
+                    // full-screen cover is dismissing; StoreKit silently
+                    // suppresses the prompt if it's requested mid-transition.
+                    // Give the dismissal a moment to settle first — we still
+                    // burn the once-per-version budget either way.
+                    try? await Task.sleep(for: .seconds(1.5))
+                    requestReview()
+                    prompter.didPrompt()
+                }
             }
     }
 }

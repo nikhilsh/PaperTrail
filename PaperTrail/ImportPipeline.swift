@@ -25,23 +25,45 @@ enum ImportPipeline {
         return []
     }
 
+    /// A page-count cap protects against jetsam on huge scanned PDFs — nobody
+    /// needs more than the first 20 pages rasterized into a single receipt import.
+    static let maxPDFPages = 20
+    /// Longest output edge, in pixels, any rasterized page is allowed to reach.
+    static let maxRasterEdge: CGFloat = 4096
+    /// Pages whose PDF-point mediaBox exceeds this in either dimension are
+    /// almost certainly malformed/degenerate and are skipped rather than risk
+    /// an enormous allocation.
+    static let maxPageDimension: CGFloat = 20_000
+
     static func imagesFromPDF(_ url: URL) -> [UIImage] {
         guard let doc = PDFDocument(url: url) else { return [] }
         var result: [UIImage] = []
-        for i in 0..<doc.pageCount {
+        let pageCount = doc.pageCount
+        let cappedCount = min(pageCount, maxPDFPages)
+        if pageCount > maxPDFPages {
+            AppLogger.warn("PDF has \(pageCount) pages, truncating to \(maxPDFPages)", category: "import")
+        }
+        for i in 0..<cappedCount {
             guard let page = doc.page(at: i) else { continue }
             let bounds = page.bounds(for: .mediaBox)
-            let scale: CGFloat = 2
-            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            let image = renderer.image { ctx in
-                UIColor.white.set()
-                ctx.fill(CGRect(origin: .zero, size: size))
-                ctx.cgContext.translateBy(x: 0, y: size.height)
-                ctx.cgContext.scaleBy(x: scale, y: -scale)
-                page.draw(with: .mediaBox, to: ctx.cgContext)
+            guard bounds.width <= maxPageDimension, bounds.height <= maxPageDimension else {
+                AppLogger.warn("Skipping oversized PDF page \(i): \(Int(bounds.width))x\(Int(bounds.height))pt", category: "import")
+                continue
             }
-            result.append(image)
+            autoreleasepool {
+                let longestEdge = max(bounds.width, bounds.height)
+                let scale: CGFloat = longestEdge > 0 ? min(2, maxRasterEdge / longestEdge) : 2
+                let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+                let renderer = UIGraphicsImageRenderer(size: size)
+                let image = renderer.image { ctx in
+                    UIColor.white.set()
+                    ctx.fill(CGRect(origin: .zero, size: size))
+                    ctx.cgContext.translateBy(x: 0, y: size.height)
+                    ctx.cgContext.scaleBy(x: scale, y: -scale)
+                    page.draw(with: .mediaBox, to: ctx.cgContext)
+                }
+                result.append(image)
+            }
         }
         return result
     }
@@ -53,8 +75,12 @@ enum ImportPipeline {
 /// file is copied here before the scope is released and before async
 /// extraction (OCR/FM, which can take a few seconds) runs.
 enum DocumentInbox {
+    private static var baseURL: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("Inbox", isDirectory: true)
+    }
+
     private static var directory: URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Inbox", isDirectory: true)
+        let dir = baseURL
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -70,8 +96,20 @@ enum DocumentInbox {
             try FileManager.default.copyItem(at: url, to: destination)
             return destination
         } catch {
-            AppLogger.error("DocumentInbox copy failed for \(url.lastPathComponent): \(error)", category: "import")
+            AppLogger.error("DocumentInbox copy failed: \(error)", category: "import")
             return nil
         }
+    }
+
+    /// Removes a single inbox copy once it's no longer needed (extraction
+    /// has consumed it, success or failure).
+    static func delete(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Purges the entire inbox directory — called once at app launch so
+    /// copies left behind by a killed/crashed import don't accumulate forever.
+    static func purgeAll() {
+        try? FileManager.default.removeItem(at: baseURL)
     }
 }
