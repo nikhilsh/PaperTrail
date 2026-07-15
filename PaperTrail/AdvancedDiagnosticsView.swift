@@ -1,9 +1,6 @@
 import SwiftUI
 import SwiftData
 import UIKit
-#if canImport(FoundationModels)
-import FoundationModels
-#endif
 
 /// The new home for every technical value that used to greet users on the main
 /// Settings surface (§2). Pushed from Settings → "Advanced & Diagnostics".
@@ -17,14 +14,9 @@ struct AdvancedDiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
-    @AppStorage("cloudKitInitError") private var cloudKitInitError = ""
     @AppStorage("cloudKitAccountStatus") private var cloudKitAccountStatus = "Unknown"
-    @AppStorage("cloudKitContainerStatus") private var cloudKitContainerStatus = "Not checked"
-    @AppStorage("cloudKitContainerIdentifier") private var cloudKitContainerIdentifier = "iCloud.nikhilsh.PaperTrail"
     @AppStorage("crashReportingEnabled") private var crashReportingEnabled = true
 
-    @State private var fmDiagResult = ""
-    @State private var fmDiagRunning = false
     @State private var copied = false
     @State private var correctionHealth = CorrectionLogger.CorrectionHealth()
 
@@ -140,49 +132,6 @@ struct AdvancedDiagnosticsView: View {
                     SettingsRow(title: "Warranty notifications", value: scheduledNotificationsSummary)
                 }
 
-                // CloudKit container
-                SettingsSectionLabel(text: "CloudKit container")
-                SettingsCard {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Container").font(.system(size: 12)).foregroundStyle(PT.txt3)
-                        Text(cloudKitContainerIdentifier)
-                            .font(PTFont.mono(12.5))
-                            .foregroundStyle(PT.txt2)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                }
-
-                if !cloudKitContainerStatus.isEmpty, cloudKitContainerStatus != "Not checked" {
-                    Text("Preflight: \(cloudKitContainerStatus)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(PT.txt3)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 4)
-                }
-
-                // On-device intelligence
-                SettingsSectionLabel(text: "On-device intelligence")
-                SettingsCard {
-                    SettingsRow(
-                        title: "Test Foundation Models",
-                        subtitle: "Run a sample receipt extraction",
-                        value: fmDiagRunning ? "Running…" : "Run", valueColor: PT.gold, showChevron: true,
-                        action: { Task { await runFMDiagnostic() } }
-                    )
-                    if !fmDiagResult.isEmpty {
-                        SettingsRowDivider()
-                        Text(fmDiagResult)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(PT.txt2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16)
-                    }
-                }
-
                 // Learning — how the extraction self-improvement loop is doing.
                 SettingsSectionLabel(text: "Learning")
                 SettingsCard {
@@ -215,8 +164,6 @@ struct AdvancedDiagnosticsView: View {
                     SettingsRow(title: "Version", value: versionString)
                     SettingsRowDivider()
                     SettingsRow(title: "Build", value: buildString)
-                    SettingsRowDivider()
-                    SettingsRow(title: "Milestone", value: "M3 · sync, auth, sharing")
                 }
             }
             .padding(.horizontal, PT.Metric.screenPad)
@@ -262,9 +209,6 @@ struct AdvancedDiagnosticsView: View {
         lines.append("Local persistence: SwiftData + CloudKit")
         lines.append("Active backend: \(activeSyncBackend)")
         lines.append("iCloud account: \(cloudKitAccountStatus)")
-        lines.append("CK container: \(cloudKitContainerIdentifier)")
-        lines.append("CK preflight: \(cloudKitContainerStatus)")
-        if !cloudKitInitError.isEmpty { lines.append("CK init error: \(cloudKitInitError)") }
         lines.append("")
         lines.append("[Storage]")
         lines.append("Records: \(records.count)")
@@ -285,8 +229,6 @@ struct AdvancedDiagnosticsView: View {
         }
         lines.append("")
         lines.append("[Observability]")
-        lines.append("Sentry configured: \(AppLogger.isSentryEnabled)")
-        lines.append("Sentry host: \(AppLogger.sentryHost ?? "Not configured")")
         lines.append("Crash reporting enabled: \(crashReportingEnabled)")
 
         UIPasteboard.general.string = lines.joined(separator: "\n")
@@ -311,50 +253,4 @@ struct AdvancedDiagnosticsView: View {
         }
     }
 
-    // MARK: - Foundation Models diagnostic (relocated from SettingsView)
-
-    private func runFMDiagnostic() async {
-        guard !fmDiagRunning else { return }
-        fmDiagRunning = true
-        defer { fmDiagRunning = false }
-
-        #if canImport(FoundationModels)
-        let availability = SystemLanguageModel.default.availability
-        let rawAvailability = String(describing: availability)
-        var result = "Raw availability: \(rawAvailability)\n"
-        result += "Device: \(Self.deviceModelIdentifier())\n"
-        result += "iOS: \(UIDevice.current.systemVersion)\n"
-
-        guard availability == .available else {
-            result += "\n⚠️ Model not available.\nState: \(rawAvailability)\n"
-            result += "Apple Intelligence may be off, the model downloading, or the region/language unsupported."
-            fmDiagResult = result
-            return
-        }
-
-        do {
-            let session = LanguageModelSession()
-            let response = try await session.respond(to: "Say hello in one word")
-            result += "\n✅ Plain text: \(response)\n"
-        } catch {
-            result += "\n❌ Plain text error: \(error.localizedDescription)\n"
-        }
-
-        do {
-            let session = LanguageModelSession(instructions: "Extract receipt fields from the text. Respond in English.")
-            let structuredResponse = try await session.respond(
-                to: "Store: Apple Singapore, Product: iPhone 16 Pro, Amount: $1599, Date: 2025-01-15",
-                generating: ReceiptExtractionSchema.self
-            )
-            let schema = structuredResponse.content
-            result += "✅ Structured: product=\(schema.productName ?? "nil"), merchant=\(schema.merchantName ?? "nil"), amount=\(schema.amount.map { String($0) } ?? "nil")\n"
-        } catch {
-            result += "❌ Structured error: \(error.localizedDescription)\n"
-        }
-
-        fmDiagResult = result
-        #else
-        fmDiagResult = "FoundationModels framework not available in this build"
-        #endif
-    }
 }
