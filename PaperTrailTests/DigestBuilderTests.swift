@@ -212,4 +212,59 @@ struct DigestBuilderTests {
         #expect(summary.expiringWarrantyCount == 0)
         #expect(summary.unregisteredActiveCount == 1)
     }
+
+    // A warranty expiring at today's 00:00 is day-equal to `now` under
+    // `startOfDay` comparison, so it must count as still-active in both the
+    // expiring-soon list and unregisteredActiveCount — the two use the same
+    // day-granularity boundary math.
+    @Test func warrantyExpiringAtStartOfTodayCountsInBothExpiringAndUnregistered() {
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        let record = DigestRecordSnapshot(productName: "Mixer", warrantyExpiryDate: startOfToday, isRegistered: false)
+        let summary = DigestBuilder.build(from: [record], now: now)
+        #expect(summary.expiringWarrantyCount == 1)
+        #expect(summary.unregisteredActiveCount == 1)
+    }
+
+    // MARK: - Notification headline (no currency totals, no day-precision)
+
+    @Test func notificationHeadlineOmitsCurrencyTotals() {
+        let record = DigestRecordSnapshot(
+            productName: "Blender", warrantyExpiryDate: daysFromNow(10), amount: 200, currency: "SGD", isRegistered: true
+        )
+        let summary = DigestBuilder.build(from: [record], now: now)
+        #expect(summary.headline.contains("SGD"))
+        #expect(!summary.notificationHeadline.contains("SGD"))
+        #expect(!summary.notificationHeadline.contains("200"))
+    }
+
+    @Test func notificationHeadlineOmitsDayPrecisionPhrasing() {
+        let record = DigestRecordSnapshot(productName: "Lamp", returnDeadline: daysFromNow(2))
+        let summary = DigestBuilder.build(from: [record], now: now)
+        #expect(summary.headline.contains("in 2 days"))
+        for phrase in ["today", "tomorrow", "in 2 days"] {
+            #expect(!summary.notificationHeadline.contains(phrase))
+        }
+    }
+
+    @Test func notificationHeadlineMatchesExpectedCopy() {
+        let records = [
+            DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10), isRegistered: true),
+            DigestRecordSnapshot(productName: "Kettle", warrantyExpiryDate: daysFromNow(20), isRegistered: true),
+            DigestRecordSnapshot(productName: "Toaster", warrantyExpiryDate: daysFromNow(30), isRegistered: true),
+            DigestRecordSnapshot(productName: "Lamp", returnDeadline: daysFromNow(2)),
+        ]
+        let summary = DigestBuilder.build(from: records, now: now)
+        #expect(summary.notificationHeadline == "3 warranties end soon · 1 return window is closing")
+    }
+
+    @Test func notificationHeadlineSingularPhrasing() {
+        let record = DigestRecordSnapshot(productName: "Blender", warrantyExpiryDate: daysFromNow(10), isRegistered: true)
+        let summary = DigestBuilder.build(from: [record], now: now)
+        #expect(summary.notificationHeadline == "1 warranty ends soon")
+    }
+
+    @Test func notificationHeadlineEmptyWhenSummaryIsEmpty() {
+        let summary = DigestBuilder.build(from: [], now: now)
+        #expect(summary.notificationHeadline == "")
+    }
 }

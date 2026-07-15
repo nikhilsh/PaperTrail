@@ -84,8 +84,11 @@ struct NotificationManager {
 
     /// Schedule warranty expiry reminders for a record.
     /// Schedules at the user's chosen lead time, 7 days before, and on expiry day.
-    func scheduleWarrantyReminders(for record: PurchaseRecord, leadDays: Int = 14) {
-        guard let expiryDate = record.warrantyExpiryDate, expiryDate > .now else { return }
+    /// Returns the number of requests submitted (used by the migration sweep to
+    /// track the total against the platform's pending-notification cap).
+    @discardableResult
+    func scheduleWarrantyReminders(for record: PurchaseRecord, leadDays: Int = 14) -> Int {
+        guard let expiryDate = record.warrantyExpiryDate, expiryDate > .now else { return 0 }
 
         let center = UNUserNotificationCenter.current()
 
@@ -99,6 +102,7 @@ struct NotificationManager {
             (days, days == 0 ? "today" : "\(days) days")
         }
 
+        var scheduledCount = 0
         for interval in intervals {
             guard let triggerDate = Calendar.current.date(byAdding: .day, value: -interval.days, to: expiryDate),
                   triggerDate > .now else { continue }
@@ -122,10 +126,12 @@ struct NotificationManager {
 
             center.add(request) { error in
                 if let error {
-                    print("NotificationManager: failed to schedule \(id): \(error)")
+                    AppLogger.error("Failed to schedule \(id): \(error)", category: "notifications")
                 }
             }
+            scheduledCount += 1
         }
+        return scheduledCount
     }
 
     /// Remove warranty notifications for a record.
@@ -139,14 +145,18 @@ struct NotificationManager {
     /// Schedule return-window reminders for a record, using its own
     /// `returnWindowDays` (set via the return-window picker). No-ops if the
     /// record has no window configured or purchase date to anchor it to.
-    func scheduleReturnWindowReminder(for record: PurchaseRecord) {
-        guard let deadline = record.returnDeadline, deadline > .now else { return }
+    /// Returns the number of requests submitted (used by the migration sweep to
+    /// track the total against the platform's pending-notification cap).
+    @discardableResult
+    func scheduleReturnWindowReminder(for record: PurchaseRecord) -> Int {
+        guard let deadline = record.returnDeadline, deadline > .now else { return 0 }
 
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: Self.returnWindowIdentifiers(recordID: record.id))
 
         let merchantSuffix = record.merchantName.map { " — \($0)" } ?? ""
 
+        var scheduledCount = 0
         for days in Self.returnWindowOffsets {
             guard let triggerDate = Calendar.current.date(byAdding: .day, value: -days, to: deadline),
                   triggerDate > .now else { continue }
@@ -168,9 +178,13 @@ struct NotificationManager {
             let id = Self.returnWindowIdentifier(recordID: record.id, offsetDays: days)
             let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
             center.add(request) { error in
-                if let error { print("NotificationManager: failed to schedule \(id): \(error)") }
+                if let error {
+                    AppLogger.error("Failed to schedule \(id): \(error)", category: "notifications")
+                }
             }
+            scheduledCount += 1
         }
+        return scheduledCount
     }
 
     /// Remove all return-window reminders for a record.
@@ -187,9 +201,26 @@ struct NotificationManager {
     /// cancel — see the type doc above) and reschedules current reminders for
     /// every record through the normal, already-idempotent scheduling entry
     /// points. No-ops after the first successful run (`migrationFlagKey`).
+    ///
+    /// The SwiftData fetch happens FIRST: if it throws, the sweep logs and
+    /// returns without touching any pending notification or setting the
+    /// migration flag, so the next launch retries from scratch rather than
+    /// leaving every reminder in the app permanently wiped.
     @MainActor
     func migrateIdentifiersIfNeeded(modelContext: ModelContext) async {
         guard !UserDefaults.standard.bool(forKey: Self.migrationFlagKey) else { return }
+
+        let records: [PurchaseRecord]
+        do {
+            records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
+        } catch {
+            AppLogger.error(
+                "Notification ID migration: record fetch failed, aborting sweep without removing "
+                    + "anything: \(error)",
+                category: "notifications"
+            )
+            return
+        }
 
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
@@ -203,21 +234,56 @@ struct NotificationManager {
             center.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
 
-        let records = (try? modelContext.fetch(FetchDescriptor<PurchaseRecord>())) ?? []
         let reminderPrefs = ReminderSettings.shared
 
+        // Records that would actually get a reminder scheduled, sorted by the
+        // soonest date driving that reminder — the platform caps pending
+        // notifications at 64, so when there are more eligible records than
+        // fit under our own 50-request budget, the soonest-firing reminders
+        // win.
+        let eligible = records.compactMap { record -> (record: PurchaseRecord, soonest: Date)? in
+            var soonest: Date?
+            if reminderPrefs.warrantyRemindersEnabled, let expiry = record.warrantyExpiryDate {
+                soonest = expiry
+            }
+            if reminderPrefs.returnWindowRemindersEnabled, record.returnWindowDays != nil,
+               let deadline = record.returnDeadline {
+                soonest = min(soonest ?? deadline, deadline)
+            }
+            guard let soonest else { return nil }
+            return (record, soonest)
+        }.sorted { $0.soonest < $1.soonest }
+
+        let requestCap = 50
+        var totalRequests = 0
         var warrantyRescheduled = 0
         var returnWindowRescheduled = 0
+        var skippedRecords = 0
 
-        for record in records {
+        for entry in eligible {
+            guard totalRequests < requestCap else {
+                skippedRecords += 1
+                continue
+            }
+            let record = entry.record
             if reminderPrefs.warrantyRemindersEnabled, record.warrantyExpiryDate != nil {
-                scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
-                warrantyRescheduled += 1
+                let count = scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                if count > 0 { warrantyRescheduled += 1 }
+                totalRequests += count
             }
             if reminderPrefs.returnWindowRemindersEnabled, record.returnWindowDays != nil {
-                scheduleReturnWindowReminder(for: record)
-                returnWindowRescheduled += 1
+                let count = scheduleReturnWindowReminder(for: record)
+                if count > 0 { returnWindowRescheduled += 1 }
+                totalRequests += count
             }
+        }
+
+        if skippedRecords > 0 {
+            AppLogger.warn(
+                "Notification ID migration: skipped \(skippedRecords) record(s) after hitting the "
+                    + "\(requestCap)-request cap",
+                category: "notifications"
+            )
         }
 
         UserDefaults.standard.set(true, forKey: Self.migrationFlagKey)

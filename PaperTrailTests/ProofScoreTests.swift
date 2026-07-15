@@ -112,13 +112,19 @@ struct ProofScoreTests {
     @Test func missingItems_orderedByPointsDescending() {
         let result = ProofScore(snapshot: snapshot())
         #expect(result.missingItems == [
-            "No receipt attached",
+            "No document attached",
             "No purchase date",
             "No purchase amount",
             "No warranty expiry date",
             "No serial number",
             "No product photo"
         ])
+    }
+
+    // MARK: Display strings
+
+    @Test func claimReadyLevelDisplaysAsProofComplete() {
+        #expect(ProofScore.Level.claimReady.rawValue == "Proof complete")
     }
 
     @Test func missingItems_skipsPresentComponents() {

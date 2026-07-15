@@ -14,7 +14,6 @@ import Foundation
 nonisolated enum InsuranceReport {
 
     struct Item {
-        let record: PurchaseRecord
         let name: String
         let merchantName: String?
         let purchaseDate: Date?
@@ -23,11 +22,17 @@ nonisolated enum InsuranceReport {
         let estimatedCurrentValue: Double?
         let serialNumber: String?
         let warrantyStatus: WarrantyStatus
-        /// The attachment to draw a thumbnail from at render time: the
-        /// record's `productImageAttachmentID` attachment if it exists among
-        /// the record's attachments, else the first attachment for the
-        /// record (if any). `nil` if the record has no attachments at all.
-        let thumbnailAttachment: Attachment?
+        /// The on-disk filename (`Attachment.localFilename`) of the attachment
+        /// to draw a thumbnail from at render time: the record's
+        /// `productImageAttachmentID` attachment if it exists among the
+        /// record's attachments, else the first attachment for the record (if
+        /// any). `nil` if the record has no attachments at all.
+        ///
+        /// A plain `String` rather than the `Attachment` model itself — this
+        /// `Item` is handed to `InsuranceReportPDF.generate`, which runs off
+        /// the main actor on a detached task and must not touch SwiftData
+        /// models.
+        let thumbnailFilename: String?
     }
 
     struct RoomSection {
@@ -49,9 +54,11 @@ nonisolated enum InsuranceReport {
 
     /// The room name used for records with a nil or blank `room`.
     static let unfiledRoomName = "Unfiled"
-    /// Currency assumed for records that don't specify one (mirrors
-    /// `PurchaseRecord.formattedAmount`'s fallback).
-    static let defaultCurrency = "SGD"
+    /// Bucket key for totals summed from items with no `currency` set. Kept
+    /// separate from every real currency code so these amounts are never
+    /// fabricated into (and never summed into) an actual currency's total —
+    /// the renderer displays this bucket as a bare number, no symbol.
+    static let unspecifiedCurrency = "Unspecified"
 
     static func build(records: [PurchaseRecord], attachments: [Attachment], asOf: Date = .now) -> Report {
         let attachmentsByRecord = Dictionary(grouping: attachments, by: { $0.recordID })
@@ -66,7 +73,6 @@ nonisolated enum InsuranceReport {
                 asOf: asOf
             )
             let item = Item(
-                record: record,
                 name: record.productName,
                 merchantName: record.merchantName,
                 purchaseDate: record.purchaseDate,
@@ -75,7 +81,7 @@ nonisolated enum InsuranceReport {
                 estimatedCurrentValue: estimated,
                 serialNumber: record.serialNumber,
                 warrantyStatus: record.warrantyStatus,
-                thumbnailAttachment: thumbnailAttachment(for: record, attachments: recordAttachments)
+                thumbnailFilename: thumbnailAttachment(for: record, attachments: recordAttachments)?.localFilename
             )
             acc[room, default: []].append(item)
         }
@@ -115,14 +121,15 @@ nonisolated enum InsuranceReport {
         return attachments.first
     }
 
-    /// Sums `keyPath` across `items`, grouped by currency (falling back to
-    /// `defaultCurrency` for items with no currency set) — never summed
-    /// across different currencies. Rounded to 2dp per currency.
+    /// Sums `keyPath` across `items`, grouped by currency (bucketing items
+    /// with no currency set under `unspecifiedCurrency`, which never merges
+    /// with a real currency's total) — never summed across different
+    /// currencies. Rounded to 2dp per currency.
     private static func sumByCurrency(_ items: [Item], _ keyPath: KeyPath<Item, Double?>) -> [String: Double] {
         var totals: [String: Double] = [:]
         for item in items {
             guard let value = item[keyPath: keyPath] else { continue }
-            let currency = item.currency ?? defaultCurrency
+            let currency = item.currency ?? unspecifiedCurrency
             totals[currency, default: 0] += value
         }
         for (currency, total) in totals {

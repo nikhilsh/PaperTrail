@@ -38,11 +38,14 @@ struct SettingsView: View {
 
     private var roomCount: Int { Set(records.compactMap(\.room).filter { !$0.isEmpty }).count }
 
-    /// Records whose Proof Score is below "Claim-ready" (90) — how many still
-    /// need a receipt, a serial number, or another proof field filled in.
+    /// Records whose Proof Score is below "Proof complete" (90) — how many
+    /// still need a document, a serial number, or another proof field filled
+    /// in. Groups attachments by `recordID` once so the count is O(records +
+    /// attachments) rather than scanning every attachment per record.
     private var proofNeedingCount: Int {
-        records.filter { record in
-            let hasAttachment = attachments.contains { $0.recordID == record.id }
+        let attachmentsByRecord = Dictionary(grouping: attachments, by: \.recordID)
+        return records.filter { record in
+            let hasAttachment = attachmentsByRecord[record.id] != nil
             let snapshot = ProofScoreSnapshot(
                 hasAttachment: hasAttachment,
                 purchaseDate: record.purchaseDate,
@@ -187,7 +190,7 @@ struct SettingsView: View {
                     SettingsRowDivider()
                     NavigationLink { ProofFixListView() } label: {
                         SettingsRow(icon: "checkmark.seal", title: "Proof completeness",
-                                    value: proofNeedingCount > 0 ? "\(proofNeedingCount) need proof" : "All claim-ready",
+                                    value: proofNeedingCount > 0 ? "\(proofNeedingCount) need proof" : "All proof complete",
                                     showChevron: true)
                     }.buttonStyle(.plain)
                 }
