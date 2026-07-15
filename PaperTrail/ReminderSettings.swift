@@ -43,6 +43,7 @@ final class ReminderSettings {
         static let returnWindowEnabled = "reminders.returnWindowEnabled"
         static let suggestSupport = "reminders.suggestSupportContacts"
         static let shareWithHousehold = "reminders.shareWithHousehold"
+        static let digestEnabled = "reminders.digestEnabled"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -56,6 +57,7 @@ final class ReminderSettings {
             Key.returnWindowEnabled: true,
             Key.suggestSupport: true,
             Key.shareWithHousehold: true,
+            Key.digestEnabled: true,
             Key.warrantyLeadTime: WarrantyLeadTime.twoWeeks.rawValue,
         ])
     }
@@ -87,5 +89,12 @@ final class ReminderSettings {
     var shareRemindersWithHousehold: Bool {
         get { access(keyPath: \.shareRemindersWithHousehold); return defaults.bool(forKey: Key.shareWithHousehold) }
         set { withMutation(keyPath: \.shareRemindersWithHousehold) { defaults.set(newValue, forKey: Key.shareWithHousehold) } }
+    }
+
+    /// Master toggle for the monthly warranty digest — one notification
+    /// summarizing what's expiring, what's closing, and what's unregistered.
+    var digestEnabled: Bool {
+        get { access(keyPath: \.digestEnabled); return defaults.bool(forKey: Key.digestEnabled) }
+        set { withMutation(keyPath: \.digestEnabled) { defaults.set(newValue, forKey: Key.digestEnabled) } }
     }
 }
