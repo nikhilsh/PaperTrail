@@ -169,11 +169,11 @@ struct SettingsView: View {
                                 action: { openURL("https://papertrail.kaopeh.com/privacy") })
                     SettingsRowDivider()
                     SettingsRow(icon: "star", title: "Rate PaperTrail", showChevron: true,
-                                action: { openURL("https://apps.apple.com/app/id0") })
+                                action: { openURL("https://apps.apple.com/app/id6788663812?action=write-review") })
                     SettingsRowDivider()
                     NavigationLink { AdvancedDiagnosticsView() } label: {
                         SettingsRow(icon: "gearshape.2", title: "Advanced & Diagnostics",
-                                    subtitle: "Sync details, debug tools, support info", showChevron: true)
+                                    subtitle: "Sync details & support info", showChevron: true)
                     }.buttonStyle(.plain)
                 }
                 .padding(.bottom, 22)
