@@ -62,7 +62,18 @@ extension PaperTrailAppDelegate: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
-        guard let recordIDString = response.notification.request.content.userInfo["recordID"] as? String,
+        let userInfo = response.notification.request.content.userInfo
+
+        // Monthly digest notification — no single record to open, route to
+        // the expiring-soon list where the digest's contents live.
+        if userInfo["route"] as? String == "expiringSoon" {
+            Task { @MainActor in
+                AppRouter.shared.navigate(to: .expiringSoon)
+            }
+            return
+        }
+
+        guard let recordIDString = userInfo["recordID"] as? String,
               let recordID = UUID(uuidString: recordIDString) else {
             // Notifications scheduled by builds ≤30 predate the recordID
             // stamp — route them to the expiring/warranty list instead of
