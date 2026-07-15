@@ -30,6 +30,10 @@ struct LibraryView: View {
         householdCache.purchaseRecords.filter { dto in !records.contains(where: { $0.id == dto.id }) }
     }
 
+    private var hasSharedRecords: Bool {
+        HouseholdManager.recordSharingEnabled && !sharedWithMe.isEmpty
+    }
+
     private var attentionCount: Int {
         records.filter { $0.warrantyStatus == .expiringSoon || $0.warrantyStatus == .expired }.count
     }
@@ -63,7 +67,10 @@ struct LibraryView: View {
 
     var body: some View {
         Group {
-            if records.isEmpty {
+            // A household member with no records of their own still has a
+            // library to show — the empty state hid Vanessa's 5 shared-in
+            // records behind "start your paper trail".
+            if records.isEmpty && !hasSharedRecords {
                 EmptyLibraryView { router.showCapture = true }
             } else {
                 content
@@ -93,7 +100,7 @@ struct LibraryView: View {
                     }
                 }
 
-                if HouseholdManager.recordSharingEnabled && !sharedWithMe.isEmpty {
+                if hasSharedRecords {
                     sharedWithMeSection
                 }
 

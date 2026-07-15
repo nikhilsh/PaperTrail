@@ -14,14 +14,22 @@ struct SearchView: View {
     private var results: [PurchaseRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
-        return records.filter { record in
-            record.productName.localizedCaseInsensitiveContains(query)
-            || (record.merchantName?.localizedCaseInsensitiveContains(query) ?? false)
-            || (record.notes?.localizedCaseInsensitiveContains(query) ?? false)
-            || (record.category?.localizedCaseInsensitiveContains(query) ?? false)
-            || record.tags.contains { $0.localizedCaseInsensitiveContains(query) }
-            || attachments(for: record).contains { $0.ocrText?.localizedCaseInsensitiveContains(query) ?? false }
-        }
+        return records.filter { Self.matches(record: $0, attachments: attachments(for: $0), query: query) }
+    }
+
+    /// Whether `record` matches `query` (case-insensitive substring match, so a
+    /// partial serial number — e.g. the last few characters typed off a barcode
+    /// scan — still matches). Static + pure so it's unit-testable without a
+    /// live `@Query`.
+    static func matches(record: PurchaseRecord, attachments: [Attachment], query: String) -> Bool {
+        record.productName.localizedCaseInsensitiveContains(query)
+        || (record.merchantName?.localizedCaseInsensitiveContains(query) ?? false)
+        || (record.notes?.localizedCaseInsensitiveContains(query) ?? false)
+        || (record.category?.localizedCaseInsensitiveContains(query) ?? false)
+        || (record.room?.localizedCaseInsensitiveContains(query) ?? false)
+        || (record.serialNumber?.localizedCaseInsensitiveContains(query) ?? false)
+        || record.tags.contains { $0.localizedCaseInsensitiveContains(query) }
+        || attachments.contains { $0.ocrText?.localizedCaseInsensitiveContains(query) ?? false }
     }
 
     var body: some View {
