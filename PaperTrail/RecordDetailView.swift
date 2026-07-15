@@ -57,6 +57,8 @@ struct RecordDetailView: View {
 
                 proofSection
 
+                proofScoreCard
+
                 supportCard
 
                 if let notes = record.notes, !notes.isEmpty {
@@ -565,6 +567,55 @@ struct RecordDetailView: View {
                 Text(" ").font(.system(size: 10.5))
             }
         }
+    }
+
+    // MARK: Proof score
+
+    private var proofScore: ProofScore {
+        let snapshot = ProofScoreSnapshot(
+            hasAttachment: !attachments.isEmpty,
+            purchaseDate: record.purchaseDate,
+            amount: record.amount,
+            warrantyExpiryDate: record.warrantyExpiryDate,
+            serialNumber: record.serialNumber,
+            productImageAttachmentID: record.productImageAttachmentID
+        )
+        return ProofScore(snapshot: snapshot)
+    }
+
+    private var proofScoreTone: Color {
+        switch proofScore.level {
+        case .claimReady: PT.sageDeep
+        case .nearlyThere: PT.amber
+        case .needsProof: PT.terra
+        }
+    }
+
+    private var proofScoreCard: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("PROOF SCORE")
+                    .ptMonoLabel(9.5, tracking: 2)
+                    .foregroundStyle(PT.txt3)
+                Text(proofScore.level.rawValue)
+                    .font(PTFont.serif(15, weight: 600))
+                    .foregroundStyle(PT.txt)
+                if !proofScore.missingItems.isEmpty {
+                    Text(proofScore.missingItems.prefix(2).joined(separator: " · "))
+                        .font(.system(size: 11))
+                        .foregroundStyle(PT.txt3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("\(proofScore.score)")
+                .font(PTFont.mono(22, medium: true))
+                .foregroundStyle(proofScoreTone)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
     }
 
     // MARK: Support card

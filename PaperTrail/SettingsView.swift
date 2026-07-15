@@ -38,6 +38,23 @@ struct SettingsView: View {
 
     private var roomCount: Int { Set(records.compactMap(\.room).filter { !$0.isEmpty }).count }
 
+    /// Records whose Proof Score is below "Claim-ready" (90) — how many still
+    /// need a receipt, a serial number, or another proof field filled in.
+    private var proofNeedingCount: Int {
+        records.filter { record in
+            let hasAttachment = attachments.contains { $0.recordID == record.id }
+            let snapshot = ProofScoreSnapshot(
+                hasAttachment: hasAttachment,
+                purchaseDate: record.purchaseDate,
+                amount: record.amount,
+                warrantyExpiryDate: record.warrantyExpiryDate,
+                serialNumber: record.serialNumber,
+                productImageAttachmentID: record.productImageAttachmentID
+            )
+            return ProofScore(snapshot: snapshot).score < 90
+        }.count
+    }
+
     private var householdSummary: String {
         let manager = HouseholdManager.shared
         let members = manager.members
@@ -161,6 +178,12 @@ struct SettingsView: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "shippingbox", title: "Storage",
                                 value: storageSize)
+                    SettingsRowDivider()
+                    NavigationLink { ProofFixListView() } label: {
+                        SettingsRow(icon: "checkmark.seal", title: "Proof completeness",
+                                    value: proofNeedingCount > 0 ? "\(proofNeedingCount) need proof" : "All claim-ready",
+                                    showChevron: true)
+                    }.buttonStyle(.plain)
                 }
                 .padding(.bottom, 22)
 
