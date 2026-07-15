@@ -14,6 +14,13 @@ struct SupportView: View {
     private var attachments: [Attachment] { allAttachments.filter { $0.recordID == record.id } }
     private var support: SupportInfo? { record.supportInfo }
 
+    /// Best-guess brand match, offered only when the record has no saved
+    /// support contact and the user has opted in via Settings.
+    private var suggestedSupport: SupportContactDirectory.Entry? {
+        guard support == nil, ReminderSettings.shared.suggestSupportContacts else { return nil }
+        return SupportContactDirectory.match(merchantName: record.merchantName, productName: record.productName)
+    }
+
     private var brand: String {
         support?.providerName ?? record.merchantName ?? "the manufacturer"
     }
@@ -68,6 +75,8 @@ struct SupportView: View {
                             Label("Call", systemImage: "phone.fill")
                         }
                         .buttonStyle(PTDarkButtonStyle())
+                    } else if let suggestion = suggestedSupport {
+                        suggestedSupportContent(suggestion)
                     } else {
                         Text("No saved support contact. Try the manufacturer's website or your receipt.")
                             .font(.system(size: 13))
@@ -177,6 +186,58 @@ struct SupportView: View {
                     .foregroundStyle(Color(hex: 0x9A7A33))
             }
         }
+    }
+
+    // MARK: Suggested support contact (unsaved best guess)
+
+    @ViewBuilder
+    private func suggestedSupportContent(_ suggestion: SupportContactDirectory.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(suggestion.displayName)
+                .font(PTFont.serif(15, weight: 600))
+                .foregroundStyle(PT.onPaper)
+            if let phone = suggestion.phone {
+                Text(phone)
+                    .font(PTFont.mono(16, medium: true))
+                    .foregroundStyle(PT.onPaper)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(hex: 0x9A7A33))
+                Text("Best guess — verify before calling.")
+                    .font(PTFont.mono(10))
+                    .foregroundStyle(Color(hex: 0x9A7A33))
+            }
+            HStack(spacing: 10) {
+                if let phone = suggestion.phone {
+                    Button {
+                        applySuggestion(suggestion, phone: phone)
+                    } label: {
+                        Text("Use this")
+                    }
+                    .buttonStyle(PTDarkButtonStyle())
+                }
+                if let urlString = suggestion.url, let url = URL(string: urlString) {
+                    Button {
+                        openURL(url)
+                    } label: {
+                        Label("Visit site", systemImage: "safari")
+                    }
+                    .buttonStyle(PTDarkButtonStyle())
+                }
+            }
+        }
+    }
+
+    private func applySuggestion(_ suggestion: SupportContactDirectory.Entry, phone: String) {
+        record.setSupportInfo(SupportInfo(
+            providerName: suggestion.displayName,
+            phoneNumber: phone,
+            confidence: .estimated,
+            note: suggestion.url
+        ))
+        record.updatedAt = .now
     }
 
     // MARK: Actions
