@@ -159,6 +159,7 @@ struct AppShellView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 SpotlightIndexer.reindexAllDebounced()
+                DigestScheduler.reschedule(modelContext: modelContext)
             }
         }
         .onChange(of: router.selectedTab) { _, newTab in

@@ -26,6 +26,10 @@ struct WarrantyView: View {
         records.contains { $0.warrantyExpiryDate != nil }
     }
 
+    private var digestSummary: DigestSummary {
+        DigestBuilder.build(from: records.map(\.digestSnapshot))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -33,6 +37,10 @@ struct WarrantyView: View {
                     .font(PTFont.serif(34, weight: 600))
                     .foregroundStyle(PT.txt)
                     .padding(.top, 8)
+
+                if !digestSummary.isEmpty {
+                    DigestCard(summary: digestSummary)
+                }
 
                 if !hasWarranties {
                     emptyState
@@ -181,6 +189,47 @@ private struct RestingEasyCard: View {
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .paperCard(goldFold: false)
+    }
+}
+
+// MARK: - "This month" digest card
+
+/// The same signal as the monthly notification, surfaced in-app so it isn't
+/// notification-only: the headline plus up to 3 soonest-expiring warranties.
+/// Compact, no new navigation.
+private struct DigestCard: View {
+    let summary: DigestSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionLabel(text: "This month")
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(summary.headline)
+                        .font(.system(size: 13))
+                        .foregroundStyle(PT.txt2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, summary.soonestExpiring.isEmpty ? 0 : 12)
+
+                    ForEach(Array(summary.soonestExpiring.enumerated()), id: \.offset) { index, item in
+                        if index > 0 {
+                            Rectangle().fill(PT.hair2).frame(height: 1).padding(.vertical, 8)
+                        }
+                        HStack(spacing: 8) {
+                            Text(item.name)
+                                .font(.system(size: 13))
+                                .foregroundStyle(PT.txt)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(item.daysLeft == 0 ? "today" : "\(item.daysLeft)d left")
+                                .font(PTFont.mono(11, medium: true))
+                                .foregroundStyle(PT.amber)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
     }
 }
 
