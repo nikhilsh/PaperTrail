@@ -1,6 +1,7 @@
 import Foundation
 import CloudKit
 import Observation
+import UIKit
 
 /// Household roles.
 enum HouseholdRole: String, Codable {
@@ -136,7 +137,7 @@ final class HouseholdManager {
         root["createdAt"] = Date.now as CKRecordValue
 
         let share = CKShare(rootRecord: root)
-        share[CKShare.SystemFieldKey.title] = "PaperTrail Household" as CKRecordValue
+        brandShare(share)
         share.publicPermission = .none
 
         _ = try await privateDB.modifyRecords(saving: [root, share], deleting: [])
@@ -199,14 +200,15 @@ final class HouseholdManager {
         try await ensureHouseholdZoneExists()
 
         if let share = try await fetchExistingZoneShare() {
-            cachedShare = share
+            let branded = await ensureShareBranding(share)
+            cachedShare = branded
             isHouseholdOwner = true
-            members = Self.members(from: share)
-            return (share, container)
+            members = Self.members(from: branded)
+            return (branded, container)
         }
 
         let share = CKShare(recordZoneID: HouseholdSchema.ownerZoneID)
-        share[CKShare.SystemFieldKey.title] = "Household" as CKRecordValue
+        brandShare(share)
         share.publicPermission = .none
 
         // Fix 5: `modifyRecords(saving:deleting:)` returns per-record
@@ -253,6 +255,63 @@ final class HouseholdManager {
         HouseholdSyncEngine.shared.mirrorSettings(shareWholeLibrary: HouseholdMirrorCoordinator.localShareWholeLibraryDefault())
 
         return (savedShare, container)
+    }
+
+    // MARK: - Share branding
+
+    /// What the invite renders as on the receiving device. Without a type and
+    /// thumbnail, iOS shows the anonymous "wants to collaborate" bubble with a
+    /// generic document glyph — nothing says PaperTrail.
+    private static let shareTitle = "PaperTrail Household"
+    private static let shareTypeIdentifier = "nikhilsh.PaperTrail.household"
+
+    private func brandShare(_ share: CKShare) {
+        share[CKShare.SystemFieldKey.title] = Self.shareTitle as CKRecordValue
+        share[CKShare.SystemFieldKey.shareType] = Self.shareTypeIdentifier as CKRecordValue
+        if let thumbnail = Self.shareThumbnailData() {
+            share[CKShare.SystemFieldKey.thumbnailImageData] = thumbnail as CKRecordValue
+        }
+    }
+
+    /// Upgrade an already-saved share to the current branding. Best-effort:
+    /// a failed save is logged and the original share returned — branding must
+    /// never block presenting the invite sheet.
+    private func ensureShareBranding(_ share: CKShare) async -> CKShare {
+        let title = share[CKShare.SystemFieldKey.title] as? String
+        let type = share[CKShare.SystemFieldKey.shareType] as? String
+        let hasThumbnail = share[CKShare.SystemFieldKey.thumbnailImageData] != nil
+        guard title != Self.shareTitle || type != Self.shareTypeIdentifier || !hasThumbnail else {
+            return share
+        }
+        brandShare(share)
+        do {
+            let result = try await privateDB.modifyRecords(saving: [share], deleting: [])
+            if let saved = try result.saveResults[share.recordID]?.get() as? CKShare {
+                AppLogger.info("Rebranded existing household share", category: "cloud.sharing")
+                return saved
+            }
+            AppLogger.error("Rebranding household share returned no save result", category: "cloud.sharing")
+        } catch {
+            AppLogger.error("Failed to rebrand household share: \(error.localizedDescription)", category: "cloud.sharing")
+        }
+        return share
+    }
+
+    /// The app icon, downscaled for the CKShare thumbnail. Resolved through
+    /// `CFBundleIcons` because asset-catalog app icons aren't directly loadable
+    /// by the catalog name.
+    private static func shareThumbnailData() -> Data? {
+        guard let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
+              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = primary["CFBundleIconFiles"] as? [String],
+              let name = files.last,
+              let icon = UIImage(named: name) else { return nil }
+        let side: CGFloat = 120
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        let scaled = renderer.image { _ in
+            icon.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }
+        return scaled.pngData()
     }
 
     private func ensureHouseholdZoneExists() async throws {
