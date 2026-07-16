@@ -13,6 +13,29 @@ struct ServiceLedgerTimelineView: View {
     let entries: [ServiceEntry]
     var onLogTapped: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // v3 animPassV3 §9 #3 "Ledger entry stamp": a newly-logged entry inks in
+    // (scale 0→1, reusing the MEMBER-stamp curve at lower amplitude — a
+    // modest 0.85 start rather than the paywall stamp's 2.4) and the row
+    // slides under it. Off-flag this is `.identity`/`nil`, so ForEach's
+    // insertion is instant exactly as in v2 — the "once" here comes for
+    // free from ForEach only firing an insertion transition the moment a
+    // new id actually appears, never on a re-render of existing entries.
+    private var entryTransition: AnyTransition {
+        guard AnimPass.isOn else { return .identity }
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.85, anchor: .top).combined(with: .opacity),
+            removal: .opacity
+        )
+    }
+
+    private var entryMotion: Animation? {
+        guard AnimPass.isOn else { return nil }
+        return AnimPass.animation(PTMotion.stampEase(AnimPass.Duration.ledgerStamp), reduceMotion: reduceMotion)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if entries.isEmpty {
@@ -24,7 +47,9 @@ struct ServiceLedgerTimelineView: View {
                         connectorAbove: index > 0,
                         connectorBelow: true
                     )
+                    .transition(entryTransition)
                 }
+                .animation(entryMotion, value: entries.map(\.id))
             }
             logEntryRow
         }

@@ -209,6 +209,22 @@ private struct RestingEasyCard: View {
 private struct DigestCard: View {
     let summary: DigestSummary
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // v3 animPassV3 §9 #9 "Digest page-curl": true once the one-time corner
+    // reveal has played for this card's current appearance. **Delta from
+    // the brief**: Ideas.html's mock (V3-5) is a full standalone digest
+    // screen with its own three-stat header/"Needs eyes"/"Quiet this month"
+    // groups — that screen doesn't exist yet. This card (`WarrantyView`'s
+    // "This month" section) is the real, shipped in-app digest surface, so
+    // the curl plays on it instead.
+    @State private var revealed = false
+
+    private var animPassOn: Bool { AnimPass.isOn }
+    /// The literal 3D corner-curl transform is a Reduce-Motion "transform"
+    /// (ANIMATION_SPEC "Don'ts"), so it's only ever attempted when Reduce
+    /// Motion is off — under Reduce Motion this card only ever crossfades.
+    private var showCurl: Bool { animPassOn && !reduceMotion }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionLabel(text: "This month")
@@ -233,10 +249,33 @@ private struct DigestCard: View {
                             Text(item.daysLeft == 0 ? "today" : "\(item.daysLeft)d left")
                                 .font(PTFont.mono(11, medium: true))
                                 .foregroundStyle(PT.amber)
+                                // v3 animPassV3 §9 #8 "Odometer numbers":
+                                // digest stats roll when they change.
+                                .contentTransition(animPassOn ? .numericText() : .identity)
+                                .animation(
+                                    animPassOn ? AnimPass.animation(.default, reduceMotion: reduceMotion) : nil,
+                                    value: item.daysLeft
+                                )
                         }
                     }
                 }
                 .padding(16)
+            }
+        }
+        // v3 animPassV3 §9 #9: one-time corner-curl reveal, approximated
+        // with a `rotation3DEffect` anchored top-trailing + opacity rather
+        // than a literal page-curl mesh/shader.
+        .rotation3DEffect(
+            .degrees(showCurl && !revealed ? -55 : 0),
+            axis: (x: 0, y: 1, z: 0.35),
+            anchor: .topTrailing,
+            perspective: 0.45
+        )
+        .opacity((animPassOn && !revealed) ? 0 : 1)
+        .onAppear {
+            guard animPassOn, !revealed else { return }
+            withAnimation(AnimPass.animation(PTMotion.archiveEase(AnimPass.Duration.digestCurl), reduceMotion: reduceMotion)) {
+                revealed = true
             }
         }
     }

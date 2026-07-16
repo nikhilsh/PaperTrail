@@ -934,6 +934,13 @@ struct DraftRecordView: View {
                 itemName: primary.productName,
                 warrantyExpiryDate: primary.warrantyExpiryDate
             )
+            // v3 animPassV3 §9 "Receipt prints on save": hand LibraryView the
+            // just-saved record's id so it can give that one card its
+            // translateY-from-top entrance. No-op (never set) when the flag
+            // is off, matching v2 exactly.
+            if AnimPass.isOn {
+                AppRouter.shared.lastSavedRecordID = primary.id
+            }
         }
 
         dismiss()

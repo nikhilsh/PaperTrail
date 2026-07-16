@@ -30,6 +30,14 @@ struct CoverageRing: View {
     var caption: String = "REMAINING"
     var diameter: CGFloat = 150
     var lineWidth: CGFloat = 9
+    /// v3 animPassV3 §9 #10 "Ring first-visit-per-day": when set (and the
+    /// flag is on), the arc-sweep/count-up only plays the first time this
+    /// key is seen on a given calendar day — every later visit that day
+    /// jumps straight to the static final fill. `nil` (the default) keeps
+    /// v2's "every visit" behavior unconditionally, flag or no flag — a
+    /// caller has to opt a specific ring into the once-per-day gate by
+    /// passing its identity.
+    var identityKey: String? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animatedFraction: CGFloat = 0
@@ -75,6 +83,20 @@ struct CoverageRing: View {
             animatedFraction = targetFraction
             displayedMonths = clampedRemaining
             return
+        }
+        // v3 animPassV3 §9 #10: static fill after the first visit today for
+        // whichever `identityKey` the caller opted in. Off-flag (or no key
+        // passed at all), this block never runs and the ring animates on
+        // every visit exactly as in v2.
+        if AnimPass.isOn, let identityKey {
+            let last = RingFirstVisitPerDay.lastAnimatedDate(for: identityKey)
+            if RingFirstVisitPerDay.shouldAnimate(lastAnimatedDate: last) {
+                RingFirstVisitPerDay.markAnimated(for: identityKey)
+            } else {
+                animatedFraction = targetFraction
+                displayedMonths = clampedRemaining
+                return
+            }
         }
         animatedFraction = 0
         displayedMonths = 0

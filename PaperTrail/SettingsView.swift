@@ -276,6 +276,14 @@ struct SettingsView: View {
                 .font(PTFont.mono(11))
                 .tracking(1.1)
                 .foregroundStyle(PT.onPaper2)
+                // v3 animPassV3 §9 #8 "Odometer numbers": rolls to a new
+                // value instead of snapping — never on mere appearance,
+                // since `.animation(value:)` only fires on an actual change.
+                .contentTransition(FeatureFlags.isOn(.animPassV3) ? .numericText() : .identity)
+                .animation(
+                    FeatureFlags.isOn(.animPassV3) ? PTMotion.reduced(.default, reduceMotion: reduceMotion) : nil,
+                    value: "\(itemCount)-\(totalValue)"
+                )
         }
     }
 
