@@ -168,13 +168,17 @@ struct SettingsView: View {
     }
 
     /// Lifetime has no App Store subscription to manage. Pulled out of the
-    /// `heroCard` `@ViewBuilder` body as a plain function call — inlining
-    /// this ternary directly into `GoldMemberCard(...)`'s argument list (or
-    /// even a `let` just above it) made the expression too complex for the
-    /// type checker to produce a diagnostic for (CI: "failed to produce
-    /// diagnostic for expression").
+    /// `heroCard` `@ViewBuilder` body as a plain function call, and written
+    /// as `if`/`return` rather than a ternary — `nil : manageSubscriptions`
+    /// (a bound method reference) was too much for the type checker to even
+    /// produce a diagnostic for (CI: "failed to produce diagnostic for
+    /// expression"), whether inline in the call, hoisted to a `let`, or
+    /// returned from a ternary in this same function.
     private func manageAction(for term: PTMembershipTerm) -> (() -> Void)? {
-        term == .lifetime ? nil : manageSubscriptions
+        if term == .lifetime {
+            return nil
+        }
+        return manageSubscriptions
     }
 
     private var libraryCard: some View {
