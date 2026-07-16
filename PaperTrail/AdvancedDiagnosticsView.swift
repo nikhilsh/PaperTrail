@@ -178,6 +178,18 @@ struct AdvancedDiagnosticsView: View {
                         }.buttonStyle(.plain)
                     }
                 }
+
+                // v3 flags — compiled out of App Store builds entirely (see
+                // FlagsView.swift); this row goes with it.
+                #if !APPSTORE
+                SettingsSectionLabel(text: "v3")
+                SettingsCard {
+                    NavigationLink { FlagsView() } label: {
+                        SettingsRow(icon: "flag", iconColor: PT.amber, title: "Flags",
+                                    subtitle: "Toggle v3 features for this build", showChevron: true)
+                    }.buttonStyle(.plain)
+                }
+                #endif
             }
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.top, 6)
