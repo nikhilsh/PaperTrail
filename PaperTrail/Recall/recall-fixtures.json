@@ -1,50 +1,50 @@
 [
   {
-    "id": "fixture-anker-powercore-2026-01",
-    "brand": "Anker",
-    "modelPatterns": ["PowerCore 20000", "A1263"],
-    "title": "Battery overheating recall",
-    "detailURL": "https://www.cpsc.gov/Recalls/2026/anker-powercore-20000-power-bank",
+    "id": "fixture-voltalabs-pb9000-2026-01",
+    "brand": "Volta Labs",
+    "modelPatterns": ["PB-9000", "VL-A1263"],
+    "title": "Battery overheating recall (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2026-01-14T00:00:00Z"
   },
   {
     "id": "fixture-generichome-dh45-2025-11",
     "brand": "GenericHome",
     "modelPatterns": ["DH45", "DH-45"],
-    "title": "Water tank leak risk — dehumidifier recall",
-    "detailURL": "https://www.cpsc.gov/Recalls/2025/generichome-dh45-dehumidifier",
+    "title": "Water tank leak risk — dehumidifier recall (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2025-11-03T00:00:00Z"
   },
   {
-    "id": "fixture-whirlpool-wed4815-2025-08",
-    "brand": "Whirlpool",
-    "modelPatterns": ["WED4815EW"],
-    "title": "Lint buildup fire risk recall",
-    "detailURL": "https://www.cpsc.gov/Recalls/2025/whirlpool-wed4815ew-dryer",
+    "id": "fixture-hearthstone-hs300-2025-08",
+    "brand": "Hearthstone",
+    "modelPatterns": ["HS-300"],
+    "title": "Lint buildup fire risk recall (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2025-08-22T00:00:00Z"
   },
   {
-    "id": "fixture-philips-hu4803-2025-06",
-    "brand": "Philips",
-    "modelPatterns": ["HU4803"],
-    "title": "Mold contamination advisory",
-    "detailURL": "https://www.cpsc.gov/Recalls/2025/philips-hu4803-humidifier",
+    "id": "fixture-mistfern-hu480-2025-06",
+    "brand": "Mistfern",
+    "modelPatterns": ["HU480"],
+    "title": "Mold contamination advisory (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2025-06-10T00:00:00Z"
   },
   {
-    "id": "fixture-ninja-bl610-2025-03",
-    "brand": "Ninja",
+    "id": "fixture-blendcraft-bl610-2025-03",
+    "brand": "Blendcraft",
     "modelPatterns": ["BL610"],
-    "title": "Blade assembly detachment recall",
-    "detailURL": "https://www.cpsc.gov/Recalls/2025/ninja-bl610-blender",
+    "title": "Blade assembly detachment recall (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2025-03-18T00:00:00Z"
   },
   {
-    "id": "fixture-dyson-v11-2024-12",
-    "brand": "Dyson",
-    "modelPatterns": ["V11", "SV14"],
-    "title": "Battery pack overheating advisory",
-    "detailURL": "https://www.cpsc.gov/Recalls/2024/dyson-v11-cordless-vacuum",
+    "id": "fixture-windrift-cv11-2024-12",
+    "brand": "Windrift",
+    "modelPatterns": ["CV11", "SV14"],
+    "title": "Battery pack overheating advisory (preview data)",
+    "detailURL": "https://example.com/recall-preview",
     "date": "2024-12-05T00:00:00Z"
   }
 ]

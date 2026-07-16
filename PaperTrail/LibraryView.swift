@@ -401,12 +401,17 @@ struct LibraryView: View {
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
         // v3 multiCoverage (§3): same remove-on-delete path as the warranty/
-        // return-window reminders above. No-ops when the flag is off.
-        if FeatureFlags.isOn(.multiCoverage) {
-            let recordID = record.id
-            Task { await CoverageReminders.removeReminders(for: recordID) }
-        }
+        // return-window reminders above. Unconditional — a record deleted
+        // after the flag was turned off could still have coverage-line
+        // reminders scheduled from when the flag was on, and those would
+        // otherwise leak forever (§6 coverage reminders discipline).
+        let recordID = record.id
+        Task { await CoverageReminders.removeReminders(for: recordID) }
         SpotlightIndexer.deindex(recordID: record.id)
+        // v3 manualOnFile (§5): local-only store, not part of the SwiftData
+        // graph — needs its own explicit cleanup here, same as
+        // `RecordDetailView.deleteRecord`. No-op if no manual was attached.
+        ManualStore.delete(for: record.id)
         modelContext.delete(record)
 
         // Fix 1: deletion requires positive evidence, and this IS that

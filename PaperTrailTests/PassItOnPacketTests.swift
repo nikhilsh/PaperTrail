@@ -77,6 +77,28 @@ struct PassItOnPacketTests {
         #expect(PassItOnPacket.pageCount(selection: selection, availability: availability) == 4) // 3 + max(0,1)
     }
 
+    // MARK: - Proof-of-purchase derivation (item 2, HIGH: was a hardcoded
+    // `true` stub in the builder before this predicate existed)
+
+    @Test func noAttachmentsMeansNoProofOfPurchase() {
+        #expect(!PassItOnPacket.hasProofOfPurchase(attachmentIDs: [], productImageAttachmentID: nil))
+    }
+
+    @Test func onlyTheProductPhotoIsNotProofOfPurchase() {
+        let photoID = UUID()
+        #expect(!PassItOnPacket.hasProofOfPurchase(attachmentIDs: [photoID], productImageAttachmentID: photoID))
+    }
+
+    @Test func aNonPhotoAttachmentIsProofOfPurchase() {
+        let photoID = UUID()
+        let receiptID = UUID()
+        #expect(PassItOnPacket.hasProofOfPurchase(attachmentIDs: [photoID, receiptID], productImageAttachmentID: photoID))
+    }
+
+    @Test func attachmentsWithNoProductPhotoSetAreStillProofOfPurchase() {
+        #expect(PassItOnPacket.hasProofOfPurchase(attachmentIDs: [UUID()], productImageAttachmentID: nil))
+    }
+
     // MARK: - Passed-on exclusion predicate
 
     @Test func flagOffNeverExcludesRegardlessOfPassedOnDate() {

@@ -173,9 +173,29 @@ struct MultiCoverageTests {
         #expect(CoverageReminders.identifier(recordID: id, lineIndex: 3, offsetDays: 0) == "coverage-\(id.uuidString)-3-0d")
     }
 
-    @Test func offsetsDedupeAndSortDescending() {
-        #expect(CoverageReminders.offsets(leadDays: 14) == [14, 0])
-        #expect(CoverageReminders.offsets(leadDays: 0) == [0]) // dedupes lead==0 with the day-of offset
+    @Test func offsetsAreLeadTimeOnlyNoDayOfNudge() {
+        // §6 coverage reminders discipline: the day-of (0) offset was
+        // dropped — lead-time only, one reminder per line/cluster.
+        #expect(CoverageReminders.offsets(leadDays: 14) == [14])
+        #expect(CoverageReminders.offsets(leadDays: 0) == [0])
+    }
+
+    // MARK: - CoverageReminders: dedupe vs. the warranty single
+
+    @Test func lineWithinSevenDaysOfWarrantyExpiryIsDuplicate() {
+        let warrantyExpiry = Date.now
+        let endDate = daysFromNow(6, from: warrantyExpiry)
+        #expect(CoverageReminders.isDuplicateOfWarranty(endDate: endDate, warrantyExpiryDate: warrantyExpiry))
+    }
+
+    @Test func lineMoreThanSevenDaysFromWarrantyExpiryIsNotDuplicate() {
+        let warrantyExpiry = Date.now
+        let endDate = daysFromNow(8, from: warrantyExpiry)
+        #expect(!CoverageReminders.isDuplicateOfWarranty(endDate: endDate, warrantyExpiryDate: warrantyExpiry))
+    }
+
+    @Test func noWarrantyExpiryNeverDedupes() {
+        #expect(!CoverageReminders.isDuplicateOfWarranty(endDate: .now, warrantyExpiryDate: nil))
     }
 
     // MARK: - CoverageReminders: 7-day dedupe grouping

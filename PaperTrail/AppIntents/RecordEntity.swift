@@ -20,9 +20,16 @@ import SwiftData
 /// parameter type for `CheckWarrantyIntent`/`OpenRecordIntent`, which predate
 /// v3 and aren't themselves flagged. In practice this only changes how
 /// proactively the system offers those pre-existing intents — it adds no new
-/// UI and writes nothing, so it's left unconditional rather than forked into
-/// a second entity type just to satisfy the flag.
-struct RecordEntity: AppEntity, Identifiable, IndexedEntity {
+/// UI and writes nothing, so it's left unconditional with respect to the
+/// runtime flag rather than forked into a second entity type just to
+/// satisfy it.
+///
+/// The `IndexedEntity` conformance itself IS compiled out of APPSTORE
+/// builds (the extension below, `#if !APPSTORE`) — item 4, HIGH: APPSTORE
+/// surface leaks. Unlike the runtime flag, `#if !APPSTORE` is a
+/// preprocessor directive resolved before protocol conformance is checked,
+/// so this works even though the flag-gating above doesn't.
+struct RecordEntity: AppEntity, Identifiable {
     /// `PurchaseRecord.id` — a stable, non-optional `UUID` stored property —
     /// is the natural key here, not SwiftData's `PersistentIdentifier`. The
     /// persistent identifier isn't guaranteed stable across CloudKit sync
@@ -50,6 +57,10 @@ struct RecordEntity: AppEntity, Identifiable, IndexedEntity {
         self.merchantName = record.merchantName
     }
 }
+
+#if !APPSTORE
+extension RecordEntity: IndexedEntity {}
+#endif
 
 /// Looks records up by id (restoring a donated shortcut / widget configuration)
 /// or by a substring of product/merchant name (Siri disambiguation, typing in

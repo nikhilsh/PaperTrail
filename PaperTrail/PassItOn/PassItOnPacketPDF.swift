@@ -165,6 +165,15 @@ enum PassItOnPacketPDF {
                     if let serial = input.serialNumber, !serial.isEmpty {
                         y += kvLine("Serial no.", serial, mono: true) + 12
                     }
+                    // NOTE: this section only ever draws text (store/date/
+                    // serial/price) — it does NOT embed the receipt image
+                    // itself. If a future change adds real receipt-image
+                    // embedding here, it MUST be gated on
+                    // `input.selection.showPricePaid` the same way the price
+                    // line below is: an embedded receipt photo very likely
+                    // shows the price paid, so it carries the same
+                    // seller-privacy stakes and can't ship unconditionally.
+                    //
                     // Price paid REDACTED unless the seller explicitly opts
                     // in via "Show price paid" — off by default (V3_BRIEF §7).
                     if input.selection.showPricePaid, let amount = input.amount {
@@ -207,10 +216,9 @@ enum PassItOnPacketPDF {
                         y += 3
                         y += draw(entry.title, font: serif(13, .medium), color: ink, maxWidth: contentWidth)
                         y += 3
-                        if let cost = entry.cost {
-                            y += draw("Cost \((cost as NSDecimalNumber).stringValue)", font: monoRegular(8.5), color: ink2)
-                            y += 3
-                        }
+                        // Cost is deliberately never drawn here (item 2,
+                        // HIGH): the buyer sees title/date/actor for each
+                        // service entry, never what it cost the seller.
                         y += 10
                         ctx.cgContext.setFillColor(ink3.withAlphaComponent(0.15).cgColor)
                         ctx.cgContext.fill(CGRect(x: margin, y: y, width: contentWidth, height: 0.5))

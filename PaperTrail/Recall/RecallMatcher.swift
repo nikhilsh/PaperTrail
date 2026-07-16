@@ -72,10 +72,15 @@ enum RecallMatcher {
     nonisolated static func modelMatches(_ record: RecordSnapshot, notice: RecallNotice) -> Bool {
         guard !notice.modelPatterns.isEmpty else { return true }
 
+        // Minimum length 3, not just non-empty: a 1-2 char haystack (e.g. a
+        // serial number field that's literally "V1") is too short to trust
+        // against `pattern.hasPrefix(haystack)` below — "V11".hasPrefix("V1")
+        // is true, which would falsely match a "V1" record against a "V11"
+        // recall. Same rationale as `brandMatches`'s `key.count >= 4` guard.
         let haystacks = [record.serialNumber, record.productName]
             .compactMap { $0 }
             .map(normalizeModel)
-            .filter { !$0.isEmpty }
+            .filter { $0.count >= 3 }
         guard !haystacks.isEmpty else { return false }
 
         for rawPattern in notice.modelPatterns {

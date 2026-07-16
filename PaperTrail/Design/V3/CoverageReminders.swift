@@ -23,11 +23,13 @@ enum CoverageReminders {
         "coverage-\(recordID.uuidString)-\(lineIndex)-\(offsetDays)d"
     }
 
-    /// Lead-time offsets applied to every dated coverage line — a
-    /// configurable lead time plus a day-of nudge, mirroring
-    /// `NotificationManager.returnWindowOffsets`'s two-offset shape.
+    /// Lead-time offset applied to every dated coverage line — lead-time
+    /// only, no separate day-of (0) nudge: a coverage line already gets a
+    /// day-of feel from whichever cluster it's grouped into (§3 dedupe), and
+    /// a second same-day notification per line was pure noise against the
+    /// ~2/month cap discipline every other reminder in this app respects.
     nonisolated static func offsets(leadDays: Int) -> [Int] {
-        Array(Set([max(0, leadDays), 0])).sorted(by: >)
+        [max(0, leadDays)]
     }
 
     // MARK: - Deadline-proximity grouping (§3 dedupe)
@@ -57,6 +59,18 @@ enum CoverageReminders {
             }
         }
         return groups
+    }
+
+    /// True when `endDate` falls within 7 days of the record's own
+    /// `warrantyExpiryDate` — such a line's own reminder would duplicate the
+    /// existing single warranty reminder (`NotificationManager`'s), so
+    /// `reschedule` skips scheduling one for it. Same 7-day window as the
+    /// line-to-line dedupe above, extended to the record's legacy warranty
+    /// date. `nil` warrantyExpiryDate never dedupes anything.
+    nonisolated static func isDuplicateOfWarranty(endDate: Date, warrantyExpiryDate: Date?, calendar: Calendar = .current) -> Bool {
+        guard let warrantyExpiryDate else { return false }
+        guard let days = calendar.dateComponents([.day], from: warrantyExpiryDate, to: endDate).day else { return false }
+        return abs(days) <= 7
     }
 
     /// Notification body listing every label in a deduped group.
@@ -107,6 +121,10 @@ enum CoverageReminders {
 
         let dated = lines.enumerated().compactMap { index, line -> DatedLine? in
             guard let endDate = line.endDate, endDate > .now else { return nil }
+            // Skip a line that's within 7 days of the record's own
+            // warranty expiry — its reminder would just duplicate the
+            // existing warranty single (dedupe vs. warranty, §6).
+            guard !isDuplicateOfWarranty(endDate: endDate, warrantyExpiryDate: record.warrantyExpiryDate) else { return nil }
             return DatedLine(index: index, label: line.label, endDate: endDate)
         }
         guard !dated.isEmpty else { return 0 }

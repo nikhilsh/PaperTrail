@@ -16,6 +16,35 @@ nonisolated struct RecallCheckRecord: Codable, Equatable, Sendable {
     /// re-fetching the feed.
     var noticeID: String?
     var checkedAt: Date
+    /// Whether this result came from `FixtureRecallFeed` rather than a real
+    /// feed — carried through to `RowState` so the dossier row can render an
+    /// unmistakable "preview data" treatment instead of presenting fixture
+    /// matches as genuine recalls. Defaults `false` so an old persisted blob
+    /// without this key still decodes (see the `Codable` note below).
+    var isFixture: Bool = false
+
+    /// Custom `Decodable` so a result persisted before `isFixture` existed
+    /// (missing key) decodes as `false` instead of failing the whole
+    /// dictionary decode — `loadResults` would otherwise silently drop every
+    /// persisted result the first time this ships.
+    enum CodingKeys: String, CodingKey {
+        case status, noticeID, checkedAt, isFixture
+    }
+
+    init(status: Status, noticeID: String?, checkedAt: Date, isFixture: Bool) {
+        self.status = status
+        self.noticeID = noticeID
+        self.checkedAt = checkedAt
+        self.isFixture = isFixture
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(Status.self, forKey: .status)
+        noticeID = try container.decodeIfPresent(String.self, forKey: .noticeID)
+        checkedAt = try container.decode(Date.self, forKey: .checkedAt)
+        isFixture = try container.decodeIfPresent(Bool.self, forKey: .isFixture) ?? false
+    }
 }
 
 /// Background-refresh recall matching (docs/design-v3/V3_BRIEF.md §6).
@@ -43,8 +72,8 @@ enum RecallWatcher {
     /// text only.
     nonisolated enum RowState: Equatable {
         case checking
-        case clear(checkedAt: Date)
-        case notice(RecallNotice)
+        case clear(checkedAt: Date, isFixture: Bool)
+        case notice(RecallNotice, isFixture: Bool)
     }
 
     /// Current display state for `recordID` — reads persisted state only,
@@ -56,16 +85,37 @@ enum RecallWatcher {
         guard let record = loadResults(defaults: defaults)[recordID.uuidString] else { return .checking }
         switch record.status {
         case .clear:
-            return .clear(checkedAt: record.checkedAt)
+            return .clear(checkedAt: record.checkedAt, isFixture: record.isFixture)
         case .notice:
             guard let noticeID = record.noticeID,
                   let notice = loadNotices(defaults: defaults)[noticeID] else {
                 // Notice cache missing/stale (e.g. cleared defaults) — fall
                 // back to "clear" rather than crash or show a broken row.
-                return .clear(checkedAt: record.checkedAt)
+                return .clear(checkedAt: record.checkedAt, isFixture: record.isFixture)
             }
-            return .notice(notice)
+            return .notice(notice, isFixture: record.isFixture)
         }
+    }
+
+    /// Which of `records` a recall check should even consider — pulled out
+    /// of `checkIfNeeded` for testability. Passed-on items are no longer
+    /// this household's problem: a recall notice on something already
+    /// sold/given away isn't actionable and shouldn't cost this owner an
+    /// alert. Not `nonisolated` — unlike `shouldNotify` below, this touches
+    /// `PurchaseRecord` directly (MainActor-isolated, like the rest of this
+    /// type), the same reason `RecallMatcher` routes through a decoupled
+    /// `RecordSnapshot` instead of `PurchaseRecord` for ITS pure logic.
+    static func eligibleForRecallCheck(_ records: [PurchaseRecord]) -> [PurchaseRecord] {
+        records.filter { $0.passedOnDate == nil }
+    }
+
+    /// Whether a match should trigger the (cap-exempt) safety notification —
+    /// only for a genuinely NEW match against a REAL (non-fixture) feed.
+    /// Pulled out of `checkIfNeeded` as a pure decision so it's directly
+    /// testable without `UNUserNotificationCenter`: this is the actual
+    /// honesty guarantee behind "fixture data never notifies".
+    nonisolated static func shouldNotify(isNewMatch: Bool, isFixture: Bool) -> Bool {
+        isNewMatch && !isFixture
     }
 
     /// Runs a recall check across `records` if the flag+Plus gate is on and
@@ -100,7 +150,10 @@ enum RecallWatcher {
         var results = loadResults(defaults: defaults)
         var newMatchCount = 0
 
-        for record in records {
+        // Passed-on items are no longer this household's problem — a
+        // recall notice on something already sold/given away isn't
+        // actionable and shouldn't cost this owner an alert.
+        for record in eligibleForRecallCheck(records) {
             let snapshot = RecallMatcher.RecordSnapshot(
                 recordID: record.id,
                 merchantName: record.merchantName,
@@ -110,14 +163,18 @@ enum RecallWatcher {
             let previous = results[record.id.uuidString]
 
             if let matched = RecallMatcher.firstMatch(for: snapshot, in: notices) {
-                results[record.id.uuidString] = RecallCheckRecord(status: .notice, noticeID: matched.id, checkedAt: now)
+                results[record.id.uuidString] = RecallCheckRecord(status: .notice, noticeID: matched.id, checkedAt: now, isFixture: feed.isFixture)
                 let alreadyKnown = previous?.status == .notice && previous?.noticeID == matched.id
-                if !alreadyKnown {
-                    newMatchCount += 1
+                if !alreadyKnown { newMatchCount += 1 }
+                // Never fire a real, cap-exempt safety notification off
+                // fixture data — that would alarm the user over a recall
+                // that doesn't exist. See `RecallFeedAdapter.isFixture` and
+                // `shouldNotify`.
+                if shouldNotify(isNewMatch: !alreadyKnown, isFixture: feed.isFixture) {
                     scheduleSafetyNotification(record: record, notice: matched)
                 }
             } else {
-                results[record.id.uuidString] = RecallCheckRecord(status: .clear, noticeID: nil, checkedAt: now)
+                results[record.id.uuidString] = RecallCheckRecord(status: .clear, noticeID: nil, checkedAt: now, isFixture: feed.isFixture)
             }
         }
 

@@ -502,6 +502,13 @@ final class VoiceRecorder {
         guard let recognizer, recognizer.isAvailable else {
             return .blocked("Speech recognition isn't available on this device right now.")
         }
+        // On-device recognition is the guarantee this feature makes (voice
+        // capture never leaves the device) — if this locale can't do it,
+        // block rather than silently falling back to Apple's server-based
+        // recognizer (item 3, HIGH).
+        guard recognizer.supportsOnDeviceRecognition else {
+            return .blocked("On-device speech isn't available for your language yet.")
+        }
 
         let speechStatus = await withCheckedContinuation { (continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
             SFSpeechRecognizer.requestAuthorization { status in
@@ -533,9 +540,11 @@ final class VoiceRecorder {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        // Always required, never conditional: `requestPermissionsAndStart`
+        // already blocked before reaching here if the locale doesn't
+        // support on-device recognition — this must never silently fall
+        // back to Apple's server-based recognizer (item 3, HIGH).
+        request.requiresOnDeviceRecognition = true
         recognitionRequest = request
 
         let inputNode = audioEngine.inputNode

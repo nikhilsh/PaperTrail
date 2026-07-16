@@ -251,7 +251,11 @@ private struct DigestCard: View {
                                 .foregroundStyle(PT.amber)
                                 // v3 animPassV3 §9 #8 "Odometer numbers":
                                 // digest stats roll when they change.
-                                .contentTransition(animPassOn ? .numericText() : .identity)
+                                // Reduce Motion: swap the transition itself,
+                                // not just the curve — `.numericText()` rolls
+                                // regardless of `.animation`'s duration
+                                // (item 10).
+                                .contentTransition(animPassOn && !reduceMotion ? .numericText() : .identity)
                                 .animation(
                                     animPassOn ? AnimPass.animation(.default, reduceMotion: reduceMotion) : nil,
                                     value: item.daysLeft

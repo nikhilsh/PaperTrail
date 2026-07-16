@@ -23,6 +23,17 @@ enum PassItOnAggregation {
 /// Page selection + live page count for the "Pass it on" buyer-packet
 /// builder (docs/design-v3/V3_BRIEF.md §7, V3-1 mock).
 enum PassItOnPacket {
+    /// Whether a record has genuine, on-file proof of purchase — any
+    /// attachment that isn't the product photo. Pure UUID book-keeping, no
+    /// SwiftData dependency, so `PassItOnBuilderView.hasProofOfPurchase`
+    /// (which does the `@Query` filtering) and tests can both call it
+    /// directly. Was a hardcoded `true` stub before this existed (item 2,
+    /// HIGH) — a record with zero attachments claimed proof of purchase was
+    /// available to hand to a buyer.
+    nonisolated static func hasProofOfPurchase(attachmentIDs: [UUID], productImageAttachmentID: UUID?) -> Bool {
+        attachmentIDs.contains { $0 != productImageAttachmentID }
+    }
+
     /// Which checklist rows the user has toggled on. Defaults match the
     /// V3-1 mock: proof/warranty/service on, manual/price off.
     struct Selection: Equatable, Sendable {
