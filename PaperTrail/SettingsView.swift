@@ -153,12 +153,6 @@ struct SettingsView: View {
     @ViewBuilder
     private var heroCard: some View {
         if PlusConfig.enabled, PlusEntitlements.shared.hasPlus, let membershipInfo {
-            // Explicitly typed local, not an inline ternary in the call
-            // below — folded into the `GoldMemberCard(...)` argument list
-            // directly, the type checker couldn't produce a diagnostic for
-            // the expression (CI: "failed to produce diagnostic for
-            // expression"). Lifetime has no App Store subscription to manage.
-            let onManage: (() -> Void)? = membershipInfo.term == .lifetime ? nil : manageSubscriptions
             GoldMemberCard(
                 name: "Your library",
                 memberNumber: membershipInfo.memberNumber,
@@ -166,11 +160,21 @@ struct SettingsView: View {
                 itemCount: itemCount,
                 totalValue: totalValue,
                 synced: !backupState.isPaused,
-                onManage: onManage
+                onManage: manageAction(for: membershipInfo.term)
             )
         } else {
             libraryCard
         }
+    }
+
+    /// Lifetime has no App Store subscription to manage. Pulled out of the
+    /// `heroCard` `@ViewBuilder` body as a plain function call — inlining
+    /// this ternary directly into `GoldMemberCard(...)`'s argument list (or
+    /// even a `let` just above it) made the expression too complex for the
+    /// type checker to produce a diagnostic for (CI: "failed to produce
+    /// diagnostic for expression").
+    private func manageAction(for term: PTMembershipTerm) -> (() -> Void)? {
+        term == .lifetime ? nil : manageSubscriptions
     }
 
     private var libraryCard: some View {
