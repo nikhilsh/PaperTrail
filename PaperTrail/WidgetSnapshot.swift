@@ -184,20 +184,28 @@ enum WidgetSnapshotWriter {
             let currency = record.currency ?? "SGD"
             totalsByCurrency[currency, default: 0] += amount
         }
-        // `max(by:)` returns the *last* of any equally-maximal elements, so
-        // sorting keys descending first means ties resolve to the
-        // alphabetically-first currency code once `max(by:)` picks the last
-        // of the tied group.
-        guard let dominant = totalsByCurrency.keys.sorted(by: >).max(by: {
-            totalsByCurrency[$0, default: 0] < totalsByCurrency[$1, default: 0]
-        }), let dominantTotal = totalsByCurrency[dominant] else { return nil }
+        // Highest total wins; a tie goes to the alphabetically-first
+        // currency code. The comparator folds the tie-break in directly
+        // (an alphabetically-later key compares "less" on equal totals),
+        // so the maximum is unique — no reliance on `max(by:)`'s
+        // first-vs-last behavior for equal elements or on dictionary
+        // iteration order.
+        guard let dominant = totalsByCurrency.max(by: { lhs, rhs in
+            lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key > rhs.key
+        }) else { return nil }
 
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 0
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        let amountText = formatter.string(from: NSNumber(value: dominantTotal)) ?? "\(Int(dominantTotal))"
-        return "\(dominant) \(amountText)"
+        // en_US_POSIX doesn't group digits on its own — force the comma so
+        // the widget shows "SGD 3,116" (the C1 mock's copy), still
+        // deterministic across device locales because both the locale and
+        // the separator are pinned here.
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = ","
+        let amountText = formatter.string(from: NSNumber(value: dominant.value)) ?? "\(Int(dominant.value))"
+        return "\(dominant.key) \(amountText)"
     }
 
     /// The first unregistered item whose warranty is still active — the
