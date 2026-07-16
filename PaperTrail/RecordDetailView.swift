@@ -393,12 +393,121 @@ struct RecordDetailView: View {
         }
     }
 
+    // MARK: v3 multiCoverage (docs/design-v3/V3_BRIEF.md §2, flag-gated)
+    //
+    // `nil` when the flag is off OR the record has no coverage line with a
+    // date on it — either way `coveragePassport` falls back to the exact v2
+    // single-ring passport below, unchanged. This is the ONLY place this
+    // view reads `FeatureFlags.isOn(.multiCoverage)`; everything downstream
+    // (`multiCoveragePassportCard`, `multiCoverageLineRows`) is reached only
+    // through this gate.
+    private var passportSummary: MultiCoverageSummary? {
+        guard FeatureFlags.isOn(.multiCoverage) else { return nil }
+        return multiCoverageSummary(lines: record.coverageLines)
+    }
+
     private var coveragePassport: some View {
         VStack(alignment: .leading, spacing: 18) {
-            passportCard
-            coveredGroup
+            if let summary = passportSummary {
+                multiCoveragePassportCard(summary)
+                multiCoverageLineRows(summary)
+            } else {
+                passportCard
+                coveredGroup
+            }
             supportContactRow
             passportCTAs
+        }
+    }
+
+    /// V3-2 mock: ring left (longest live line's span), "N coverage lines /
+    /// N active · N expired / Next to lapse" right. Same outer card chrome
+    /// (stamp, Bought/Expires ledger rows, serial, model) as `passportCard`.
+    private func multiCoveragePassportCard(_ summary: MultiCoverageSummary) -> some View {
+        PaperCardV2 {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Coverage passport")
+                        .ptMonoLabel(9.5, tracking: 2)
+                        .foregroundStyle(PT.onPaper3)
+                    Spacer()
+                    PTStamp(text: passportStamp.text, state: passportStamp.state)
+                }
+
+                HStack(alignment: .center, spacing: 18) {
+                    if let values = summary.ringLine.values {
+                        CoverageRing(
+                            totalMonths: values.total,
+                            monthsRemaining: values.remaining,
+                            unitSuffix: values.unit.suffix,
+                            caption: "longest line",
+                            diameter: 110,
+                            lineWidth: 8
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(summary.totalCount) coverage line\(summary.totalCount == 1 ? "" : "s")")
+                            .font(PTFont.serif(17, weight: 600))
+                            .foregroundStyle(PT.onPaper)
+                        Text("\(summary.activeCount) active · \(summary.expiredCount) expired")
+                            .font(.system(size: 12))
+                            .foregroundStyle(PT.onPaper2)
+                        if let next = summary.nextToLapse, let endDate = next.line.endDate {
+                            Text("Next to lapse: \(next.line.label), \(PTDate.dayMonthYear.string(from: endDate))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(PT.onPaper2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+
+                Rectangle().fill(PT.onPaperHair).frame(height: 1)
+
+                LedgerRow(key: "Bought", value: record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                LedgerRow(key: "Expires", value: record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+
+                if let serial = record.serialNumber, !serial.isEmpty {
+                    Rectangle().fill(PT.onPaperHair).frame(height: 1)
+                    passportSerialRow(serial)
+                }
+
+                if !record.productName.isEmpty {
+                    LedgerRow(key: "Model", value: record.productName)
+                }
+            }
+            .padding(18)
+        }
+    }
+
+    /// V3-2 mock: one compact row per line below the passport card, plus the
+    /// gold "+ ADD A COVERAGE LINE" action that routes to the editor.
+    private func multiCoverageLineRows(_ summary: MultiCoverageSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 0) {
+                ForEach(summary.rows) { row in
+                    if row.index > 0 {
+                        Rectangle().fill(PT.hair).frame(height: 1)
+                    }
+                    CoverageLineRowView(row: row)
+                }
+            }
+            .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            NavigationLink {
+                EditRecordView(record: record)
+            } label: {
+                Text("+ ADD A COVERAGE LINE")
+                    .font(PTFont.mono(10.5, medium: true))
+                    .tracking(2)
+                    .foregroundStyle(PT.gold)
+            }
+            .buttonStyle(.plain)
+
+            Text("Reminders fire per line — nudges ≤ 7 days apart arrive as one note.")
+                .font(.system(size: 11))
+                .foregroundStyle(PT.txt3)
         }
     }
 
@@ -988,6 +1097,12 @@ struct RecordDetailView: View {
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
+        // v3 multiCoverage (§3): same remove-on-delete path as the warranty/
+        // return-window reminders above. No-ops when the flag is off.
+        if FeatureFlags.isOn(.multiCoverage) {
+            let recordID = record.id
+            Task { await CoverageReminders.removeReminders(for: recordID) }
+        }
         SpotlightIndexer.deindex(recordID: record.id)
         modelContext.delete(record)
 

@@ -22,6 +22,12 @@ struct CoverageRing: View {
     /// unitless counts the caller is free to pass in whatever unit this
     /// suffix names.
     var unitSuffix: String = "mo"
+    /// Center caption under the count, e.g. "REMAINING" (default, v2) or
+    /// "longest line" (v3 `multiCoverage` — V3_BRIEF §2, mock V3-2) when the
+    /// ring is showing the longest of several coverage lines rather than a
+    /// single warranty span. Purely a label swap; the count/arc math is
+    /// unaffected either way.
+    var caption: String = "REMAINING"
     var diameter: CGFloat = 150
     var lineWidth: CGFloat = 9
 
@@ -48,7 +54,7 @@ struct CoverageRing: View {
                 Text("\(displayedMonths) \(unitSuffix)")
                     .font(PTFont.serif(38, weight: 600))
                     .foregroundStyle(PT.onPaper)
-                Text("REMAINING")
+                Text(caption)
                     .ptMonoLabel(9, tracking: 2)
                     .foregroundStyle(PT.onPaper3)
             }

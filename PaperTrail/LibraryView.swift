@@ -253,6 +253,12 @@ struct LibraryView: View {
         }
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
+        // v3 multiCoverage (§3): same remove-on-delete path as the warranty/
+        // return-window reminders above. No-ops when the flag is off.
+        if FeatureFlags.isOn(.multiCoverage) {
+            let recordID = record.id
+            Task { await CoverageReminders.removeReminders(for: recordID) }
+        }
         SpotlightIndexer.deindex(recordID: record.id)
         modelContext.delete(record)
 
