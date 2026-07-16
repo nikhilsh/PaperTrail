@@ -97,4 +97,54 @@ enum PT {
         colors: [gold.opacity(0.10), .clear],
         center: .top, startRadius: 0, endRadius: 460
     )
+
+    /// The v2 foil gradient, stop-for-stop per `docs/design-v2/DESIGN_LANGUAGE.md`
+    /// §2: `linear(90°, goldDeep, gold 40%, goldHi 52%, gold 64%, goldDeep)`.
+    ///
+    /// This is ~2% off `goldFoil`'s stops (38/50/62, taken from `pt.css`'s
+    /// `.gold-rule` — the two source docs disagree by a couple of percentage
+    /// points and neither reads as visually distinct at UI scale). `goldFoil`
+    /// is left untouched so existing screens don't shift; new v2 work should
+    /// prefer `foilGradient` as the named, spec-exact token.
+    static let foilGradient = LinearGradient(
+        stops: [
+            .init(color: goldDeep, location: 0.0),
+            .init(color: gold,     location: 0.40),
+            .init(color: goldHi,   location: 0.52),
+            .init(color: gold,     location: 0.64),
+            .init(color: goldDeep, location: 1.0)
+        ],
+        startPoint: .leading, endPoint: .trailing
+    )
+}
+
+// MARK: - Motion (docs/design-v2/ANIMATION_SPEC.md)
+
+/// Named easing curves from the v2 animation spec, plus a Reduce Motion
+/// escape hatch. Curves are parameterized by duration because the same curve
+/// is reused at different durations across components (e.g. `archiveEase`
+/// drives both the 280ms push transition and the 900ms coverage-ring sweep).
+enum PTMotion {
+    /// cubic-bezier(.2,.7,.3,1) — navigation push/pop, coverage ring sweep.
+    static func archiveEase(_ duration: Double) -> Animation {
+        .timingCurve(0.2, 0.7, 0.3, 1, duration: duration)
+    }
+
+    /// cubic-bezier(.2,.8,.25,1) — sheet presentation (soft-ask, paywall).
+    static func sheetEase(_ duration: Double) -> Animation {
+        .timingCurve(0.2, 0.8, 0.25, 1, duration: duration)
+    }
+
+    /// cubic-bezier(.2,.9,.3,1.3) — slight overshoot; the PURCHASED stamp slam.
+    static func stampEase(_ duration: Double) -> Animation {
+        .timingCurve(0.2, 0.9, 0.3, 1.3, duration: duration)
+    }
+
+    /// Per ANIMATION_SPEC "Don'ts": under Reduce Motion, every translation
+    /// becomes a 200ms crossfade — no skew, no overshoot, no sheen. Pass the
+    /// spec'd curve/duration plus the environment's `accessibilityReduceMotion`
+    /// value; this returns the right `Animation` for the current context.
+    static func reduced(_ animation: Animation, reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : animation
+    }
 }
