@@ -71,9 +71,10 @@ higher reads as business pricing and enrages households.
 
 Ship monetization only after Wave 1 + Wave 2 exist (the paid tier needs the insurance
 report + digest to be real) and household sharing has survived a store release. Target:
-the store update *after* the flag-on household release. Grandfathering: everyone who
-used household sharing before the paywall keeps it free (they're the early testers —
-another trust move, announced explicitly).
+the store update *after* the flag-on household release. No grandfathering needed:
+household sharing has never reached App Store users (the store build has always been
+flag-off for it) — only the developer's own OTA test devices have used it, so there's
+nobody to carry forward free.
 
 ## What we will never do
 

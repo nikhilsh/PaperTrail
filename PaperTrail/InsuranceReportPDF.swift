@@ -151,6 +151,11 @@ enum InsuranceReportPDF {
                 y += draw("Home Inventory Report", font: serif(28), color: ink)
                 y += 6
                 y += draw(PTDate.dayMonthYear.string(from: report.generatedAt), font: monoRegular(10), color: ink3)
+                if report.isPlusPreview {
+                    y += 6
+                    y += draw("FREE PREVIEW — THE FULL HOME REPORT IS PART OF PAPERTRAIL PLUS",
+                               font: mono(8.5), color: gold, maxWidth: contentWidth)
+                }
                 y += 16
                 drawRule()
                 y += 24

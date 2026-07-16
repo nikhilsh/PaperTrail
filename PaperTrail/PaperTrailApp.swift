@@ -192,6 +192,9 @@ struct PaperTrailApp: App {
                 .environmentObject(CloudImageSyncManager.shared)
                 .reviewPrompting()
                 .task {
+                    // No-ops entirely while PlusConfig.enabled is false — no
+                    // StoreKit call is made.
+                    PlusEntitlements.shared.start()
                     _ = await NotificationManager.shared.requestPermission()
                     await NotificationManager.shared.migrateIdentifiersIfNeeded(modelContext: modelContainer.mainContext)
                     await runCloudKitPreflight()

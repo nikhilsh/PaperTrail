@@ -50,6 +50,11 @@ nonisolated enum InsuranceReport {
         let grandPurchaseTotalsByCurrency: [String: Double]
         let grandEstimatedTotalsByCurrency: [String: Double]
         let generatedAt: Date
+        /// True when `build` was asked to restrict to a single room (the
+        /// PaperTrail Plus free-preview gate — see `ExportView`). Drives the
+        /// "Free preview" cover-page line in `InsuranceReportPDF`. Defaults
+        /// to `false` so every existing call site stays unaffected.
+        var isPlusPreview: Bool = false
     }
 
     /// The room name used for records with a nil or blank `room`.
@@ -60,7 +65,13 @@ nonisolated enum InsuranceReport {
     /// the renderer displays this bucket as a bare number, no symbol.
     static let unspecifiedCurrency = "Unspecified"
 
-    static func build(records: [PurchaseRecord], attachments: [Attachment], asOf: Date = .now) -> Report {
+    /// - Parameter restrictToHighestValueRoom: PaperTrail Plus free-preview
+    ///   gate (docs/MONETIZATION.md — "Insurance-Ready Report... Free tier:
+    ///   one room"). When `true`, the report is trimmed to the single room
+    ///   with the highest total purchase value after grouping — everything
+    ///   else about `build` runs unchanged. Defaults to `false`, so every
+    ///   existing caller (including all current tests) is unaffected.
+    static func build(records: [PurchaseRecord], attachments: [Attachment], asOf: Date = .now, restrictToHighestValueRoom: Bool = false) -> Report {
         let attachmentsByRecord = Dictionary(grouping: attachments, by: { $0.recordID })
 
         let itemsByRoom: [String: [Item]] = records.reduce(into: [:]) { acc, record in
@@ -98,14 +109,30 @@ nonisolated enum InsuranceReport {
                 )
             }
 
-        let allItems = sections.flatMap(\.items)
+        let finalSections: [RoomSection]
+        if restrictToHighestValueRoom, let topRoom = sections.max(by: { roomTotalValue($0) < roomTotalValue($1) }) {
+            finalSections = [topRoom]
+        } else {
+            finalSections = sections
+        }
+
+        let allItems = finalSections.flatMap(\.items)
         return Report(
-            sections: sections,
+            sections: finalSections,
             totalItemCount: allItems.count,
             grandPurchaseTotalsByCurrency: sumByCurrency(allItems, \.amount),
             grandEstimatedTotalsByCurrency: sumByCurrency(allItems, \.estimatedCurrentValue),
-            generatedAt: asOf
+            generatedAt: asOf,
+            isPlusPreview: restrictToHighestValueRoom
         )
+    }
+
+    /// Sum of a room's purchase totals across currencies — for RANKING rooms
+    /// only (picking the single highest-value room for the free-preview
+    /// gate), never displayed: mixing currencies into one number would be
+    /// wrong to show a user, but it's a fine tie-breaker heuristic here.
+    private static func roomTotalValue(_ section: RoomSection) -> Double {
+        section.purchaseTotalsByCurrency.values.reduce(0, +)
     }
 
     private static func normalizedRoom(_ room: String?) -> String {

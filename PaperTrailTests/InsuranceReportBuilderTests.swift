@@ -153,4 +153,44 @@ struct InsuranceReportBuilderTests {
         let item = report.sections.first?.items.first
         #expect(item?.thumbnailFilename == nil)
     }
+
+    // MARK: - PaperTrail Plus free-preview gate (restrictToHighestValueRoom)
+
+    @Test func defaultBuildIsUnaffectedByThePlusPreviewParameter() {
+        let records = [
+            record(name: "Sofa", room: "Living Room", amount: 500),
+            record(name: "Kettle", room: "Kitchen", amount: 50),
+        ]
+        let report = InsuranceReport.build(records: records, attachments: [])
+        #expect(report.sections.count == 2)
+        #expect(report.isPlusPreview == false)
+    }
+
+    @Test func restrictToHighestValueRoomKeepsOnlyTheTopRoomByPurchaseTotal() {
+        let records = [
+            record(name: "Sofa", room: "Living Room", amount: 500, currency: "USD"),
+            record(name: "Kettle", room: "Kitchen", amount: 50, currency: "USD"),
+            record(name: "Drill", room: "Garage", amount: 20, currency: "USD"),
+        ]
+        let report = InsuranceReport.build(records: records, attachments: [], restrictToHighestValueRoom: true)
+        #expect(report.sections.count == 1)
+        #expect(report.sections.first?.name == "Living Room")
+        #expect(report.totalItemCount == 1)
+        #expect(report.isPlusPreview == true)
+    }
+
+    @Test func restrictToHighestValueRoomRecomputesGrandTotalsFromTheKeptRoomOnly() {
+        let records = [
+            record(name: "Sofa", room: "Living Room", amount: 500, currency: "USD"),
+            record(name: "TV", room: "Living Room", amount: 300, currency: "USD"),
+            record(name: "Kettle", room: "Kitchen", amount: 50, currency: "USD"),
+        ]
+        let report = InsuranceReport.build(records: records, attachments: [], restrictToHighestValueRoom: true)
+        // Whichever single room survives, the grand totals must be exactly
+        // that room's totals — never a sum left over from a dropped room.
+        let kept = try! #require(report.sections.first)
+        #expect(report.sections.count == 1)
+        #expect(report.grandPurchaseTotalsByCurrency == kept.purchaseTotalsByCurrency)
+        #expect(report.grandEstimatedTotalsByCurrency == kept.estimatedTotalsByCurrency)
+    }
 }

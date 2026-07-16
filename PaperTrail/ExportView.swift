@@ -19,9 +19,20 @@ struct ExportView: View {
     @State private var isBuildingReport = false
     @State private var reportURL: URL?
     @State private var showReportShareSheet = false
+    /// PaperTrail Plus gate for the Home Inventory Report — offers a
+    /// single-room free preview instead of generating straight away.
+    @State private var showReportGateDialog = false
+    @State private var showPaywall = false
 
     private var recordCount: Int { records.count }
     private var documentCount: Int { attachments.count }
+
+    /// Whole-home report requires Plus (docs/MONETIZATION.md — free tier is
+    /// one room). `false` whenever the flag is off, so the badge/dialog never
+    /// appear and "Generate report" behaves exactly as it does today.
+    private var reportNeedsPlus: Bool {
+        PlusConfig.enabled && !PlusEntitlements.shared.hasPlus
+    }
 
     var body: some View {
         ScrollView {
@@ -94,6 +105,18 @@ struct ExportView: View {
         .sheet(isPresented: $showReportShareSheet) {
             if let reportURL { ShareSheetView(activityItems: [reportURL]) }
         }
+        .sheet(isPresented: $showPaywall) {
+            NavigationStack { PaywallView() }
+                .tint(PT.gold)
+                .preferredColorScheme(.dark)
+        }
+        .confirmationDialog("Home Inventory Report", isPresented: $showReportGateDialog, titleVisibility: .visible) {
+            Button("Preview one room") { Task { await buildAndShareReport(restrictToHighestValueRoom: true) } }
+            Button("Get Plus") { showPaywall = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Free preview covers your highest-value room. The full whole-home report is part of PaperTrail Plus.")
+        }
         .alert("Export failed", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: {
@@ -159,9 +182,20 @@ struct ExportView: View {
                     .foregroundStyle(PT.goldDeep)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Home Inventory Report")
-                        .font(PTFont.serif(16, weight: 600))
-                        .foregroundStyle(PT.onPaper)
+                    HStack(spacing: 6) {
+                        Text("Home Inventory Report")
+                            .font(PTFont.serif(16, weight: 600))
+                            .foregroundStyle(PT.onPaper)
+                        if reportNeedsPlus {
+                            Text("PLUS")
+                                .font(PTFont.mono(8.5, medium: true))
+                                .tracking(1.0)
+                                .foregroundStyle(PT.inkStamp)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(PT.goldFoil, in: Capsule())
+                        }
+                    }
                     Text("Everything you own, by room — ready for your insurer")
                         .font(.system(size: 12))
                         .foregroundStyle(PT.onPaper2)
@@ -169,7 +203,13 @@ struct ExportView: View {
                 Spacer(minLength: 0)
             }
 
-            Button { Task { await buildAndShareReport() } } label: {
+            Button {
+                if reportNeedsPlus {
+                    showReportGateDialog = true
+                } else {
+                    Task { await buildAndShareReport() }
+                }
+            } label: {
                 HStack(spacing: 8) {
                     if isBuildingReport { ProgressView().tint(PT.inkStamp) }
                     Text(isBuildingReport ? "Preparing…" : "Generate report")
@@ -220,9 +260,10 @@ struct ExportView: View {
     /// rendering — full-res image decodes and PDF drawing — then runs off
     /// the main actor in a detached task so it can't block the UI.
     @MainActor
-    private func buildInsuranceReportPDF() async -> URL? {
+    private func buildInsuranceReportPDF(restrictToHighestValueRoom: Bool = false) async -> URL? {
         isBuildingReport = true
-        let report = InsuranceReport.build(records: records, attachments: attachments)
+        let report = InsuranceReport.build(records: records, attachments: attachments,
+                                            restrictToHighestValueRoom: restrictToHighestValueRoom)
         let url = await Task.detached {
             InsuranceReportPDF.generate(report)
         }.value
@@ -234,8 +275,8 @@ struct ExportView: View {
         return url
     }
 
-    private func buildAndShareReport() async {
-        guard let url = await buildInsuranceReportPDF() else { return }
+    private func buildAndShareReport(restrictToHighestValueRoom: Bool = false) async {
+        guard let url = await buildInsuranceReportPDF(restrictToHighestValueRoom: restrictToHighestValueRoom) else { return }
         reportURL = url
         showReportShareSheet = true
     }
