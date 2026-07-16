@@ -1,29 +1,51 @@
 import SwiftUI
 import SwiftData
 import UIKit
-import CloudKit
+import StoreKit
 
-/// Settings, rebuilt around outcomes (§1): a Library Card hero, then Reminders,
-/// Your data, Household, Your library, Help & about, and iCloud & Your Data.
-/// Every raw diagnostic now lives in `AdvancedDiagnosticsView` (§2) — nothing
-/// technical greets a real person here, but nothing was deleted.
+/// Settings, rebuilt as the v2 "front desk" (docs/design-v2/V2_BRIEF.md §1,
+/// S1): a Library Card hero (re-struck in gold once Plus is active — P3) and
+/// exactly four rows — Reminders, Household, Your data, Help & about — each
+/// a one-tap drill-in to a screen that carries everything that used to live
+/// directly on this surface. Nothing was deleted; every old row is still
+/// here, one level down. The standalone "iCloud & Your Data" status card is
+/// gone too, but not the information it carried: the library card's own
+/// SYNC row now tells the same honest truth (reusing `backupState`, the
+/// signal that already drove this card's badge), and the raw CloudKit
+/// account status still lives in Advanced & Diagnostics ("iCloud account"),
+/// unchanged.
 struct SettingsView: View {
     @Query private var records: [PurchaseRecord]
     @Query private var attachments: [Attachment]
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @AppStorage("activeSyncBackend") private var activeSyncBackend = "Unknown"
     @AppStorage("lastCloudSyncDate") private var lastCloudSyncRaw = 0.0
-    @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
-    @AppStorage("spotlightIndexingEnabled") private var spotlightIndexingEnabled = true
 
     private let reminders = ReminderSettings.shared
 
-    @State private var showLoggedValueInfo = false
-    @State private var iCloudStatusText = "Checking iCloud status…"
-    @State private var iCloudStatusTone: Color = PT.txt3
-    /// PaperTrail Plus section — entirely hidden while `PlusConfig.enabled`
-    /// is false, so Settings renders byte-identically to today.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// PaperTrail Plus paywall — presented from the Plus band / lapsed renew
+    /// band on the library card (tapping the gold member card's MANAGE ›
+    /// goes to the App Store instead, via `manageSubscriptions()`).
     @State private var showPaywall = false
+    /// Snapshot of `hasPlus` taken the moment the paywall is opened, so
+    /// `handlePaywallDismiss` can tell "just converted" apart from "already
+    /// had Plus, dismissed without changing anything" — that's what gates
+    /// the "struck in gold" toast (ANIMATION_SPEC §4).
+    @State private var hadPlusWhenPaywallOpened = false
+    @State private var toast: PTToastItem?
+    /// Yearly product's live `displayPrice`, loaded once StoreKit answers.
+    /// `nil` until then — the band shows the static "S$29.98" house copy in
+    /// the meantime, never a blank price.
+    @State private var yearlyPriceText: String?
+    /// Member-card params sourced from the live entitlement transaction.
+    @State private var membershipInfo: PlusMembershipInfo?
+
+    private struct PlusMembershipInfo {
+        let memberNumber: String
+        let term: PTMembershipTerm
+    }
 
     // MARK: Derived
 
@@ -39,28 +61,6 @@ struct SettingsView: View {
         return formatter.string(from: NSNumber(value: sum)) ?? "—"
     }
 
-    private var roomCount: Int { Set(records.compactMap(\.room).filter { !$0.isEmpty }).count }
-
-    /// Records whose Proof Score is below "Proof complete" (90) — how many
-    /// still need a document, a serial number, or another proof field filled
-    /// in. Groups attachments by `recordID` once so the count is O(records +
-    /// attachments) rather than scanning every attachment per record.
-    private var proofNeedingCount: Int {
-        let attachmentsByRecord = Dictionary(grouping: attachments, by: \.recordID)
-        return records.filter { record in
-            let hasAttachment = attachmentsByRecord[record.id] != nil
-            let snapshot = ProofScoreSnapshot(
-                hasAttachment: hasAttachment,
-                purchaseDate: record.purchaseDate,
-                amount: record.amount,
-                warrantyExpiryDate: record.warrantyExpiryDate,
-                serialNumber: record.serialNumber,
-                productImageAttachmentID: record.productImageAttachmentID
-            )
-            return ProofScore(snapshot: snapshot).score < 90
-        }.count
-    }
-
     private var householdSummary: String {
         let manager = HouseholdManager.shared
         let members = manager.members
@@ -68,15 +68,6 @@ struct SettingsView: View {
         if !manager.isHouseholdOwner { return "Joined" }
         if members.contains(where: { $0.role == .invited }) { return "Invite sent" }
         return "\(members.count) member\(members.count == 1 ? "" : "s")"
-    }
-
-    private var storageSize: String {
-        let totalBytes = attachments.reduce(into: 0) { total, attachment in
-            let url = ImageStorageManager.url(for: attachment.localFilename)
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-            total += size
-        }
-        return ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
     }
 
     private var lastSyncDate: Date? {
@@ -87,9 +78,17 @@ struct SettingsView: View {
         currentBackupState(syncManager: cloudImageSync, activeSyncBackend: activeSyncBackend, lastSync: lastSyncDate)
     }
 
-    var body: some View {
-        @Bindable var reminders = reminders
+    /// The mono row's left-hand label — "SYNCED · N ITEMS · $X,XXX" honest
+    /// states (§1): never a fake green, always the real backup state.
+    private var syncCapsLabel: String {
+        switch backupState {
+        case .synced: "SYNCED"
+        case .syncing: "SYNCING"
+        case .paused: "SYNC PAUSED"
+        }
+    }
 
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Settings")
@@ -97,165 +96,40 @@ struct SettingsView: View {
                     .foregroundStyle(PT.txt)
                     .padding(.bottom, 18)
 
-                libraryCard
+                heroCard
                     .padding(.bottom, 26)
 
-                // PaperTrail Plus — inert and invisible until PlusConfig.enabled flips.
-                if PlusConfig.enabled {
-                    SettingsSectionLabel(text: "PaperTrail Plus")
-                    SettingsCard {
-                        SettingsRow(icon: "sparkles", iconColor: PT.gold, title: "PaperTrail Plus",
-                                    value: PlusEntitlements.shared.hasPlus ? "Plus" : "Free", showChevron: true,
-                                    action: { showPaywall = true })
-                        SettingsRowDivider()
-                        SettingsRow(icon: "arrow.clockwise", iconColor: PT.gold, title: "Restore purchases",
-                                    action: { Task { await PlusEntitlements.shared.restore() } })
-                    }
-                    .padding(.bottom, 22)
-                }
-
-                // Reminders
-                SettingsSectionLabel(text: "Reminders")
                 SettingsCard {
-                    SettingsRow(
-                        icon: "bell", iconColor: PT.gold, title: "Warranty reminders",
-                        subtitle: reminders.warrantyRemindersEnabled ? "Before each warranty runs out" : "Off — you won't be warned",
-                        toggle: $reminders.warrantyRemindersEnabled
-                    )
-                    if reminders.warrantyRemindersEnabled {
-                        SettingsRowDivider()
-                        Menu {
-                            ForEach(WarrantyLeadTime.allCases) { lead in
-                                Button(lead.label) { reminders.warrantyLeadTime = lead }
-                            }
-                        } label: {
-                            SettingsRow(icon: "calendar", title: "Remind me", value: reminders.warrantyLeadTime.label, showChevron: true)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    SettingsRowDivider()
-                    SettingsRow(
-                        icon: "arrow.uturn.backward", iconColor: PT.gold, title: "Return windows",
-                        subtitle: "Warn before a return or refund period closes",
-                        toggle: $reminders.returnWindowRemindersEnabled
-                    )
-                    SettingsRowDivider()
-                    SettingsRow(
-                        icon: "calendar.badge.clock", iconColor: PT.gold, title: "Monthly coverage digest",
-                        subtitle: "One summary of what's expiring and closing",
-                        toggle: $reminders.digestEnabled
-                    )
-                    SettingsRowDivider()
-                    SettingsRow(
-                        icon: "sparkles", iconColor: PT.gold, title: "Suggest support contacts",
-                        subtitle: "Look up brand help lines when something breaks",
-                        toggle: $reminders.suggestSupportContacts
-                    )
-                }
-                .padding(.bottom, 22)
-
-                // Your data
-                SettingsSectionLabel(text: "Your data")
-                SettingsCard {
-                    NavigationLink { ExportView() } label: {
-                        SettingsRow(icon: "square.and.arrow.up", iconColor: PT.gold, title: "Export everything",
-                                    subtitle: "A full copy — PDF + CSV, no lock-in", showChevron: true)
-                    }.buttonStyle(.plain)
-                    SettingsRowDivider()
-                    NavigationLink { ImportView() } label: {
-                        SettingsRow(icon: "tray.and.arrow.down", iconColor: PT.gold, title: "Import receipts",
-                                    subtitle: "From Photos, Files, or your inbox", showChevron: true)
-                    }.buttonStyle(.plain)
-                    SettingsRowDivider()
-                    SettingsRow(icon: "brain", iconColor: PT.gold, title: "Share anonymous learning data",
-                                subtitle: "Merchant patterns only — never your purchases",
-                                toggle: $communityLearningEnabled)
-                    SettingsRowDivider()
-                    SettingsRow(icon: "magnifyingglass", iconColor: PT.gold, title: "Show records in iOS search",
-                                subtitle: "Find receipts from the Home Screen",
-                                toggle: $spotlightIndexingEnabled)
-                    SettingsRowDivider()
-                    SettingsRow(icon: "lock", iconColor: PT.sage, title: "Records are private",
-                                subtitle: "Stored in your iCloud — only you can see them")
-                }
-                .padding(.bottom, 22)
-
-                // Household
-                SettingsSectionLabel(text: "Household")
-                SettingsCard {
-                    NavigationLink { HouseholdView() } label: {
-                        SettingsRow(icon: "person.2", iconColor: PT.gold, title: "Family sharing",
-                                    subtitle: "Share proof with the people you live with",
-                                    value: householdSummary, showChevron: true)
-                    }.buttonStyle(.plain)
-                }
-                .padding(.bottom, 22)
-
-                // Your library
-                SettingsSectionLabel(text: "Your library")
-                SettingsCard {
-                    SettingsRow(icon: "square.stack.3d.up", title: "Logged value",
-                                subtitle: "Handy for insurance & claims",
-                                value: totalValue, showChevron: true,
-                                action: { showLoggedValueInfo = true })
-                    SettingsRowDivider()
-                    SettingsRow(icon: "square.grid.2x2", title: "Categories", subtitle: "Rooms & types",
-                                value: "\(roomCount) room\(roomCount == 1 ? "" : "s")")
-                    SettingsRowDivider()
-                    SettingsRow(icon: "shippingbox", title: "Storage",
-                                value: storageSize)
-                    SettingsRowDivider()
-                    NavigationLink { ProofFixListView() } label: {
-                        SettingsRow(icon: "checkmark.seal", title: "Proof completeness",
-                                    value: proofNeedingCount > 0 ? "\(proofNeedingCount) need proof" : "All proof complete",
+                    NavigationLink { RemindersSettingsView() } label: {
+                        SettingsRow(icon: "bell", iconColor: PT.gold, title: "Reminders",
+                                    subtitle: "Warranty · returns · monthly digest",
+                                    value: reminders.warrantyRemindersEnabled ? "On" : "Off",
                                     showChevron: true)
                     }.buttonStyle(.plain)
-                }
-                .padding(.bottom, 22)
-
-                // Help & about
-                SettingsSectionLabel(text: "Help & about")
-                SettingsCard {
-                    SettingsRow(icon: "questionmark.circle", title: "Help & support", showChevron: true,
-                                action: { openURL("https://papertrail.kaopeh.com") })
                     SettingsRowDivider()
-                    SettingsRow(icon: "hand.raised", title: "Privacy policy", showChevron: true,
-                                action: { openURL("https://papertrail.kaopeh.com/privacy") })
+                    NavigationLink { HouseholdView() } label: {
+                        SettingsRow(icon: "person.2", iconColor: PT.gold, title: "Household",
+                                    subtitle: "Share proof with people you live with",
+                                    value: householdSummary, showChevron: true)
+                    }.buttonStyle(.plain)
                     SettingsRowDivider()
-                    SettingsRow(icon: "star", title: "Rate PaperTrail", showChevron: true,
-                                action: { openURL("https://apps.apple.com/app/id6788663812?action=write-review") })
+                    NavigationLink { YourDataSettingsView() } label: {
+                        SettingsRow(icon: "folder", iconColor: PT.gold, title: "Your data",
+                                    subtitle: "Export, import, privacy — no lock-in", showChevron: true)
+                    }.buttonStyle(.plain)
                     SettingsRowDivider()
-                    NavigationLink { AdvancedDiagnosticsView() } label: {
-                        SettingsRow(icon: "gearshape.2", title: "Advanced & Diagnostics",
-                                    subtitle: "Sync details & support info", showChevron: true)
+                    NavigationLink { HelpAboutSettingsView() } label: {
+                        SettingsRow(icon: "questionmark.circle", iconColor: PT.gold, title: "Help & about",
+                                    subtitle: "Guides, policy, diagnostics", showChevron: true)
                     }.buttonStyle(.plain)
                 }
-                .padding(.bottom, 22)
+                .padding(.bottom, 18)
 
-                // iCloud & Your Data
-                SettingsSectionLabel(text: "iCloud & Your Data")
-                SettingsCard {
-                    SettingsRow(icon: "icloud", iconColor: iCloudStatusTone, title: iCloudStatusText)
-                }
-                .padding(.bottom, 10)
                 Text("Your records and images are stored on this device and in your private iCloud. Nobody else — including the developer — can access them.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(PT.txt3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
-                    .padding(.bottom, 18)
-
-                // Footer
-                VStack(spacing: 4) {
-                    Text("PaperTrail · Version \(versionString)")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(PT.txt3)
-                    Text("Proof of purchase, ready the day you need it.")
-                        .font(PTFont.serif(13, weight: 500, italic: true))
-                        .foregroundStyle(PT.txt3)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 6)
             }
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.top, 4)
@@ -263,97 +137,134 @@ struct SettingsView: View {
         }
         .ptScreen()
         .toolbar(.hidden, for: .navigationBar)
-        .task { await refreshICloudStatus() }
         .task { await HouseholdManager.shared.refresh() }
-        .sheet(isPresented: $showPaywall) {
+        .task { await loadYearlyPrice() }
+        .task { await loadMembershipInfo() }
+        .sheet(isPresented: $showPaywall, onDismiss: handlePaywallDismiss) {
             NavigationStack { PaywallView() }
                 .tint(PT.gold)
                 .preferredColorScheme(.dark)
         }
-        .alert("Logged value", isPresented: $showLoggedValueInfo) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("\(itemCount) item\(itemCount == 1 ? "" : "s") · \(totalValue) logged. Handy for insurance & claims.")
+        .ptToast($toast)
+    }
+
+    // MARK: - Hero: library card (free) / gold member card (Plus, P3)
+
+    @ViewBuilder
+    private var heroCard: some View {
+        if PlusConfig.enabled, PlusEntitlements.shared.hasPlus, let membershipInfo {
+            GoldMemberCard(
+                name: "Your library",
+                memberNumber: membershipInfo.memberNumber,
+                term: membershipInfo.term,
+                itemCount: itemCount,
+                totalValue: totalValue,
+                synced: !backupState.isPaused,
+                onManage: manageAction(for: membershipInfo.term)
+            )
+        } else {
+            libraryCard
         }
     }
 
-    // MARK: - Library Card hero
+    /// Lifetime has no App Store subscription to manage. Pulled out of the
+    /// `heroCard` `@ViewBuilder` body as a plain function call, and written
+    /// as `if`/`return` rather than a ternary — `nil : manageSubscriptions`
+    /// (a bound method reference) was too much for the type checker to even
+    /// produce a diagnostic for (CI: "failed to produce diagnostic for
+    /// expression"), whether inline in the call, hoisted to a `let`, or
+    /// returned from a ternary in this same function.
+    private func manageAction(for term: PTMembershipTerm) -> (() -> Void)? {
+        if term == .lifetime {
+            return nil
+        }
+        return manageSubscriptions
+    }
 
     private var libraryCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("PAPERTRAIL · LIBRARY CARD")
-                    .ptMonoLabel(9.5, tracking: 2.4)
-                    .foregroundStyle(PT.goldDeep)
-                Spacer()
-                Text("EST. 2026")
-                    .font(PTFont.mono(9.5))
-                    .tracking(1.4)
-                    .foregroundStyle(PT.onPaper3)
-            }
-            .padding(.bottom, 14)
+        PaperCardV2(goldFold: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Text("PAPERTRAIL · LIBRARY CARD")
+                            .ptMonoLabel(9.5, tracking: 2.4)
+                            .foregroundStyle(PT.goldDeep)
+                        Spacer()
+                        Text("EST. 2026")
+                            .font(PTFont.mono(9.5))
+                            .tracking(1.4)
+                            .foregroundStyle(PT.onPaper3)
+                    }
+                    .padding(.bottom, 14)
 
-            HStack(spacing: 12) {
-                PTAvatar(size: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Your library")
-                        .font(PTFont.serif(20, weight: 600))
-                        .foregroundStyle(PT.onPaper)
-                    Text("Synced privately via iCloud")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(PT.onPaper2)
+                    HStack(spacing: 12) {
+                        PTAvatar(size: 48)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Your library")
+                                .font(PTFont.serif(20, weight: 600))
+                                .foregroundStyle(PT.onPaper)
+                            // Backup recency line — honest state, never static copy.
+                            Text(backupState.text)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(PT.onPaper2)
+                        }
+                        Spacer()
+                    }
+
+                    GoldRule()
+                        .padding(.vertical, 14)
+
+                    syncRow
                 }
-                Spacer()
-            }
+                .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
 
-            GoldRule()
-                .padding(.vertical, 14)
-
-            HStack {
-                BackupStatusBadge(state: backupState, onRetry: retryBackup)
-                Spacer()
-                Text("\(itemCount) ITEMS · \(totalValue)")
-                    .font(PTFont.mono(10))
-                    .tracking(0.6)
-                    .foregroundStyle(PT.onPaper3)
+                // Lapsed members (were Plus, aren't now) get the quiet renew
+                // band instead of the ordinary upsell — v2.1 spec: "No red,
+                // no drama, nothing deleted."
+                if PlusEntitlements.shared.isLapsed {
+                    LapsedRenewBand(
+                        priceText: "\(yearlyPriceText ?? "S$29.98")/yr",
+                        action: openPaywall
+                    )
+                } else {
+                    PlusBand(
+                        tagline: "Annual membership · first 2 weeks free",
+                        priceText: "\(yearlyPriceText ?? "S$29.98")/YR",
+                        action: openPaywall
+                    )
+                }
             }
         }
-        .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
-        .frame(maxWidth: .infinity)
-        .paperCard(goldFold: true)
     }
 
-    private var versionString: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    private var syncRow: some View {
+        Group {
+            if backupState.isPaused {
+                Button(action: retryBackup) { syncRowContent }.buttonStyle(.plain)
+            } else {
+                syncRowContent
+            }
+        }
+    }
+
+    private var syncRowContent: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Circle().fill(backupState.dotColor).frame(width: 6, height: 6)
+                Text(syncCapsLabel)
+            }
+            .font(PTFont.mono(11, medium: true))
+            .tracking(1.1)
+            .foregroundStyle(backupState.dotColor)
+            Spacer()
+            Text("\(itemCount) ITEM\(itemCount == 1 ? "" : "S") · \(totalValue)")
+                .font(PTFont.mono(11))
+                .tracking(1.1)
+                .foregroundStyle(PT.onPaper2)
+        }
     }
 
     // MARK: - Actions
-
-    private func refreshICloudStatus() async {
-        let container = CKContainer(identifier: "iCloud.nikhilsh.PaperTrail")
-        let status: CKAccountStatus
-        do {
-            status = try await container.accountStatus()
-        } catch {
-            iCloudStatusText = "iCloud account not signed in — data stays on this device"
-            iCloudStatusTone = PT.txt3
-            return
-        }
-        switch status {
-        case .available:
-            iCloudStatusText = "Syncing with iCloud"
-            iCloudStatusTone = PT.sage
-        case .restricted:
-            iCloudStatusText = "iCloud restricted"
-            iCloudStatusTone = PT.amber
-        case .noAccount, .couldNotDetermine, .temporarilyUnavailable:
-            iCloudStatusText = "iCloud account not signed in — data stays on this device"
-            iCloudStatusTone = PT.txt3
-        @unknown default:
-            iCloudStatusText = "iCloud account not signed in — data stays on this device"
-            iCloudStatusTone = PT.txt3
-        }
-    }
 
     private func retryBackup() {
         Task {
@@ -363,9 +274,86 @@ struct SettingsView: View {
         }
     }
 
-    private func openURL(_ string: String) {
-        guard let url = URL(string: string) else { return }
-        UIApplication.shared.open(url)
+    /// Live StoreKit price for the yearly product — falls back to the
+    /// spec's static house copy ("S$29.98") until (or unless) it loads.
+    private func loadYearlyPrice() async {
+        guard PlusConfig.enabled else { return }
+        guard let product = try? await Product.products(for: [PlusConfig.ProductID.yearly]).first else { return }
+        yearlyPriceText = product.displayPrice
+    }
+
+    /// Reads the live Plus entitlement transaction for the gold member
+    /// card's member № and term (`PTMembershipTerm.from`, annual/monthly/
+    /// trial/lifetime). When Plus just lapsed (was shown, now isn't), the
+    /// card's own crossfade back to cream is driven by animating the switch
+    /// here (ANIMATION_SPEC §9: 600ms, on next Settings visit) — a fresh
+    /// grant doesn't need this wrapper because `GoldMemberCard` animates its
+    /// own gold-strike entrance on appear.
+    private func loadMembershipInfo() async {
+        guard PlusConfig.enabled, PlusEntitlements.shared.hasPlus else {
+            if membershipInfo != nil {
+                withAnimation(PTMotion.reduced(.easeInOut(duration: 0.6), reduceMotion: reduceMotion)) {
+                    membershipInfo = nil
+                }
+            }
+            return
+        }
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "d MMM yyyy"
+
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result,
+                  PlusConfig.ProductID.all.contains(transaction.productID) else { continue }
+
+            let number = memberNumber(fromTransactionID: String(transaction.originalID))
+            let renewalText = transaction.expirationDate.map { dateFormatter.string(from: $0) } ?? "—"
+            let term = PTMembershipTerm.from(
+                productID: transaction.productID,
+                isIntroductoryOffer: transaction.offerType == .introductory,
+                renewalDateText: renewalText,
+                lifetimeProductID: PlusConfig.ProductID.lifetime,
+                monthlyProductID: PlusConfig.ProductID.monthly
+            )
+            membershipInfo = PlusMembershipInfo(memberNumber: number, term: term)
+            return
+        }
+        membershipInfo = nil
+    }
+
+    /// Snapshots `hasPlus` before presenting the paywall so
+    /// `handlePaywallDismiss` can tell a genuine new purchase apart from a
+    /// no-op dismiss.
+    private func openPaywall() {
+        hadPlusWhenPaywallOpened = PlusEntitlements.shared.hasPlus
+        showPaywall = true
+    }
+
+    /// Refreshes the member card after the paywall closes, and — only on a
+    /// genuine new purchase (ANIMATION_SPEC §4) — shows the "struck in gold"
+    /// toast alongside the card's own gold-strike entrance.
+    private func handlePaywallDismiss() {
+        Task {
+            await loadMembershipInfo()
+            if !hadPlusWhenPaywallOpened, PlusEntitlements.shared.hasPlus {
+                toast = PTToastItem(message: "Your card has been struck in gold.")
+            }
+        }
+    }
+
+    /// Wires the gold card's MANAGE › to the real App Store subscription
+    /// management sheet (same call PlusDebugView uses for its own "Manage
+    /// subscriptions" debug action).
+    private func manageSubscriptions() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else { return }
+        Task {
+            do {
+                try await AppStore.showManageSubscriptions(in: scene)
+            } catch {
+                AppLogger.error("Settings: manage subscriptions failed: \(error.localizedDescription)", category: "plus")
+            }
+        }
     }
 }
 

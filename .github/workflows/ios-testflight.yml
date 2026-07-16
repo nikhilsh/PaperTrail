@@ -17,7 +17,13 @@ jobs:
       APP_NAME: PaperTrail
       SCHEME: PaperTrail
       PROJECT_PATH: PaperTrail.xcodeproj
-      CONFIGURATION: Release
+      # AppStore (not Release): compiles with the APPSTORE Swift condition,
+      # which hard-forces every v3 feature flag off (FeatureFlags.isOn) and
+      # compiles the Flags screen out entirely (FlagsView.swift, and its
+      # entry row in AdvancedDiagnosticsView, are both `#if !APPSTORE`). The
+      # OTA lane (.github/workflows/ios-adhoc-ota.yml) deliberately stays on
+      # Release so v3 flags remain testable on Ad Hoc devices.
+      CONFIGURATION: AppStore
       EXPORT_METHOD: app-store-connect
       BUNDLE_ID: nikhilsh.PaperTrail
       TEAM_ID: EHW7L3679R

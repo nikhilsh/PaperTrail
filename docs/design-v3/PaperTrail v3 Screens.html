@@ -1,0 +1,213 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="design_doc_mode" content="canvas"><title>PaperTrail v3 — Remaining Screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="pt.css">
+<style>
+body{margin:0;background:#26231e;font-family:var(--serif)}
+a{color:var(--gold)}a:hover{color:var(--gold-hi)}
+.frame{position:absolute;width:390px}
+.flabel{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#9c9382;margin:0 0 6px;font-weight:600}
+.fnote{font-family:-apple-system,system-ui;font-size:12px;line-height:1.45;color:#7d766a;margin:0 0 14px}
+.phone{width:390px;height:844px;border-radius:46px;overflow:hidden;position:relative;background:var(--ink-900);outline:1px solid rgba(231,220,196,.16);box-shadow:0 30px 80px -30px rgba(0,0,0,.8)}
+.sbar{display:flex;justify-content:space-between;align-items:center;padding:20px 30px 0;font:600 15px -apple-system,system-ui;color:var(--txt)}
+.sbar .r{font-family:var(--mono);font-size:11px;letter-spacing:.08em}
+.bodyp{padding:8px 22px 0}
+.ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.h1{font-family:var(--serif);font-size:34px;font-weight:600;color:var(--txt);letter-spacing:-.01em;margin:8px 0 0}
+.grp{background:var(--ink-750);border-radius:16px;overflow:hidden}
+.srow{display:flex;align-items:center;gap:12px;padding:14px 16px}
+.srow+.srow{border-top:1px solid var(--hair-2)}
+.sic{width:34px;height:34px;border-radius:9px;background:rgba(231,220,196,.06);display:flex;align-items:center;justify-content:center;color:var(--gold)}
+.st{flex:1;min-width:0}.st b{display:block;font:500 15.5px -apple-system,system-ui;color:var(--txt)}
+.st span{display:block;font:400 12px -apple-system,system-ui;color:var(--txt-3);margin-top:2px}
+.sval{font-family:var(--mono);font-size:11.5px;color:var(--txt-2);letter-spacing:.06em;white-space:nowrap}
+.chv{color:var(--txt-3);font:400 19px/1 -apple-system;margin-left:2px}
+.tgl{width:46px;height:28px;border-radius:99px;background:var(--sage);position:relative;flex:0 0 auto}
+.tgl::after{content:"";position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.tgl.off{background:rgba(231,220,196,.16)}.tgl.off::after{right:auto;left:2px}
+.covline{padding:12px 16px}
+.covline+.covline{border-top:1px solid var(--hair-2)}
+.covline .cl1{display:flex;justify-content:space-between;align-items:baseline}
+.covline b{font:500 14.5px -apple-system;color:var(--txt)}
+.covline .mos{font-family:var(--mono);font-size:11.5px;color:var(--txt-2);letter-spacing:.06em}
+.covline .sub{font:400 11.5px -apple-system;color:var(--txt-3);margin-top:2px}
+.covbar{height:4px;border-radius:2px;margin-top:8px}
+.covline.dead b{color:var(--txt-3);text-decoration:line-through}
+.covline.dead .mos{color:var(--txt-3)}
+.pgrow{display:flex;align-items:center;gap:13px;padding:13px 16px;border-bottom:1px solid rgba(33,28,18,.1)}
+.pgrow:last-child{border-bottom:0}
+.pgcheck{width:22px;height:22px;border-radius:6px;border:1.5px solid rgba(138,110,58,.5);display:flex;align-items:center;justify-content:center;font:600 13px -apple-system;color:#fff;flex:0 0 auto}
+.pgcheck.on{background:var(--sage-deep);border-color:var(--sage-deep)}
+.pgrow b{display:block;font:600 14px -apple-system;color:var(--on-paper)}
+.pgrow span{display:block;font:400 11.5px -apple-system;color:var(--on-paper-3);margin-top:1px}
+.flagrow{display:flex;align-items:center;gap:12px;padding:13px 16px}
+.flagrow+.flagrow{border-top:1px solid var(--hair-2)}
+.flagrow .fk{flex:1;font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--txt)}
+.flagrow .fk span{display:block;font:400 11px -apple-system;color:var(--txt-3);letter-spacing:0;margin-top:2px;text-transform:none}
+.siricard{position:absolute;left:14px;right:14px;top:120px}
+.digest{background:linear-gradient(180deg,#F6EEDD,#F0E7D2);color:var(--on-paper);border-radius:14px;padding:24px 22px;box-shadow:var(--shadow-card);position:relative;overflow:hidden}
+.digest::after{content:"";position:absolute;right:0;top:0;width:0;height:0;border-style:solid;border-width:0 34px 34px 0;border-color:transparent #D6C7A2 transparent transparent}
+.dstat{text-align:center;flex:1}
+.dstat .n{font-family:var(--serif);font-size:27px;font-weight:600}
+.dstat .l{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-paper-3);margin-top:2px}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13l1.8-2.2a1.4 1.4 0 0 1 2.2 1.7L17.5 18a6 6 0 0 1-5.1 3H11a6 6 0 0 1-6-6v-4a1.5 1.5 0 0 1 3 0"/></symbol>
+<symbol id="i-seal" viewBox="0 0 24 24"><path d="M12 3l2.2 1.8 2.8-.3 1 2.6 2.5 1.4-.7 2.7 1.2 2.5-2 1.9.1 2.8-2.7.8-1.5 2.4-2.9-.6-2.9.6-1.5-2.4-2.7-.8.1-2.8-2-1.9L4.2 11l-.7-2.7L6 6.9l1-2.6 2.8.3z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V4"/><path d="M6 4h12l-3 4 3 4H6"/></symbol>
+</defs></svg>
+
+<!-- V1 · Pass it on builder -->
+<div class="frame" style="left:40px;top:80px">
+<p class="flabel">V3-1 · Pass it on — buyer packet builder</p>
+<p class="fnote">Checked pages assemble live into the packet preview. Price paid redacted by default. Share = PDF handover animation (spec D).</p>
+<div class="phone"><div class="pt">
+<div class="sbar"><span>14:09</span><span class="r">5G ▮▮▮</span></div>
+<div class="bodyp">
+<div class="row between"><span class="chip">‹ Samsung TV</span><span class="kicker">Pass it on</span><span style="width:70px"></span></div>
+<div class="h-display" style="font-size:28px;margin-top:16px;color:var(--txt)">A dossier for the <span class="ital gold" style="font-size:20px">next owner.</span></div>
+<p class="sf" style="font:400 12.5px/1.5 -apple-system;color:var(--txt-3);margin:8px 0 0">Listings with proof sell for more. Pick what the buyer sees — your price stays private unless you say so.</p>
+<div class="paper" style="margin-top:16px;padding:6px 0">
+<div class="pgrow"><span class="pgcheck on">✓</span><div style="flex:1"><b>Proof of purchase</b><span>Store, date, receipt image · price REDACTED</span></div></div>
+<div class="pgrow"><span class="pgcheck on">✓</span><div style="flex:1"><b>Remaining warranty</b><span>10 mo transferable · Samsung SG terms attached</span></div></div>
+<div class="pgrow"><span class="pgcheck on">✓</span><div style="flex:1"><b>Service history</b><span>2 entries · mainboard replaced under warranty</span></div></div>
+<div class="pgrow"><span class="pgcheck"></span><div style="flex:1"><b>Manual</b><span>QA55S90D user guide · adds 4.2 MB</span></div></div>
+<div class="pgrow"><span class="pgcheck"></span><div style="flex:1"><b>Show price paid</b><span>Off — buyer sees "purchased Jan 2026" only</span></div></div>
+</div>
+<div class="grp" style="margin-top:14px">
+<div class="srow" style="padding:12px 16px"><div class="sic"><svg class="ic"><use href="#i-hand"/></svg></div><div class="st"><b>Buyer packet · 3 pages</b><span>PDF · footer "Kept with PaperTrail"</span></div><span class="sval">2.1 MB</span></div>
+</div>
+<button class="btn btn-gold" style="margin-top:14px">Hand it over</button>
+<p class="sf" style="font:400 11px -apple-system;color:var(--txt-3);text-align:center;margin-top:10px">Sharing doesn't remove the item — mark it "passed on" after the sale.</p>
+</div>
+</div></div>
+</div>
+
+<!-- V2 · Multi-coverage passport rows -->
+<div class="frame" style="left:480px;top:80px">
+<p class="flabel">V3-2 · Multi-coverage lines (under passport ring)</p>
+<p class="fnote">Ring reflects the longest live line. Each line keeps its own clock; expired lines stay, struck through. Reminder per line.</p>
+<div class="phone"><div class="pt">
+<div class="sbar"><span>14:09</span><span class="r">5G ▮▮▮</span></div>
+<div class="bodyp">
+<div class="row between"><span class="chip">‹ Back</span><span class="kicker">Samsung TV</span><span style="width:58px"></span></div>
+<div class="paper dogear" style="margin-top:14px;padding:18px 20px 16px"><span class="fold"></span>
+<div class="row between"><span class="kicker" style="color:var(--gold-deep)">Coverage passport</span><span class="stamp covered" style="font-size:9px;padding:5px 9px">Covered</span></div>
+<div style="display:flex;align-items:center;gap:18px;margin-top:14px">
+<div style="position:relative;width:110px;height:110px;flex:0 0 auto">
+<svg style="transform:rotate(-90deg)" width="110" height="110"><circle cx="55" cy="55" r="46" fill="none" stroke="rgba(33,28,18,.12)" stroke-width="8"/><circle cx="55" cy="55" r="46" fill="none" stroke="#93A86F" stroke-width="8" stroke-linecap="round" stroke-dasharray="196 289"/></svg>
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><span class="serif" style="font-size:26px;font-weight:600;color:var(--on-paper)">22 mo</span><span class="label-mono" style="color:var(--on-paper-3);font-size:8px">longest line</span></div>
+</div>
+<div style="flex:1"><div class="serif" style="font-size:17px;font-weight:600;color:var(--on-paper)">3 coverage lines</div><div class="sf" style="font:400 12px/1.45 -apple-system;color:var(--on-paper-2);margin-top:4px">2 active · 1 expired<br>Next to lapse: parts &amp; labour, 3 Jun 2027</div></div>
+</div>
+</div>
+<div class="grp" style="margin-top:14px">
+<div class="covline">
+<div class="cl1"><b>Panel — extended warranty</b><span class="mos">22 mo left</span></div>
+<div class="sub">Samsung · to 3 Jun 2028 · panel defects only</div>
+<div class="covbar" style="background:linear-gradient(90deg,var(--sage) 61%,rgba(231,220,196,.12) 61%)"></div>
+</div>
+<div class="covline">
+<div class="cl1"><b>Parts &amp; labour</b><span class="mos">10 mo left</span></div>
+<div class="sub">Manufacturer · to 3 Jun 2027 · remind 2 wk before</div>
+<div class="covbar" style="background:linear-gradient(90deg,var(--sage) 42%,rgba(231,220,196,.12) 42%)"></div>
+</div>
+<div class="covline dead">
+<div class="cl1"><b>Return window</b><span class="mos">closed 22 Jan 2026</span></div>
+</div>
+</div>
+<div class="row" style="margin-top:12px"><span class="mono" style="font-size:10.5px;letter-spacing:.14em;color:var(--gold)">+ ADD A COVERAGE LINE</span></div>
+<p class="sf" style="font:400 11px -apple-system;color:var(--txt-3);margin-top:14px">Reminders fire per line — nudges ≤ 7 days apart arrive as one note.</p>
+</div>
+</div></div>
+</div>
+
+<!-- V3 · Flags screen -->
+<div class="frame" style="left:920px;top:80px">
+<p class="flabel">V3-3 · Flags (debug builds only)</p>
+<p class="fnote">Appended to Advanced &amp; Diagnostics. Never compiled into APPSTORE builds — the banner states it.</p>
+<div class="phone"><div class="pt">
+<div class="sbar"><span>14:09</span><span class="r">DEBUG</span></div>
+<div class="bodyp">
+<div class="row between"><span class="chip">‹ Diagnostics</span><span style="width:58px"></span></div>
+<h1 class="h1" style="margin-top:12px">Flags</h1>
+<div style="margin-top:12px;padding:10px 14px;border:1px dashed rgba(215,166,76,.5);border-radius:10px">
+<span class="mono" style="font-size:9.5px;letter-spacing:.14em;color:var(--amber)">DEBUG &amp; TESTFLIGHT ONLY · COMPILED OUT OF APP STORE BUILDS</span>
+</div>
+<div class="grp" style="margin-top:14px">
+<div class="flagrow"><span class="fk">shelfWidgets<span>Home &amp; lock screen widgets</span></span><span class="tgl"></span></div>
+<div class="flagrow"><span class="fk">multiCoverage<span>Coverage lines per item</span></span><span class="tgl"></span></div>
+<div class="flagrow"><span class="fk">addSheetV2<span>Five ways to shelve</span></span><span class="tgl"></span></div>
+<div class="flagrow"><span class="fk">serviceLedger<span>Repairs timeline in dossier</span></span><span class="tgl off"></span></div>
+<div class="flagrow"><span class="fk">manualOnFile<span>PDF manuals per item</span></span><span class="tgl off"></span></div>
+<div class="flagrow"><span class="fk">recallWatch<span>Safety recall matching · Plus</span></span><span class="tgl off"></span></div>
+<div class="flagrow"><span class="fk">passItOn<span>Buyer resale packet · Plus</span></span><span class="tgl off"></span></div>
+<div class="flagrow"><span class="fk">siriIntents<span>Siri, Spotlight, App Intents</span></span><span class="tgl"></span></div>
+<div class="flagrow"><span class="fk">animPassV3<span>Ten new motion moments</span></span><span class="tgl"></span></div>
+</div>
+<div class="row between" style="margin-top:14px">
+<span class="mono" style="font-size:10.5px;letter-spacing:.14em;color:var(--gold)">ALL ON</span>
+<span class="mono" style="font-size:10.5px;letter-spacing:.14em;color:var(--txt-3)">ALL OFF</span>
+<span class="mono" style="font-size:10.5px;letter-spacing:.14em;color:var(--txt-3)">MATCH APP STORE</span>
+</div>
+</div>
+</div></div>
+</div>
+
+<!-- V4 · Siri snippet -->
+<div class="frame" style="left:1360px;top:80px">
+<p class="flabel">V3-4 · Siri snippet card</p>
+<p class="fnote">"Is the washer still under warranty?" → compact passport over the dimmed home screen. Locked library = no content, just "Unlock PaperTrail to see this."</p>
+<div class="phone"><div style="height:100%;background:radial-gradient(120% 90% at 50% -10%,#3a3226,#12100c 65%);position:relative">
+<div class="siricard">
+<div class="paper dogear" style="padding:18px 20px"><span class="fold"></span>
+<div class="row between"><span class="kicker" style="color:var(--gold-deep)">Papertrail</span><span class="stamp covered" style="font-size:8.5px;padding:4px 8px">Covered</span></div>
+<div class="serif" style="font-size:22px;font-weight:600;margin-top:10px;color:var(--on-paper)">LG Washer/Dryer</div>
+<div class="sf" style="font:400 13px -apple-system;color:var(--on-paper-2);margin-top:4px">Yes — 14 months left. Expires 12 Sep 2027.</div>
+<div style="height:4px;border-radius:2px;background:linear-gradient(90deg,var(--sage) 72%,rgba(33,28,18,.12) 72%);margin-top:12px"></div>
+<div class="row between" style="margin-top:12px">
+<span class="mono" style="font-size:9.5px;letter-spacing:.14em;color:var(--gold-deep)">OPEN PASSPORT ›</span>
+<span class="mono" style="font-size:9.5px;letter-spacing:.14em;color:var(--on-paper-3)">BUILD CLAIM</span>
+</div>
+</div>
+</div>
+<div style="position:absolute;bottom:60px;left:0;right:0;display:flex;justify-content:center">
+<div style="width:66px;height:66px;border-radius:50%;background:conic-gradient(from 0deg,#C2A15C,#93A86F,#D7A64C,#C2A15C);filter:blur(1px);opacity:.9"></div>
+</div>
+</div></div>
+</div>
+
+<!-- V5 · Digest -->
+<div class="frame" style="left:1800px;top:80px">
+<p class="flabel">V3-5 · Monthly digest</p>
+<p class="fnote">Opens with one page-curl (dog-ear motif). Three stats, then only rows that need eyes. 60-second read, by design.</p>
+<div class="phone"><div class="pt">
+<div class="sbar"><span>09:00</span><span class="r">1 AUG</span></div>
+<div class="bodyp">
+<div class="row between"><span class="chip">Done</span><span class="kicker">The monthly digest</span><span style="width:50px"></span></div>
+<div class="digest" style="margin-top:16px">
+<span class="kicker" style="color:var(--gold-deep)">Papertrail · August 2026</span>
+<div class="serif" style="font-size:26px;font-weight:600;margin-top:8px;line-height:1.1">The state of<br>your shelves.</div>
+<hr class="gold-rule" style="margin:14px 0">
+<div class="row">
+<div class="dstat"><div class="n">$3,116</div><div class="l">protected</div></div>
+<div class="dstat"><div class="n">4/5</div><div class="l">covered</div></div>
+<div class="dstat"><div class="n">2</div><div class="l">need eyes</div></div>
+</div>
+</div>
+<p class="label-mono" style="margin:18px 0 8px;color:var(--amber)">Needs eyes</p>
+<div class="grp" style="outline:1px solid rgba(215,166,76,.25)">
+<div class="srow"><div class="st"><b>Rheem heater — still unregistered</b><span>Registration unlocks the full 5 years</span></div><span class="mono" style="font-size:10px;letter-spacing:.12em;color:var(--gold)">DO IT →</span></div>
+<div class="srow"><div class="st"><b>Samsung TV — parts &amp; labour ends 3 Jun</b><span>10 months out · reminder set ✓</span></div><span class="chv">›</span></div>
+</div>
+<p class="label-mono" style="margin:18px 0 8px">Quiet this month</p>
+<div class="grp">
+<div class="srow" style="padding:12px 16px"><div class="st"><b style="font-size:14px">Recall watch</b><span>5 models checked · all clear</span></div><span class="sval" style="color:#cfe0b0">✓</span></div>
+<div class="srow" style="padding:12px 16px"><div class="st"><b style="font-size:14px">Backups</b><span>31 of 31 days synced</span></div><span class="sval" style="color:#cfe0b0">✓</span></div>
+</div>
+<p class="serif ital" style="font-size:14px;color:var(--txt-3);text-align:center;margin-top:18px">That's everything. See you in September.</p>
+</div>
+</div></div>
+</div>
+</body></html>
