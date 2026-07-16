@@ -308,7 +308,7 @@ struct PaywallView: View {
             selectedProduct = products.first { $0.id == PlusConfig.ProductID.yearly } ?? products.first
             loadState = .loaded
         } catch {
-            AppLogger.error("Failed to load Plus products: \(error.localizedDescription)", category: "monetization")
+            AppLogger.error("Failed to load Plus products: \(error.localizedDescription)", category: "plus")
             loadState = .unavailable
         }
     }
@@ -317,25 +317,17 @@ struct PaywallView: View {
         guard let product = selectedProduct else { return }
         isPurchasing = true
         defer { isPurchasing = false }
-        do {
-            let result = try await product.purchase()
-            switch result {
-            case .success(let verification):
-                if case .verified(let transaction) = verification {
-                    await transaction.finish()
-                }
-                await PlusEntitlements.shared.refresh()
-                dismiss()
-            case .userCancelled:
-                break
-            case .pending:
-                alert = .pending
-            @unknown default:
-                break
-            }
-        } catch {
-            AppLogger.error("Plus purchase failed: \(error.localizedDescription)", category: "monetization")
-            alert = .error(error.localizedDescription)
+        // Shared with PlusDebugView's direct buy buttons — one purchase
+        // code path, one place that logs (PlusEntitlements.purchase(_:)).
+        switch await PlusEntitlements.shared.purchase(product) {
+        case .success:
+            dismiss()
+        case .userCancelled:
+            break
+        case .pending:
+            alert = .pending
+        case .failed(let message):
+            alert = .error(message)
         }
     }
 

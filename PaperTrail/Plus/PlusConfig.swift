@@ -6,13 +6,33 @@ import Foundation
 /// `enabled` is the single master switch: while `false`, nothing Plus-related
 /// is visible or active anywhere in the app (no paywall entry points, no
 /// StoreKit calls, no gates) — the store build stays byte-identical to today.
-/// App Store Connect doesn't have these products yet, so this MUST stay
-/// `false` until they're created and this has been verified end-to-end.
+/// `true` now that App Store Connect sandbox products exist — see `enabled`'s
+/// doc comment for current status and what still needs re-checking before
+/// a real App Store submission.
 enum PlusConfig {
 
     /// Master switch. Flip only after ASC products exist and StoreKit
     /// integration has been verified on-device.
-    static let enabled = false
+    ///
+    /// `true` for the build-36 IAP debug pass: ASC sandbox products exist
+    /// (plus.monthly, plus.yearly, plus.lifetime) and this needs on-device
+    /// verification via `PlusDebugView`. MUST be re-evaluated before any
+    /// App Store submission — flip back to `false` if Plus isn't ready to
+    /// launch publicly yet.
+    static let enabled = true
+
+    /// Master switch for the in-app "Plus Debug" console (`PlusDebugView`),
+    /// reachable from Advanced & Diagnostics. It exposes raw StoreKit state,
+    /// direct buy buttons, and a local entitlement override that bypasses
+    /// payment entirely — there is NO Xcode/Transaction Manager on the dev
+    /// box, so the app itself has to carry this tooling for sandbox testing
+    /// on Ad Hoc OTA builds.
+    ///
+    /// ⚠️ MUST NEVER SHIP TO THE APP STORE. This is a debug-only escape
+    /// hatch (entitlement override, raw transaction dump) that has no
+    /// business in a production build. Re-evaluate — and flip to `false` —
+    /// before any App Store submission, independently of `enabled` above.
+    static let debugConsoleEnabled = true
 
     /// StoreKit product identifiers (App Store Connect: subscription group
     /// "PaperTrail Plus" for the two subscriptions, non-consumable for lifetime).
