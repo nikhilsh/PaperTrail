@@ -22,9 +22,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26.5
+      # 26.4.1, not 26.5 — matching the TestFlight lane whose API-key auth
+      # demonstrably works against the provisioning service.
+      - name: Select Xcode 26.4.1
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app/Contents/Developer
           xcodebuild -version
 
       - name: Write ASC API key
@@ -37,9 +39,10 @@ jobs:
           # at the standard private_keys locations by AuthKey_<ID>.p8 name —
           # the -authenticationKeyPath flag alone fails with "Authentication
           # failed: Make sure a bearer token was provided".
-          for dir in "$HOME/.appstoreconnect/private_keys" "$HOME/private_keys" "$HOME/.private_keys"; do
+          for dir in "$HOME/.appstoreconnect/private_keys" "$HOME/private_keys" "$HOME/.private_keys" "./private_keys"; do
             mkdir -p "$dir"
             cp "$RUNNER_TEMP/asc_key.p8" "$dir/AuthKey_${ASC_KEY_ID}.p8"
+            chmod 600 "$dir/AuthKey_${ASC_KEY_ID}.p8"
           done
 
       - name: Build with automatic cloud signing (registers app group)
