@@ -137,7 +137,7 @@ struct RecallWatcherTests {
 
     // MARK: - Passed-on records are skipped
 
-    @Test func eligibleForRecallCheckExcludesPassedOnRecords() {
+    @Test @MainActor func eligibleForRecallCheckExcludesPassedOnRecords() {
         let kept = PurchaseRecord(productName: "Kept")
         let passedOn = PurchaseRecord(productName: "Passed on")
         passedOn.passedOnDate = .now
