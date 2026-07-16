@@ -70,5 +70,15 @@
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+
+	<!-- v3 addSheetV2 "Just say it" (docs/design-v3/V3_BRIEF.md §3): on-device
+	     speech capture, fed through the same extraction pipeline OCR text
+	     uses. Added here, not via INFOPLIST_KEY_*, per the CKSharingSupported
+	     lesson — that mechanism only honors a fixed set of known keys and
+	     silently drops the rest. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PaperTrail listens only while you describe a purchase, and processes speech on this device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>PaperTrail listens only while you describe a purchase, and processes speech on this device.</string>
 </dict>
 </plist>
