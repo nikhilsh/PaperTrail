@@ -251,7 +251,11 @@ struct PaperTrailApp: App {
                         await runCloudKitPreflight()
                     }
                     await syncCloudImages()
-                    if HouseholdManager.recordSharingEnabled {
+                    // Same un-entitled-test-host deadlock as runCloudKitPreflight
+                    // above — HouseholdSyncEngine/HouseholdMirrorCoordinator touch
+                    // CloudKit directly on start(). Nothing in the unit test suite
+                    // exercises live household sync, so skip starting it there too.
+                    if HouseholdManager.recordSharingEnabled, !isRunningUnitTests {
                         addStartupBreadcrumb(level: .info, category: "cloud.sharing", message: "Starting household sync engines at launch")
                         HouseholdSyncEngine.shared.start()
                         HouseholdMirrorCoordinator.shared.start()
