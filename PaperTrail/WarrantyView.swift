@@ -5,9 +5,18 @@ import SwiftData
 struct WarrantyView: View {
     @Query private var records: [PurchaseRecord]
 
+    /// v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged): every
+    /// aggregation on this screen (needs-attention/resting-easy lists, the
+    /// digest) reads through this rather than `records` directly, so a
+    /// passed-on item stops being nagged about — it's not owned anymore.
+    /// Collapses back to `records` exactly when the flag is off.
+    private var activeRecords: [PurchaseRecord] {
+        records.filter { !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn)) }
+    }
+
     /// Expired + expiring, sorted by risk: expired first, then soonest-expiring.
     private var needsAttention: [PurchaseRecord] {
-        records
+        activeRecords
             .filter { $0.warrantyStatus == .expired || $0.warrantyStatus == .expiringSoon }
             .sorted { lhs, rhs in
                 func rank(_ r: PurchaseRecord) -> Int { r.warrantyStatus == .expired ? 0 : 1 }
@@ -17,17 +26,17 @@ struct WarrantyView: View {
     }
 
     private var restingEasy: [PurchaseRecord] {
-        records
+        activeRecords
             .filter { $0.warrantyStatus == .active }
             .sorted { ($0.warrantyExpiryDate ?? .distantFuture) < ($1.warrantyExpiryDate ?? .distantFuture) }
     }
 
     private var hasWarranties: Bool {
-        records.contains { $0.warrantyExpiryDate != nil }
+        activeRecords.contains { $0.warrantyExpiryDate != nil }
     }
 
     private var digestSummary: DigestSummary {
-        DigestBuilder.build(from: records.map(\.digestSnapshot))
+        DigestBuilder.build(from: activeRecords.map(\.digestSnapshot))
     }
 
     var body: some View {

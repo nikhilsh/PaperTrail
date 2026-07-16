@@ -64,6 +64,17 @@ final class PurchaseRecord {
     /// as `coverageLinesData`).
     var serviceEntriesData: Data? = nil
 
+    /// When this record was marked "passed on" (sold/given away) via the
+    /// `passItOn` builder (v3 design wave, docs/design-v3/V3_BRIEF.md §7).
+    /// `nil` = still owned — the overwhelmingly common case. Additive +
+    /// optional so existing CloudKit records migrate via lightweight
+    /// migration, same pattern as `returnWindowDays`/`coverageLinesData`.
+    /// Read directly (no computed wrapper needed, unlike the JSON-blob
+    /// fields above) by `LibraryView`/`WarrantyView`/`WidgetSnapshotWriter`/
+    /// `DigestScheduler` to exclude passed-on records from value/count
+    /// aggregations — see `PassItOnAggregation.isExcludedFromAggregates`.
+    var passedOnDate: Date? = nil
+
     // NOTE: No @Relationship to Attachment. Both models share one CloudKit-backed store,
     // but we intentionally avoid @Relationship to keep the schema simple and avoid
     // SwiftData relationship issues with CloudKit. Link via Attachment.recordID == PurchaseRecord.id.
@@ -96,6 +107,7 @@ final class PurchaseRecord {
         productImageAttachmentID: UUID? = nil,
         coverageLinesData: Data? = nil,
         serviceEntriesData: Data? = nil,
+        passedOnDate: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -123,6 +135,7 @@ final class PurchaseRecord {
         self.productImageAttachmentID = productImageAttachmentID
         self.coverageLinesData = coverageLinesData
         self.serviceEntriesData = serviceEntriesData
+        self.passedOnDate = passedOnDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

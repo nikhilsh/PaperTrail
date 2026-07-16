@@ -37,6 +37,12 @@ struct RecordDetailView: View {
     /// re-reading from disk each time.
     @State private var manualRecord: ManualRecord?
 
+    // MARK: v3 recallWatch (docs/design-v3/V3_BRIEF.md §6, flagged + Plus)
+    @State private var recallRowState: RecallWatcher.RowState?
+
+    // MARK: v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged + Plus)
+    @State private var showPassItOnBuilder = false
+
     private let scanningService = ScanningService()
 
     private var attachments: [Attachment] {
@@ -74,6 +80,8 @@ struct RecordDetailView: View {
 
                 dossierSection
 
+                passItOnRow
+
                 proofScoreCard
 
                 supportCard
@@ -81,6 +89,8 @@ struct RecordDetailView: View {
                 if let notes = record.notes, !notes.isEmpty {
                     notesCard(notes)
                 }
+
+                unmarkPassedOnRow
 
                 Button("Delete record", role: .destructive) {
                     showDeleteConfirmation = true
@@ -178,6 +188,17 @@ struct RecordDetailView: View {
         .task {
             guard FeatureFlags.isOn(.manualOnFile) else { return }
             manualRecord = ManualStore.manual(for: record.id)
+        }
+        .task {
+            guard FeatureFlags.isOn(.recallWatch), PlusEntitlements.shared.hasPlus else { return }
+            recallRowState = RecallWatcher.rowState(for: record.id)
+        }
+        .sheet(isPresented: $showPassItOnBuilder) {
+            NavigationStack {
+                PassItOnBuilderView(record: record)
+            }
+            .tint(PT.gold)
+            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showServiceEntryForm) {
             ServiceEntryFormView(onSave: logServiceEntry)
@@ -875,13 +896,146 @@ struct RecordDetailView: View {
                 // `manualOnFile` itself is off.
                 papersGhostRow
             }
-            // recallWatch (V3_BRIEF §6) hooks in here as a second row, once
-            // that flag/feature is built — deliberately not stubbed with a
-            // placeholder row per the ship-gate rule (no dead/reserved UI).
+            // v3 recallWatch (§6): absent entirely unless BOTH the flag and
+            // Plus are on (`recallRowState` is only ever set under that same
+            // gate, in `.task` above) — no placeholder/dead row otherwise,
+            // per the ship-gate rule.
+            if let recallRowState {
+                Rectangle().fill(PT.hair).frame(height: 1)
+                recallRow(recallRowState)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // MARK: Recall watch (docs/design-v3/V3_BRIEF.md §6)
+
+    @ViewBuilder
+    private func recallRow(_ state: RecallWatcher.RowState) -> some View {
+        switch state {
+        case .checking:
+            HStack(spacing: 12) {
+                Image(systemName: "shield.lefthalf.filled")
+                    .font(.system(size: 15))
+                    .foregroundStyle(PT.txt3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Recall watch")
+                        .font(PTFont.serif(15, weight: 600))
+                        .foregroundStyle(PT.txt)
+                    // Static text — the ellipsis draw-on animation is
+                    // `animPassV3` (§9), not built in this wave.
+                    Text("Watching…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(PT.txt2)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.vertical, 4)
+
+        case .clear(let checkedAt):
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.shield")
+                    .font(.system(size: 15))
+                    .foregroundStyle(PT.sage)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Recall watch")
+                        .font(PTFont.serif(15, weight: 600))
+                        .foregroundStyle(PT.txt)
+                    Text("No recalls for this model · checked \(PTDate.dayMonthYear.string(from: checkedAt))")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(PT.txt2)
+                }
+                Spacer(minLength: 8)
+                Text("✓ Clear")
+                    .font(PTFont.mono(10.5, medium: true))
+                    .foregroundStyle(PT.sageDeep)
+            }
+            .padding(.vertical, 4)
+
+        case .notice(let notice):
+            Button {
+                openURL(notice.detailURL)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(PT.terra)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Recall notice — read this")
+                            .font(PTFont.serif(15, weight: 600))
+                            .foregroundStyle(PT.terra)
+                        Text(notice.title)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(PT.txt2)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PT.txt3)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: Pass it on (docs/design-v3/V3_BRIEF.md §7)
+
+    @ViewBuilder
+    private var passItOnRow: some View {
+        if FeatureFlags.isOn(.passItOn), PlusEntitlements.shared.hasPlus {
+            Button {
+                showPassItOnBuilder = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "hand.raised")
+                        .font(.system(size: 15))
+                        .foregroundStyle(PT.gold)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Pass it on")
+                            .font(PTFont.serif(15, weight: 600))
+                            .foregroundStyle(PT.txt)
+                        Text("Selling? Build a buyer packet — proof, service history, remaining warranty")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(PT.txt2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PT.txt3)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    /// Quiet undo for an accidental/premature "Mark as passed on" — gated on
+    /// the flag alone (not Plus): this only ever reverses data the flag
+    /// itself wrote, and a lapsed Plus member shouldn't be locked out of
+    /// fixing their own record. Absent when the flag is off, per the
+    /// "ignored, not destroyed" rule — `record.passedOnDate` stays set
+    /// underneath, untouched, until the flag comes back on.
+    @ViewBuilder
+    private var unmarkPassedOnRow: some View {
+        if FeatureFlags.isOn(.passItOn), record.passedOnDate != nil {
+            Button("Mark as not passed on") {
+                record.passedOnDate = nil
+                record.updatedAt = .now
+                passportToast = PTToastItem(message: "No longer marked as passed on")
+            }
+            .font(PTFont.mono(11, medium: true))
+            .tracking(1)
+            .textCase(.uppercase)
+            .foregroundStyle(PT.txt3)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+        }
     }
 
     private var papersGhostRow: some View {

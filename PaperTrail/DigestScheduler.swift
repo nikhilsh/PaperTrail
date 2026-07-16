@@ -41,6 +41,13 @@ enum DigestScheduler {
             return
         }
 
+        // v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged): a passed-on
+        // item shouldn't nag about its warranty/return window in the
+        // monthly digest anymore. Collapses back to `records` exactly when
+        // the flag is off.
+        let records = records.filter {
+            !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn))
+        }
         let summary = DigestBuilder.build(from: records.map(\.digestSnapshot))
         guard !summary.isEmpty else {
             center.removePendingNotificationRequests(withIdentifiers: [notificationIdentifier])
@@ -86,7 +93,10 @@ enum DigestScheduler {
             AppLogger.error("Digest fetch failed: \(error.localizedDescription)", category: "digest")
             return DigestSummary()
         }
-        return DigestBuilder.build(from: records.map(\.digestSnapshot))
+        let activeRecords = records.filter {
+            !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn))
+        }
+        return DigestBuilder.build(from: activeRecords.map(\.digestSnapshot))
     }
 
     /// The next 1st-of-the-month at 09:00 local — this month's if it hasn't
