@@ -143,6 +143,15 @@ enum ClaimPacketPDF {
                     y += thumbH + 22
                 }
 
+                // TODO(v3 serviceLedger, docs/design-v3/V3_BRIEF.md §4): "Claim
+                // packet gains optional 'Service history' page; resale packet
+                // includes it always." A service-history page would render here
+                // — after ATTACHED PROOF, before the tamper-evident footer — as
+                // a "SERVICE HISTORY" section listing `record.serviceEntries`
+                // (date · actor · title · cost · job ref), same `kv`/`draw`
+                // helpers as above. Not built in this wave; this file is
+                // otherwise untouched per the v3 F3 task brief.
+
                 // Tamper-evident line near the bottom.
                 let captured = earliestCaptureDate(attachments: attachments)
                 let capturedText: String
