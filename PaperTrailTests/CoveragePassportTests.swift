@@ -61,6 +61,37 @@ struct CoveragePassportTests {
         #expect(decoded == lines)
     }
 
+    /// `id` is additive: JSON persisted before it existed (no `"id"` key) must
+    /// still decode, defaulting to a fresh UUID rather than failing.
+    @Test func coverageLineDecodesOldJSONWithoutIdField() throws {
+        let oldFormatJSON = Data("""
+        [{"label":"Parts","covered":true},{"label":"Accidental damage","covered":false}]
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode([CoverageLine].self, from: oldFormatJSON)
+        #expect(decoded.count == 2)
+        #expect(decoded[0].label == "Parts")
+        #expect(decoded[0].covered == true)
+        #expect(decoded[1].label == "Accidental damage")
+        #expect(decoded[1].covered == false)
+
+        // Still equal to a freshly-constructed line by value (id excluded
+        // from `==`), and each decoded line got its own distinct fresh id.
+        #expect(decoded[0] == CoverageLine(label: "Parts", covered: true))
+        #expect(decoded[0].id != decoded[1].id)
+    }
+
+    /// New-format JSON (with an `"id"` key) round-trips the id itself, not
+    /// just a freshly-generated one — identity should be stable across a
+    /// decode, not re-minted every time.
+    @Test func coverageLineRoundTripsAnExplicitId() throws {
+        let id = UUID()
+        let line = CoverageLine(id: id, label: "Water damage", covered: false)
+        let data = try JSONEncoder().encode(line)
+        let decoded = try JSONDecoder().decode(CoverageLine.self, from: data)
+        #expect(decoded.id == id)
+    }
+
     @Test func coverageLinesSetterToleratesGarbageThenReadsBackEmpty() {
         // Assigning through the computed setter always produces valid JSON, so
         // this just documents the decode-failure fallback stays empty rather

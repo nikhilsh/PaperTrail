@@ -117,7 +117,7 @@ struct EditRecordView: View {
             }
 
             Section("Coverage passport — what's covered") {
-                ForEach($coverageLines, id: \.label) { $line in
+                ForEach($coverageLines) { $line in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             TextField("Coverage line", text: $line.label)
