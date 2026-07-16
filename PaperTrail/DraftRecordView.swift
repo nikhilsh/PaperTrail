@@ -906,6 +906,17 @@ struct DraftRecordView: View {
         // Delight moment: a successful scan→save, never on an error path.
         ReviewPrompter.shared.recordsSaved(records.count)
 
+        // Notification soft-ask (N1): only ever triggers on the user's very
+        // first successful save, using the real just-saved item's name and
+        // warranty date in the sample notification.
+        if let primary = records.first {
+            SoftAskCoordinator.shared.recordSaved(
+                count: records.count,
+                itemName: primary.productName,
+                warrantyExpiryDate: primary.warrantyExpiryDate
+            )
+        }
+
         dismiss()
     }
 }

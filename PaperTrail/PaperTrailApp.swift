@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Sentry
 import CloudKit
+import UserNotifications
 
 private enum SyncBackendState {
     static let defaultsKey = "activeSyncBackend"
@@ -195,7 +196,19 @@ struct PaperTrailApp: App {
                     // No-ops entirely while PlusConfig.enabled is false — no
                     // StoreKit call is made.
                     PlusEntitlements.shared.start()
-                    _ = await NotificationManager.shared.requestPermission()
+                    // Permission is requested ONLY through the N1 soft-ask
+                    // flow (SoftAskCoordinator) while status is undetermined
+                    // — an unconditional call here would fire the system
+                    // prompt before the soft-ask ever gets a chance to show.
+                    // Once the user has answered (either way), re-asserting
+                    // here is a harmless no-op (no UI, just re-reads the
+                    // existing status), so behavior for already-decided users
+                    // is unchanged.
+                    let notificationStatus = await UNUserNotificationCenter.current()
+                        .notificationSettings().authorizationStatus
+                    if notificationStatus != .notDetermined {
+                        _ = await NotificationManager.shared.requestPermission()
+                    }
                     await NotificationManager.shared.migrateIdentifiersIfNeeded(modelContext: modelContainer.mainContext)
                     await runCloudKitPreflight()
                     await syncCloudImages()
