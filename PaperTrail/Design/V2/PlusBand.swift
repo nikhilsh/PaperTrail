@@ -7,16 +7,15 @@ import SwiftUI
 // (70pt highlight, skew -18°, 1.4s, 0.8s delay) — persisted via UserDefaults
 // so it never replays on later visits.
 //
-// SPEC UPDATE (subscriptions stay alongside lifetime): both the title/
-// tagline and the trailing price string are caller-supplied — Wave D will
-// pass live StoreKit copy (e.g. "From S$3.98/mo"), not a hardcoded
-// "Pay once, own it forever" / lifetime price.
+// SPEC v2.1 (subscription-only): title/tagline and the trailing price
+// string are caller-supplied — Wave D passes live StoreKit copy. House copy:
+// "PaperTrail Plus / Annual membership · first 2 weeks free / <price>/YR ›".
 
 struct PlusBand: View {
     var title: String = "PaperTrail Plus"
     var tagline: String
-    /// Trailing price/label text, e.g. "S$69.98" or "From S$3.98/mo". The
-    /// component appends the "›" affordance itself — that's chrome, not copy.
+    /// Trailing price/label text, e.g. "S$39.98/YR". The component appends
+    /// the "›" affordance itself — that's chrome, not copy.
     var priceText: String
     var action: () -> Void
 
@@ -94,7 +93,7 @@ struct PlusBand: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        PlusBand(tagline: "Pay once, own it forever", priceText: "S$69.98") {}
+        PlusBand(tagline: "Annual membership · first 2 weeks free", priceText: "S$39.98/YR") {}
     }
     .background(PT.paperFill)
     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

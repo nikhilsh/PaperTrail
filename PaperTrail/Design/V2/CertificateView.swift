@@ -5,26 +5,24 @@ import SwiftUI
 // The paywall's hero content: a cream "certificate of membership" with a
 // double engraved border, a gold seal, benefit checks, and a price area.
 // Content-only — the paywall screen (Wave D) wires in StoreKit, the buy
-// button, and the PURCHASED-stamp/gold-strike sequence.
+// button, and the MEMBER ✓-stamp/gold-strike sequence.
 //
-// SPEC UPDATE (subscriptions stay alongside lifetime): the price area is a
-// generic slot (`PriceSlot`), not a hardcoded "ONE TIME / price / no
-// subscription" block — Wave D may pass either the single-price convenience
-// initializer below, or 2-3 selectable plan rows of its own. Nothing in this
-// file hardcodes "No subscription. Nothing recurring, ever." — that copy is
-// dead per the spec update. "Pay once. Keep it for life." is not hardcoded
-// either; it's the caller-supplied `tagline`.
+// SPEC v2.1 (subscription-only; supersedes the brief's lifetime framing):
+// the tagline reads "Renewed yearly, like a library card.", the seal says
+// "PLUS · MEMBER · EST 2026", and the price area is a generic slot that
+// Wave D fills with a two-plan picker built from `PlanPickerRow` +
+// `PlanFinePrint` below (Annual default with ≈/month math, Monthly). The
+// old "ONE TIME / No subscription. Nothing recurring, ever." copy is dead —
+// nothing here hardcodes any plan shape.
 
 struct CertificateView<PriceSlot: View>: View {
     var kicker: String = "Certificate of membership"
     var title: String = "PaperTrail Plus"
-    /// e.g. "Pay once. Keep it for life." for a lifetime-framed certificate —
-    /// entirely caller-supplied, never hardcoded here.
+    /// v2.1 house copy: "Renewed yearly, like a library card." — caller-
+    /// supplied so screens can localize/rephrase.
     var tagline: String
-    /// The seal's 3-line caption, e.g. "PLUS ·\nLIFETIME\n· EST 2026". Kept
-    /// generic (default omits any plan assumption) since the certificate no
-    /// longer implies lifetime-only.
-    var sealCaption: String = "PLUS ·\n· EST 2026"
+    /// The seal's caption lines. Default per spec v2.1.
+    var sealCaption: String = "PLUS ·\nMEMBER\n· EST 2026"
     var benefits: [String]
     @ViewBuilder var priceSlot: () -> PriceSlot
 
@@ -116,11 +114,11 @@ struct CertificateView<PriceSlot: View>: View {
     }
 }
 
-// MARK: - Single-price convenience (the "(a)" variant from the spec update)
+// MARK: - Single-price block
+//
+// A "KICKER / price / footnote" block for a one-price certificate context
+// (also handy for confirmation states). All strings caller-supplied.
 
-/// A single "KICKER / price / footnote" block — the default look for a
-/// one-price certificate. `kicker`/`price`/`footnote` are all caller strings;
-/// none of the historical "ONE TIME" / "No subscription…" copy is baked in.
 struct CertificatePriceBlock: View {
     let kicker: String
     let price: String
@@ -148,7 +146,7 @@ extension CertificateView where PriceSlot == CertificatePriceBlock {
         kicker: String = "Certificate of membership",
         title: String = "PaperTrail Plus",
         tagline: String,
-        sealCaption: String = "PLUS ·\n· EST 2026",
+        sealCaption: String = "PLUS ·\nMEMBER\n· EST 2026",
         benefits: [String],
         priceKicker: String,
         price: String,
@@ -160,47 +158,134 @@ extension CertificateView where PriceSlot == CertificatePriceBlock {
     }
 }
 
-#Preview("CertificateView — single price") {
-    ScrollView {
-        CertificateView(
-            tagline: "Pay once. Keep it for life.",
-            sealCaption: "PLUS ·\nLIFETIME\n· EST 2026",
-            benefits: [
-                "Household sharing, unlimited members",
-                "Whole-home insurance report",
-                "Warranty Digest Pro",
-                "Every future Plus feature — included"
-            ],
-            priceKicker: "One time",
-            price: "S$69.98"
-        )
-        .padding(24)
+// MARK: - PlanPickerRow (spec v2.1)
+//
+// A selectable plan row for the certificate's price slot — on-paper styling.
+// Selection feedback: the border tint + an inset ring snap in over 150ms
+// ease-out. Both strokes are ALWAYS in the view tree (only color/opacity
+// change), so selecting never shifts layout. Wave D composes two of these
+// (Annual default with ≈/month math, Monthly) above one `PlanFinePrint`.
+
+struct PlanPickerRow: View {
+    /// e.g. "Annual"
+    let title: String
+    /// e.g. "S$39.98/yr"
+    let price: String
+    /// Optional second line, e.g. "≈ S$3.33/mo" — the annual row's math.
+    var detail: String? = nil
+    let isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(PT.onPaper)
+                    if let detail {
+                        Text(detail)
+                            .font(PTFont.mono(10))
+                            .foregroundStyle(PT.onPaper3)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(price)
+                    .font(PTFont.mono(12, medium: true))
+                    .foregroundStyle(PT.onPaper)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            // Outer border: constant width, tint snaps gold on selection.
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(isSelected ? PT.gold : Color(hex: 0x8A6E3A, alpha: 0.35), lineWidth: 1.5)
+            )
+            // Inset ring: always present, fades in on selection — no layout shift.
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PT.goldDeep, lineWidth: 1)
+                    .padding(3)
+                    .opacity(isSelected ? 0.55 : 0)
+            )
+            .animation(.easeOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
-    .ptScreen()
 }
 
-#Preview("CertificateView — plan rows slot") {
+/// The shared fine-print line under a plan picker. Crossfades (180ms) when
+/// the text changes with the selection. Layout stability: the frame reserves
+/// two lines (`minHeight`) so single/double-line copy variants don't shift
+/// the certificate; keep copy within two lines.
+/// v2.1 pattern: "First 2 weeks free · then <price>. We'll remind you before
+/// every renewal. Cancel keeps everything."
+struct PlanFinePrint: View {
+    let text: String
+
+    var body: some View {
+        ZStack {
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(PT.onPaper3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .id(text)
+                .transition(.opacity)
+        }
+        .frame(maxWidth: .infinity, minHeight: 30, alignment: .top)
+        .animation(.easeInOut(duration: 0.18), value: text)
+    }
+}
+
+#Preview("CertificateView — plan picker") {
+    struct Demo: View {
+        @State private var annual = true
+        var body: some View {
+            ScrollView {
+                CertificateView(
+                    tagline: "Renewed yearly, like a library card.",
+                    benefits: [
+                        "Household sharing, unlimited members",
+                        "Whole-home insurance report",
+                        "Warranty Digest Pro",
+                        "Every future Plus feature — included"
+                    ]
+                ) {
+                    VStack(spacing: 8) {
+                        PlanPickerRow(title: "Annual", price: "S$39.98/yr", detail: "≈ S$3.33/mo",
+                                      isSelected: annual) { annual = true }
+                        PlanPickerRow(title: "Monthly", price: "S$5.98/mo",
+                                      isSelected: !annual) { annual = false }
+                        PlanFinePrint(text: "First 2 weeks free · then \(annual ? "S$39.98/yr" : "S$5.98/mo"). We'll remind you before every renewal. Cancel keeps everything.")
+                            .padding(.top, 4)
+                    }
+                    .frame(maxWidth: 262)
+                }
+                .padding(24)
+            }
+            .ptScreen()
+        }
+    }
+    return Demo()
+}
+
+#Preview("CertificateView — single price block") {
     ScrollView {
         CertificateView(
-            tagline: "One home. Every proof, in one place.",
+            tagline: "Renewed yearly, like a library card.",
             benefits: [
                 "Household sharing, unlimited members",
                 "Whole-home insurance report",
                 "Warranty Digest Pro"
-            ]
-        ) {
-            VStack(spacing: 8) {
-                ForEach(["Monthly · S$5.98/mo", "Yearly · S$39.98/yr", "Lifetime · S$69.98 once"], id: \.self) { row in
-                    Text(row)
-                        .font(PTFont.mono(11.5, medium: true))
-                        .foregroundStyle(PT.onPaper)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(PT.onPaperHair, lineWidth: 1))
-                }
-            }
-            .frame(maxWidth: 262)
-        }
+            ],
+            priceKicker: "Annual membership",
+            price: "S$39.98/yr",
+            priceFootnote: "First 2 weeks free. Cancel keeps everything."
+        )
         .padding(24)
     }
     .ptScreen()

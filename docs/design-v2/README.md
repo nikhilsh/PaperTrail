@@ -1,7 +1,23 @@
 # PaperTrail v2 — "The Archive" design pass
 
 Handoff docs from the design project, committed here so future sessions don't
-depend on an external job path. Read in this order:
+depend on an external job path.
+
+> **SPEC v2.1 (2026-07-16, supersedes the docs below where they conflict):**
+> the IAP model is **subscription-only — no lifetime tier**. Where
+> `V2_BRIEF.md`/`DESIGN_LANGUAGE.md` say "pay once", "lifetime",
+> "NEVER EXPIRES", or "No subscription. Nothing recurring, ever.", read
+> instead: Annual (default, with ≈/month math) + Monthly plans, first 2 weeks
+> free; certificate tagline "Renewed yearly, like a library card."; seal
+> "PLUS · MEMBER · EST 2026"; member card shows `MEMBER Nº · ANNUAL|MONTHLY`
+> (or TRIAL), `RENEWS <date>` / `TRIAL · BILLS <date>`, footer "We'll knock
+> 2 weeks before renewal." + MANAGE ›; purchase stamp reads **MEMBER ✓** (not
+> PURCHASED ✓); lapse = gold card crossfades to cream over 600ms on the next
+> Settings visit, with a quiet cream "Renew your card — <price>" band (no
+> red, no drama). The component library in `PaperTrail/Design/V2/` reflects
+> v2.1.
+
+Read in this order:
 
 1. [`V2_BRIEF.md`](V2_BRIEF.md) — what to build: Settings "front desk" (S1),
    Coverage Passport (W2), Lifetime Certificate paywall (P1→P3), notification
