@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import SafariServices
+import UniformTypeIdentifiers
 
 struct RecordDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -23,6 +24,18 @@ struct RecordDetailView: View {
     /// legacy `toastMessage` overlay above; drives the shared `PTToast`
     /// component for the serial-copy confirmation per ANIMATION_SPEC §7.
     @State private var passportToast: PTToastItem?
+
+    // MARK: v3 serviceLedger + manualOnFile (docs/design-v3/V3_BRIEF.md §4-5, flagged)
+    @State private var selectedDossierTabRaw: DossierTab = .proof
+    @State private var showServiceEntryForm = false
+    @State private var showManualImporter = false
+    @State private var showManualPreview = false
+    /// Local mirror of `ManualStore.manual(for: record.id)` — the store
+    /// itself is a plain on-disk reader with no publisher, so this state
+    /// var is what drives the Papers row re-rendering after an import.
+    /// Loaded once in `.task`, updated directly on save/delete rather than
+    /// re-reading from disk each time.
+    @State private var manualRecord: ManualRecord?
 
     private let scanningService = ScanningService()
 
@@ -59,7 +72,7 @@ struct RecordDetailView: View {
                     returnWindowLine
                 }
 
-                proofSection
+                dossierSection
 
                 proofScoreCard
 
@@ -162,6 +175,29 @@ struct RecordDetailView: View {
             }
         }
         .ptToast($passportToast)
+        .task {
+            guard FeatureFlags.isOn(.manualOnFile) else { return }
+            manualRecord = ManualStore.manual(for: record.id)
+        }
+        .sheet(isPresented: $showServiceEntryForm) {
+            ServiceEntryFormView(onSave: logServiceEntry)
+        }
+        .sheet(isPresented: $showManualPreview) {
+            if let url = ManualStore.url(for: record.id) {
+                NavigationStack {
+                    QuickLookPreviewView(url: url)
+                        .ignoresSafeArea()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { showManualPreview = false }
+                            }
+                        }
+                }
+            }
+        }
+        .fileImporter(isPresented: $showManualImporter, allowedContentTypes: [.pdf]) { result in
+            handleManualImport(result)
+        }
     }
 
     @State private var showProductPhotoPicker = false
@@ -758,6 +794,169 @@ struct RecordDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(returnWindow.tone.opacity(0.3), lineWidth: 1))
     }
 
+    // MARK: v3 serviceLedger + manualOnFile dossier tabs (docs/design-v3/V3_BRIEF.md §4-5, flagged independently)
+    //
+    // `visibleDossierTabs` is the single gate: `.service` only appears when
+    // `serviceLedger` is on, `.papers` appears when EITHER flag is on (it's
+    // `manualOnFile`'s stated home per V3_BRIEF §5, but a manual attached
+    // while `serviceLedger` is off still needs somewhere to live so the two
+    // flags stay independently toggleable — flipping `manualOnFile` alone
+    // must not require `serviceLedger`). `.proof` is always present. When
+    // fewer than two tabs would show (both flags off — the ship-gate case),
+    // `dossierSection` renders the bare `proofSection` with no tab chrome at
+    // all: the exact v2 tree, unchanged.
+
+    private var visibleDossierTabs: [DossierTab] {
+        var tabs: [DossierTab] = [.proof]
+        if FeatureFlags.isOn(.serviceLedger) { tabs.append(.service) }
+        if FeatureFlags.isOn(.serviceLedger) || FeatureFlags.isOn(.manualOnFile) { tabs.append(.papers) }
+        return tabs
+    }
+
+    /// Clamps `selectedDossierTabRaw` to whatever's actually visible — guards
+    /// against the Flags screen toggling a flag off mid-view and leaving the
+    /// selection pointing at a tab that just disappeared.
+    private var selectedDossierTab: DossierTab {
+        visibleDossierTabs.contains(selectedDossierTabRaw) ? selectedDossierTabRaw : .proof
+    }
+
+    @ViewBuilder
+    private var dossierSection: some View {
+        if visibleDossierTabs.count > 1 {
+            VStack(alignment: .leading, spacing: 14) {
+                DossierTabBar(tabs: visibleDossierTabs, selection: Binding(
+                    get: { selectedDossierTab },
+                    set: { selectedDossierTabRaw = $0 }
+                ))
+                switch selectedDossierTab {
+                case .proof: proofSection
+                case .service: serviceLedgerSection
+                case .papers: papersSection
+                }
+            }
+        } else {
+            proofSection
+        }
+    }
+
+    // MARK: Service (docs/design-v3/V3_BRIEF.md §4)
+
+    private var serviceLedgerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(text: "Service history", tone: PT.txt3)
+            ServiceLedgerTimelineView(
+                entries: record.serviceEntries.sortedByDateDescending,
+                onLogTapped: { showServiceEntryForm = true }
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func logServiceEntry(_ entry: ServiceEntry) {
+        var entries = record.serviceEntries
+        entries.append(entry)
+        record.serviceEntries = entries
+        record.updatedAt = .now
+        AppLogger.info("Logged service entry for record \(record.id): \(entry.title)", category: "service_ledger")
+        passportToast = PTToastItem(message: "Service entry logged")
+    }
+
+    // MARK: Papers (docs/design-v3/V3_BRIEF.md §5 manualOnFile; §6 recallWatch is a separate flag/feature — not built here)
+
+    private var papersSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if FeatureFlags.isOn(.manualOnFile) {
+                manualRow
+            } else {
+                // Reachable when `serviceLedger` alone put us on this tab
+                // (`.papers` shows whenever either flag is on) but
+                // `manualOnFile` itself is off.
+                papersGhostRow
+            }
+            // recallWatch (V3_BRIEF §6) hooks in here as a second row, once
+            // that flag/feature is built — deliberately not stubbed with a
+            // placeholder row per the ship-gate rule (no dead/reserved UI).
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var papersGhostRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "circle.dashed")
+                .font(.system(size: 12))
+                .foregroundStyle(PT.txt3)
+            Text("Nothing filed yet")
+                .font(.system(size: 12.5))
+                .italic()
+                .foregroundStyle(PT.txt3)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 9)
+    }
+
+    @ViewBuilder
+    private var manualRow: some View {
+        Button {
+            if manualRecord != nil {
+                showManualPreview = true
+            } else {
+                showManualImporter = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "book.closed")
+                    .font(.system(size: 15))
+                    .foregroundStyle(PT.gold)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Manual on file")
+                        .font(PTFont.serif(15, weight: 600))
+                        .foregroundStyle(PT.txt)
+                    if let manualRecord {
+                        Text("\(manualRecord.displayName) · PDF · \(manualRecord.formattedSize)")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(PT.txt2)
+                    } else {
+                        Text("Attach a PDF from Files")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(PT.txt2)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: manualRecord != nil ? "chevron.right" : "plus.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(PT.txt3)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Copies the picked PDF into `ManualStore`. `fileImporter` hands back a
+    /// security-scoped URL — must bracket the copy with
+    /// start/stopAccessingSecurityScopedResource or the read silently fails
+    /// off the main bundle's sandbox.
+    private func handleManualImport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            let didStartAccessing = url.startAccessingSecurityScopedResource()
+            defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
+            let displayName = url.deletingPathExtension().lastPathComponent
+            if let saved = ManualStore.save(sourceURL: url, displayName: displayName, for: record.id) {
+                manualRecord = saved
+                passportToast = PTToastItem(message: "Manual attached")
+            } else {
+                AppLogger.error("Manual import failed to save for record \(record.id)", category: "manual")
+                passportToast = PTToastItem(message: "Couldn't attach manual")
+            }
+        case .failure(let error):
+            AppLogger.error("Manual import failed for record \(record.id): \(error.localizedDescription)", category: "manual")
+        }
+    }
+
     // MARK: Proof
 
     private var proofSection: some View {
@@ -1118,6 +1317,10 @@ struct RecordDetailView: View {
             Task { await CoverageReminders.removeReminders(for: recordID) }
         }
         SpotlightIndexer.deindex(recordID: record.id)
+        // v3 manualOnFile (§5): local-only store, not part of the SwiftData
+        // graph — needs its own explicit cleanup here. No-op if no manual
+        // was ever attached.
+        ManualStore.delete(for: record.id)
         modelContext.delete(record)
 
         // Fix 1: deletion requires positive evidence, and this IS that

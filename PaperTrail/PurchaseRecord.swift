@@ -54,6 +54,16 @@ final class PurchaseRecord {
     /// `SharedRecordDTO` / household sharing in this wave (follow-up).
     var coverageLinesData: Data? = nil
 
+    /// Logged repairs/service events for the `serviceLedger` timeline (v3
+    /// design wave, docs/design-v3/V3_BRIEF.md §4), JSON-encoded
+    /// `[ServiceEntry]`. Additive + optional so existing CloudKit records
+    /// migrate via lightweight migration — same pattern as
+    /// `coverageLinesData`. Access via the `serviceEntries` computed
+    /// property below, never this raw blob directly. NOT mirrored into
+    /// `SharedRecordDTO` / household sharing in this wave (follow-up, same
+    /// as `coverageLinesData`).
+    var serviceEntriesData: Data? = nil
+
     // NOTE: No @Relationship to Attachment. Both models share one CloudKit-backed store,
     // but we intentionally avoid @Relationship to keep the schema simple and avoid
     // SwiftData relationship issues with CloudKit. Link via Attachment.recordID == PurchaseRecord.id.
@@ -85,6 +95,7 @@ final class PurchaseRecord {
         isRegistered: Bool = false,
         productImageAttachmentID: UUID? = nil,
         coverageLinesData: Data? = nil,
+        serviceEntriesData: Data? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -111,6 +122,7 @@ final class PurchaseRecord {
         self.isRegistered = isRegistered
         self.productImageAttachmentID = productImageAttachmentID
         self.coverageLinesData = coverageLinesData
+        self.serviceEntriesData = serviceEntriesData
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -164,6 +176,23 @@ extension PurchaseRecord {
         }
         set {
             coverageLinesData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    /// Logged service/repair entries (`serviceLedger` timeline), decoded
+    /// from `serviceEntriesData`. Empty when nothing's recorded yet or the
+    /// blob fails to decode — never throws. Callers wanting timeline order
+    /// use `.sortedByDateDescending` on the result.
+    var serviceEntries: [ServiceEntry] {
+        get {
+            guard let serviceEntriesData,
+                  let decoded = try? JSONDecoder().decode([ServiceEntry].self, from: serviceEntriesData) else {
+                return []
+            }
+            return decoded
+        }
+        set {
+            serviceEntriesData = try? JSONEncoder().encode(newValue)
         }
     }
 
