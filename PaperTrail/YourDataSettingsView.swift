@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// "Your data" (v2 Settings front desk, S1 §4) — the drill-in one level
 /// below Settings' top-level "Your data" row. Export, import and the privacy
