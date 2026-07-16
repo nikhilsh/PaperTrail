@@ -79,6 +79,12 @@ final class AppRouter {
     /// concludes (success or failure).
     var isImporting = false
 
+    /// True while a full-screen cover (scan, import review) is presented or
+    /// about to be. `SoftAskCoordinator` checks this before ever presenting
+    /// the notification soft-ask — nothing may interrupt an in-progress scan
+    /// or import (V2_BRIEF §4 acceptance criteria).
+    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting }
+
     func navigate(to route: Route) {
         switch route {
         case .record(let id):
@@ -124,6 +130,10 @@ private enum ForegroundRefreshCoordinator {
             }
             DigestScheduler.reschedule(records: records)
             WidgetSnapshotWriter.write(records: records)
+            // Soft-ask retry (N1): catches the initial ask if it was skipped
+            // earlier because a scan/import cover was still up, otherwise
+            // tries the one allowed re-ask. No-ops instantly otherwise.
+            await SoftAskCoordinator.shared.retrySoftAsk(records: records)
         }
     }
 }
@@ -171,6 +181,7 @@ struct AppShellView: View {
         .environment(router)
         .preferredColorScheme(.dark)
         .tint(PT.gold)
+        .softAskPresentation()
         .fullScreenCover(isPresented: $router.showCapture) {
             NavigationStack {
                 CaptureView()
@@ -218,6 +229,17 @@ struct AppShellView: View {
                 router.pendingRecordID = nil
             }
         }
+        .onChange(of: router.showCapture) { wasShowing, isShowing in
+            // The common first-save path is Capture → DraftRecordView, and
+            // saving only pops DraftRecordView off Capture's own nav stack —
+            // `showCapture` itself stays true until the user closes Capture,
+            // well past `SoftAskCoordinator`'s save-time attempt. Catch it
+            // here instead, the moment Capture actually closes.
+            if wasShowing, !isShowing { retrySoftAskIfNeeded() }
+        }
+        .onChange(of: router.pendingImportPayload) { wasPresented, isPresented in
+            if wasPresented != nil, isPresented == nil { retrySoftAskIfNeeded() }
+        }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
             Button("Share anonymously") {
                 communityLearningEnabled = true
@@ -229,6 +251,18 @@ struct AppShellView: View {
         } message: {
             Text("When you correct a scanned field, PaperTrail can share that correction anonymously (no account, no identifiers, a random install ID only) to improve extraction for everyone. You can change this anytime in Settings.")
         }
+    }
+
+    // MARK: Soft-ask (N1)
+
+    /// Re-evaluates the soft-ask right after a full-screen cover (Capture,
+    /// import review) finishes closing back to the app root — see
+    /// `SoftAskCoordinator.retrySoftAsk` for why this matters beyond the
+    /// save-time attempt. One-off fetch, cheap and infrequent (fires only on
+    /// a cover-close transition).
+    private func retrySoftAskIfNeeded() {
+        guard let records = try? modelContext.fetch(FetchDescriptor<PurchaseRecord>()) else { return }
+        Task { await SoftAskCoordinator.shared.retrySoftAsk(records: records) }
     }
 
     // MARK: Deep links

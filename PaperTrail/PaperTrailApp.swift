@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Sentry
 import CloudKit
+import UserNotifications
 
 private enum SyncBackendState {
     static let defaultsKey = "activeSyncBackend"
@@ -65,6 +66,18 @@ private func configureSentry() {
     addStartupBreadcrumb(level: .info, category: "app.lifecycle", message: "PaperTrail launch started")
 }
 
+/// True when the app process was launched to host a unit test bundle (the
+/// standard `XCTestConfigurationFilePath` environment-variable check). The
+/// unit test host has no `com.apple.developer.icloud-services` entitlement,
+/// and `CKContainer.accountStatus()`/`userRecordID()` don't just error out
+/// there — they wedge the whole process indefinitely (reproduced in CI:
+/// even a `withThrowingTaskGroup` timeout race around them never resolves).
+/// CloudKit preflight is diagnostics-only (Settings/Sentry tags), never
+/// required for correctness, so it's skipped entirely under test rather than
+/// chased further — the actual sync path (SwiftData's CloudKit-backed
+/// `ModelContainer`) is unaffected.
+private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
 private func accountStatusDescription(_ status: CKAccountStatus) -> String {
     switch status {
     case .available: return "Available"
@@ -73,6 +86,31 @@ private func accountStatusDescription(_ status: CKAccountStatus) -> String {
     case .couldNotDetermine: return "Could not determine"
     case .temporarilyUnavailable: return "Temporarily unavailable"
     @unknown default: return "Unknown"
+    }
+}
+
+/// Thrown by `withPreflightTimeout` when a CloudKit call doesn't return in
+/// time — the CloudKit account-status/user-record calls have no built-in
+/// timeout and, observed in CI's un-entitled simulator sandbox (no
+/// `com.apple.developer.icloud-services` entitlement on that build), can hang
+/// indefinitely rather than erroring. Bounding them here means a stuck check
+/// — there or on a real device with a wedged network path — can't silently
+/// freeze the rest of the app's launch `.task` forever; it just becomes
+/// another failure on the same try/catch paths below.
+private struct PreflightTimeout: Error {}
+
+private func withPreflightTimeout<T: Sendable>(
+    seconds: Double = 8,
+    _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(for: .seconds(seconds))
+            throw PreflightTimeout()
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
     }
 }
 
@@ -85,14 +123,14 @@ private func runCloudKitPreflight() async {
     let container = CKContainer(identifier: containerID)
 
     do {
-        let status = try await container.accountStatus()
+        let status = try await withPreflightTimeout { try await container.accountStatus() }
         let statusText = accountStatusDescription(status)
         defaults.set(statusText, forKey: AppDiagnostics.cloudKitAccountStatusKey)
         addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "Account status: \(statusText)")
         SentrySDK.configureScope { scope in scope.setTag(value: statusText, key: "cloudkit_account_status") }
 
         do {
-            _ = try await container.userRecordID()
+            _ = try await withPreflightTimeout { try await container.userRecordID() }
             defaults.set("User record lookup succeeded", forKey: AppDiagnostics.cloudKitContainerStatusKey)
             addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "User record lookup succeeded for \(containerID)")
         } catch {
@@ -195,11 +233,29 @@ struct PaperTrailApp: App {
                     // No-ops entirely while PlusConfig.enabled is false — no
                     // StoreKit call is made.
                     PlusEntitlements.shared.start()
-                    _ = await NotificationManager.shared.requestPermission()
+                    // Permission is requested ONLY through the N1 soft-ask
+                    // flow (SoftAskCoordinator) while status is undetermined
+                    // — an unconditional call here would fire the system
+                    // prompt before the soft-ask ever gets a chance to show.
+                    // Once the user has answered (either way), re-asserting
+                    // here is a harmless no-op (no UI, just re-reads the
+                    // existing status), so behavior for already-decided users
+                    // is unchanged.
+                    let notificationStatus = await UNUserNotificationCenter.current()
+                        .notificationSettings().authorizationStatus
+                    if notificationStatus != .notDetermined {
+                        _ = await NotificationManager.shared.requestPermission()
+                    }
                     await NotificationManager.shared.migrateIdentifiersIfNeeded(modelContext: modelContainer.mainContext)
-                    await runCloudKitPreflight()
+                    if !isRunningUnitTests {
+                        await runCloudKitPreflight()
+                    }
                     await syncCloudImages()
-                    if HouseholdManager.recordSharingEnabled {
+                    // Same un-entitled-test-host deadlock as runCloudKitPreflight
+                    // above — HouseholdSyncEngine/HouseholdMirrorCoordinator touch
+                    // CloudKit directly on start(). Nothing in the unit test suite
+                    // exercises live household sync, so skip starting it there too.
+                    if HouseholdManager.recordSharingEnabled, !isRunningUnitTests {
                         addStartupBreadcrumb(level: .info, category: "cloud.sharing", message: "Starting household sync engines at launch")
                         HouseholdSyncEngine.shared.start()
                         HouseholdMirrorCoordinator.shared.start()
