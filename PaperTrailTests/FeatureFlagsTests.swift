@@ -2,6 +2,11 @@ import Testing
 import Foundation
 @testable import PaperTrail
 
+// This whole suite exercises `Flag`/`FeatureFlags` API that only exists in a
+// non-APPSTORE build — see their `#if !APPSTORE` gating. An APPSTORE test
+// run would otherwise fail to compile this file rather than cleanly skip it.
+#if !APPSTORE
+
 /// Coverage for the v3 flag architecture (`docs/design-v3/V3_BRIEF.md` §0):
 /// every flag defaults off, set/read round-trips through an injected
 /// `UserDefaults` suite (never the shared App Group suite — tests must never
@@ -91,3 +96,5 @@ struct FeatureFlagsTests {
         }
     }
 }
+
+#endif

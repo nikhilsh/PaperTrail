@@ -32,6 +32,12 @@ private struct PTToastModifier: ViewModifier {
                         guard !Task.isCancelled else { return }
                         withAnimation(.easeOut(duration: 0.2)) { self.item = nil }
                     }
+                    // The toast is a transient overlay VoiceOver has no
+                    // reason to focus on its own — announce it explicitly so
+                    // it isn't silently missed.
+                    .onAppear {
+                        AccessibilityNotification.Announcement(item.message).post()
+                    }
             }
         }
         .animation(.easeOut(duration: 0.2), value: item)

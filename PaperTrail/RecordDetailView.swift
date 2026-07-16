@@ -328,6 +328,9 @@ struct RecordDetailView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Serial number, \(serial)")
+        .accessibilityHint("Copies to clipboard")
     }
 
     @ViewBuilder
@@ -572,7 +575,9 @@ struct RecordDetailView: View {
             .padding(.vertical, 5)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Copy serial number")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Serial number, \(serial)")
+        .accessibilityHint("Copies to clipboard")
     }
 
     // MARK: What's covered group
@@ -581,16 +586,20 @@ struct RecordDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionLabel(text: "What's covered", tone: PT.txt3)
             VStack(spacing: 0) {
-                coverageCheckRow(label: "Parts", covered: true)
-                Rectangle().fill(PT.hair).frame(height: 1)
-                coverageCheckRow(label: "Labour", covered: true)
-                ForEach(Array(record.coverageLines.enumerated()), id: \.offset) { _, line in
-                    Rectangle().fill(PT.hair).frame(height: 1)
-                    coverageCheckRow(label: line.label, covered: line.covered)
-                }
+                // No hardcoded Parts/Labour — those were fabricated for
+                // every record regardless of what the warranty actually
+                // says. Only render lines the user actually entered; when
+                // there are none, say so instead of implying coverage that
+                // was never confirmed.
                 if record.coverageLines.isEmpty {
-                    Rectangle().fill(PT.hair).frame(height: 1)
                     coverageGhostRow
+                } else {
+                    ForEach(Array(record.coverageLines.enumerated()), id: \.element.id) { index, line in
+                        if index > 0 {
+                            Rectangle().fill(PT.hair).frame(height: 1)
+                        }
+                        coverageCheckRow(label: line.label, covered: line.covered)
+                    }
                 }
             }
         }
@@ -639,7 +648,12 @@ struct RecordDetailView: View {
 
     private var passportSupportContact: PassportSupportContact? {
         if let support = record.supportInfo {
-            return (support.providerName, support.phoneNumber, support.note, support.confidence == .verified)
+            // `support.note` is a free-text field (e.g. "Bought via
+            // AppleCare+") — it was previously passed straight into the
+            // `urlString` slot below and handed to `URL(string:)`, which is
+            // wrong regardless of whether it happens to parse. There's no
+            // real support URL on user-entered support info, so this is nil.
+            return (support.providerName, support.phoneNumber, nil, support.confidence == .verified)
         }
         guard ReminderSettings.shared.suggestSupportContacts,
               let suggestion = SupportContactDirectory.match(merchantName: record.merchantName, productName: record.productName) else {
