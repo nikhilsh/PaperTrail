@@ -167,6 +167,12 @@ struct DraftPayload: Identifiable, Hashable {
     let type: AttachmentType
     let attachments: [Attachment]
     let ocr: OCRExtractionResult
+    /// True when `attachments` is a single product photo (the add-sheet's
+    /// "Photograph the thing", v3 §3) rather than proof of purchase — tells
+    /// `DraftRecordView.saveRecord()` to file it as `productImageAttachmentID`
+    /// instead of a regular document attachment. Defaults false so every
+    /// existing call site (scan, Photos import, Mail/Files import) is unaffected.
+    var seedsProductImage: Bool = false
 
     static func == (lhs: DraftPayload, rhs: DraftPayload) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

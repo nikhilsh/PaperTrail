@@ -57,6 +57,64 @@ enum WarrantySpeech {
         return formatter.string(from: date)
     }
 
+    /// The plain-language answer shown on the Siri snippet card (V3_BRIEF.md
+    /// §8, mock V3-4), e.g.:
+    /// "Yes — 14 months left. Expires 12 Sep 2027."
+    /// "No — expired on 12 Mar 2024."
+    /// "No warranty info on file."
+    /// Deliberately terser than `statusSentence` (no product name — the
+    /// snippet card already shows it as the headline) since this doubles as
+    /// on-card copy, not just spoken dialog.
+    static func snippetAnswer(expiryDate: Date?, now: Date = .now) -> String {
+        guard let expiryDate else {
+            return "No warranty info on file."
+        }
+        if expiryDate < now {
+            return "No — expired on \(PTDate.dayMonthYear.string(from: expiryDate))."
+        }
+        let remaining = snippetRemainingPhrase(from: now, to: expiryDate)
+        return "Yes — \(remaining) left. Expires \(PTDate.dayMonthYear.string(from: expiryDate))."
+    }
+
+    /// Remaining-time phrasing for the snippet card, per the V3-4 mock's
+    /// "14 months left": days under 60 days, calendar months up to 24 months
+    /// (so "14 months", never "1 year" — the card favors month precision),
+    /// and years + leftover months from 24 months on ("2 years, 3 months").
+    /// Distinct from `remainingPhrase`, which optimizes for Siri TTS and
+    /// rolls a year+ into coarse whole years.
+    static func snippetRemainingPhrase(from now: Date, to date: Date) -> String {
+        let calendar = Calendar.current
+        let days = max(0, calendar.dateComponents([.day], from: now, to: date).day ?? 0)
+        if days < 60 {
+            return "\(days) day\(days == 1 ? "" : "s")"
+        }
+        let months = max(1, calendar.dateComponents([.month], from: now, to: date).month ?? 0)
+        if months < 24 {
+            return "\(months) month\(months == 1 ? "" : "s")"
+        }
+        let years = months / 12
+        let leftover = months % 12
+        let yearPart = "\(years) year\(years == 1 ? "" : "s")"
+        guard leftover > 0 else { return yearPart }
+        return "\(yearPart), \(leftover) month\(leftover == 1 ? "" : "s")"
+    }
+
+    /// Fraction of the warranty window elapsed (0...1) — what the snippet
+    /// card's sage progress bar fills by, mirroring `PTWarranty.progressElapsed`
+    /// (Design/PTPresentation.swift) but as a pure function over raw dates so
+    /// it's testable without a `PurchaseRecord`/SwiftData round-trip. Returns
+    /// 1 once expired, 0.5 when there's an expiry but no purchase date to
+    /// anchor the window (unknown pace), 0 when there's no warranty info at all.
+    static func progressElapsed(purchaseDate: Date?, expiryDate: Date?, now: Date = .now) -> Double {
+        guard let expiryDate else { return 0 }
+        guard let purchaseDate, expiryDate > purchaseDate else {
+            return expiryDate < now ? 1 : 0.5
+        }
+        let total = expiryDate.timeIntervalSince(purchaseDate)
+        let elapsed = now.timeIntervalSince(purchaseDate)
+        return max(0, min(1, elapsed / total))
+    }
+
     /// ExpiringSoonIntent's summary line, e.g.:
     /// "2 warranties expire soon: AirPods Pro on 20 Jul, LG Washer on 3 Aug."
     /// "1 warranty expires soon: AirPods Pro on 20 Jul."

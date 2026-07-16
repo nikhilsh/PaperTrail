@@ -61,6 +61,82 @@ struct WarrantySpeechTests {
         #expect(WarrantySpeech.remainingPhrase(from: now, to: date(daysFromNow: 800, reference: now)) == "2 years")
     }
 
+    // MARK: - snippetAnswer
+
+    @Test func snippetAnswerHandlesMissingExpiry() {
+        #expect(WarrantySpeech.snippetAnswer(expiryDate: nil) == "No warranty info on file.")
+    }
+
+    @Test func snippetAnswerHandlesExpired() {
+        let now = date(daysFromNow: 0)
+        let expiry = Calendar.current.date(from: DateComponents(year: 2024, month: 3, day: 12))!
+        #expect(WarrantySpeech.snippetAnswer(expiryDate: expiry, now: now) == "No — expired on 12 Mar 2024.")
+    }
+
+    @Test func snippetAnswerHandlesCovered() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let expiry = Calendar.current.date(from: DateComponents(year: 2027, month: 9, day: 12))!
+        // 14 months — stays in months (never "1 year"), per the V3-4 mock.
+        #expect(WarrantySpeech.snippetAnswer(expiryDate: expiry, now: now) == "Yes — 14 months left. Expires 12 Sep 2027.")
+    }
+
+    // MARK: - snippetRemainingPhrase boundaries
+
+    @Test func snippetPhraseUsesDaysUnderSixtyDays() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in59Days = date(daysFromNow: 59, reference: now)
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in59Days) == "59 days")
+        let inOneDay = date(daysFromNow: 1, reference: now)
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: inOneDay) == "1 day")
+    }
+
+    @Test func snippetPhraseUsesMonthsUnderTwoYears() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in23Months = Calendar.current.date(byAdding: .month, value: 23, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in23Months) == "23 months")
+    }
+
+    @Test func snippetPhraseUsesYearsFromTwoYears() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in24Months = Calendar.current.date(byAdding: .month, value: 24, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in24Months) == "2 years")
+        let in25Months = Calendar.current.date(byAdding: .month, value: 25, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in25Months) == "2 years, 1 month")
+    }
+
+    // MARK: - progressElapsed
+
+    @Test func progressElapsedIsZeroWithNoExpiry() {
+        #expect(WarrantySpeech.progressElapsed(purchaseDate: nil, expiryDate: nil) == 0)
+    }
+
+    @Test func progressElapsedIsOneWhenExpired() {
+        let now = date(daysFromNow: 0)
+        let expiry = date(daysFromNow: -10, reference: now)
+        #expect(WarrantySpeech.progressElapsed(purchaseDate: nil, expiryDate: expiry, now: now) == 1)
+    }
+
+    @Test func progressElapsedIsHalfWithNoPurchaseDateAnchor() {
+        let now = date(daysFromNow: 0)
+        let expiry = date(daysFromNow: 100, reference: now)
+        #expect(WarrantySpeech.progressElapsed(purchaseDate: nil, expiryDate: expiry, now: now) == 0.5)
+    }
+
+    @Test func progressElapsedInterpolatesBetweenPurchaseAndExpiry() {
+        let now = date(daysFromNow: 0)
+        let purchase = date(daysFromNow: -50, reference: now)
+        let expiry = date(daysFromNow: 50, reference: now)
+        // 50 of 100 days elapsed.
+        #expect(abs(WarrantySpeech.progressElapsed(purchaseDate: purchase, expiryDate: expiry, now: now) - 0.5) < 0.01)
+    }
+
+    @Test func progressElapsedClampsToUnitRange() {
+        let now = date(daysFromNow: 0)
+        let purchase = date(daysFromNow: -200, reference: now)
+        let expiry = date(daysFromNow: -100, reference: now) // already past expiry
+        #expect(WarrantySpeech.progressElapsed(purchaseDate: purchase, expiryDate: expiry, now: now) == 1)
+    }
+
     // MARK: - expiringSoonSummary
 
     @Test func expiringSoonSummaryHandlesEmptyList() {
