@@ -75,9 +75,10 @@ struct PlusGateTests {
         #expect(PlusConfig.freeForever.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
     }
 
-    @Test func benefitsListHasThreeEntries() {
-        // docs/MONETIZATION.md names exactly three Plus benefits.
-        #expect(PlusConfig.benefits.count == 3)
+    @Test func benefitsListHasFourEntries() {
+        // docs/design-v2/V2_BRIEF.md §3: the certificate shows exactly four
+        // benefit checks.
+        #expect(PlusConfig.benefits.count == 4)
     }
 
     @Test func productIDsAreDistinctAndNonEmpty() {
@@ -88,5 +89,28 @@ struct PlusGateTests {
         #expect(ids.contains(PlusConfig.ProductID.monthly))
         #expect(ids.contains(PlusConfig.ProductID.yearly))
         #expect(ids.contains(PlusConfig.ProductID.lifetime))
+    }
+
+    // MARK: - subscriptionPlans (v2.1: no lifetime tier on the paywall)
+
+    @Test func subscriptionPlansExcludesLifetime() {
+        let plans = PlusConfig.ProductID.subscriptionPlans
+        #expect(plans.count == 2)
+        #expect(!plans.contains(PlusConfig.ProductID.lifetime))
+        #expect(plans.contains(PlusConfig.ProductID.monthly))
+        #expect(plans.contains(PlusConfig.ProductID.yearly))
+    }
+
+    @Test func subscriptionPlansDefaultsToAnnualFirst() {
+        // Annual is the paywall's default-selected plan.
+        #expect(PlusConfig.ProductID.subscriptionPlans.first == PlusConfig.ProductID.yearly)
+    }
+
+    @Test func lifetimeStillRecognizedForEntitlementPurposesOnly() {
+        // Hard rule: a past lifetime purchase must still grant Plus even
+        // though it's no longer sold — `all` (entitlement recognition) keeps
+        // it, `subscriptionPlans` (paywall UI) does not.
+        #expect(PlusConfig.ProductID.all.contains(PlusConfig.ProductID.lifetime))
+        #expect(!PlusConfig.ProductID.subscriptionPlans.contains(PlusConfig.ProductID.lifetime))
     }
 }

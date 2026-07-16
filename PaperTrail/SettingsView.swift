@@ -23,17 +23,23 @@ struct SettingsView: View {
 
     private let reminders = ReminderSettings.shared
 
-    /// PaperTrail Plus paywall — presented from the Plus band on the library
-    /// card (tapping the gold member card's MANAGE › goes to the App Store
-    /// instead, via `manageSubscriptions()`).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// PaperTrail Plus paywall — presented from the Plus band / lapsed renew
+    /// band on the library card (tapping the gold member card's MANAGE ›
+    /// goes to the App Store instead, via `manageSubscriptions()`).
     @State private var showPaywall = false
+    /// Snapshot of `hasPlus` taken the moment the paywall is opened, so
+    /// `handlePaywallDismiss` can tell "just converted" apart from "already
+    /// had Plus, dismissed without changing anything" — that's what gates
+    /// the "struck in gold" toast (ANIMATION_SPEC §4).
+    @State private var hadPlusWhenPaywallOpened = false
+    @State private var toast: PTToastItem?
     /// Yearly product's live `displayPrice`, loaded once StoreKit answers.
     /// `nil` until then — the band shows the static "S$29.98" house copy in
     /// the meantime, never a blank price.
     @State private var yearlyPriceText: String?
-    /// Member-card params sourced from the live entitlement transaction —
-    /// basic wiring only; trial/lapse presentation refinements are Wave D's
-    /// job (see `Design/V2/GoldMemberCard.swift`).
+    /// Member-card params sourced from the live entitlement transaction.
     @State private var membershipInfo: PlusMembershipInfo?
 
     private struct PlusMembershipInfo {
@@ -134,11 +140,12 @@ struct SettingsView: View {
         .task { await HouseholdManager.shared.refresh() }
         .task { await loadYearlyPrice() }
         .task { await loadMembershipInfo() }
-        .sheet(isPresented: $showPaywall) {
+        .sheet(isPresented: $showPaywall, onDismiss: handlePaywallDismiss) {
             NavigationStack { PaywallView() }
                 .tint(PT.gold)
                 .preferredColorScheme(.dark)
         }
+        .ptToast($toast)
     }
 
     // MARK: - Hero: library card (free) / gold member card (Plus, P3)
@@ -153,7 +160,8 @@ struct SettingsView: View {
                 itemCount: itemCount,
                 totalValue: totalValue,
                 synced: !backupState.isPaused,
-                onManage: manageSubscriptions
+                // Lifetime has no App Store subscription to manage.
+                onManage: membershipInfo.term == .lifetime ? nil : manageSubscriptions
             )
         } else {
             libraryCard
@@ -197,11 +205,21 @@ struct SettingsView: View {
                 }
                 .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
 
-                PlusBand(
-                    tagline: "Annual membership · first 2 weeks free",
-                    priceText: "\(yearlyPriceText ?? "S$29.98")/YR",
-                    action: { showPaywall = true }
-                )
+                // Lapsed members (were Plus, aren't now) get the quiet renew
+                // band instead of the ordinary upsell — v2.1 spec: "No red,
+                // no drama, nothing deleted."
+                if PlusEntitlements.shared.isLapsed {
+                    LapsedRenewBand(
+                        priceText: "\(yearlyPriceText ?? "S$29.98")/yr",
+                        action: openPaywall
+                    )
+                } else {
+                    PlusBand(
+                        tagline: "Annual membership · first 2 weeks free",
+                        priceText: "\(yearlyPriceText ?? "S$29.98")/YR",
+                        action: openPaywall
+                    )
+                }
             }
         }
     }
@@ -251,12 +269,20 @@ struct SettingsView: View {
         yearlyPriceText = product.displayPrice
     }
 
-    /// Basic wiring (P3): reads the live Plus entitlement transaction for
-    /// the gold member card's member № and term. Trial/lapse presentation
-    /// refinements are Wave D's job — this just gets honest values on screen.
+    /// Reads the live Plus entitlement transaction for the gold member
+    /// card's member № and term (`PTMembershipTerm.from`, annual/monthly/
+    /// trial/lifetime). When Plus just lapsed (was shown, now isn't), the
+    /// card's own crossfade back to cream is driven by animating the switch
+    /// here (ANIMATION_SPEC §9: 600ms, on next Settings visit) — a fresh
+    /// grant doesn't need this wrapper because `GoldMemberCard` animates its
+    /// own gold-strike entrance on appear.
     private func loadMembershipInfo() async {
         guard PlusConfig.enabled, PlusEntitlements.shared.hasPlus else {
-            membershipInfo = nil
+            if membershipInfo != nil {
+                withAnimation(PTMotion.reduced(.easeInOut(duration: 0.6), reduceMotion: reduceMotion)) {
+                    membershipInfo = nil
+                }
+            }
             return
         }
         let dateFormatter = DateFormatter()
@@ -268,18 +294,37 @@ struct SettingsView: View {
 
             let number = memberNumber(fromTransactionID: String(transaction.originalID))
             let renewalText = transaction.expirationDate.map { dateFormatter.string(from: $0) } ?? "—"
-            let term: PTMembershipTerm
-            if transaction.offerType == .introductory {
-                term = .trial(billsOn: renewalText)
-            } else if transaction.productID == PlusConfig.ProductID.monthly {
-                term = .monthly(renewsOn: renewalText)
-            } else {
-                term = .annual(renewsOn: renewalText)
-            }
+            let term = PTMembershipTerm.from(
+                productID: transaction.productID,
+                isIntroductoryOffer: transaction.offerType == .introductory,
+                renewalDateText: renewalText,
+                lifetimeProductID: PlusConfig.ProductID.lifetime,
+                monthlyProductID: PlusConfig.ProductID.monthly
+            )
             membershipInfo = PlusMembershipInfo(memberNumber: number, term: term)
             return
         }
         membershipInfo = nil
+    }
+
+    /// Snapshots `hasPlus` before presenting the paywall so
+    /// `handlePaywallDismiss` can tell a genuine new purchase apart from a
+    /// no-op dismiss.
+    private func openPaywall() {
+        hadPlusWhenPaywallOpened = PlusEntitlements.shared.hasPlus
+        showPaywall = true
+    }
+
+    /// Refreshes the member card after the paywall closes, and — only on a
+    /// genuine new purchase (ANIMATION_SPEC §4) — shows the "struck in gold"
+    /// toast alongside the card's own gold-strike entrance.
+    private func handlePaywallDismiss() {
+        Task {
+            await loadMembershipInfo()
+            if !hadPlusWhenPaywallOpened, PlusEntitlements.shared.hasPlus {
+                toast = PTToastItem(message: "Your card has been struck in gold.")
+            }
+        }
     }
 
     /// Wires the gold card's MANAGE › to the real App Store subscription

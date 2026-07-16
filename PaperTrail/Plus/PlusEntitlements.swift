@@ -32,6 +32,18 @@ final class PlusEntitlements {
         /// .debugConsoleEnabled` is `true` — a compile-time constant — so
         /// this key is inert by construction in a store build.
         static let simulateOverride = "plus.debug.simulateOverride"
+
+        /// Set once, the first time a real entitlement is ever seen — never
+        /// cleared, even after lapse. Distinguishes "lapsed member" (show the
+        /// quiet renew band) from "never subscribed" (show the plain Plus
+        /// band) — see `isLapsed`.
+        static let wasEverMember = "plus.wasEverMember"
+
+        /// Product ID of the last active membership seen. Cosmetic/
+        /// diagnostic only — the lapsed-state renew band always re-pitches
+        /// the annual plan regardless (docs/design-v2/V2_BRIEF.md §1
+        /// post-purchase: "Renew your card — S$29.98/yr").
+        static let lastPlanProductID = "plus.lastPlanProductID"
     }
 
     /// Normalized outcome of a StoreKit purchase attempt, shared by
@@ -70,6 +82,14 @@ final class PlusEntitlements {
         }
     }
 
+    /// Persisted once a real entitlement is ever seen — never cleared, even
+    /// after lapse (see `Key.wasEverMember`).
+    private(set) var wasEverMember: Bool
+
+    /// The product ID of the last active membership seen — see
+    /// `Key.lastPlanProductID`.
+    private(set) var lastPlanProductID: String?
+
     /// Last ~50 lines of purchase/restore/entitlement activity, newest last,
     /// for `PlusDebugView`'s event log. Every entry is also mirrored to
     /// `AppLogger.info(category: "plus")`, so the same flow is queryable in
@@ -91,6 +111,8 @@ final class PlusEntitlements {
         // value from a build where the flag was once on.
         self.realHasPlus = PlusConfig.enabled ? defaults.bool(forKey: Key.hasPlus) : false
         self.simulateOverride = defaults.bool(forKey: Key.simulateOverride)
+        self.wasEverMember = PlusConfig.enabled ? defaults.bool(forKey: Key.wasEverMember) : false
+        self.lastPlanProductID = PlusConfig.enabled ? defaults.string(forKey: Key.lastPlanProductID) : nil
     }
 
     /// The entitlement the rest of the app reads (gates, `PaywallView`,
@@ -121,6 +143,21 @@ final class PlusEntitlements {
 
     var canUseHousehold: Bool {
         Self.canUseHousehold(flagEnabled: PlusConfig.enabled, hasPlus: hasPlus)
+    }
+
+    /// Pure lapse precedence (docs/design-v2/V2_BRIEF.md §1 post-purchase,
+    /// ANIMATION_SPEC.md §9): "lapsed" means the account was a real Plus
+    /// member at some point and isn't now — never true for someone who
+    /// never subscribed, so the free tier never sees a guilt-trip band.
+    /// `nonisolated` — testable without hopping onto `@MainActor`.
+    nonisolated static func isLapsed(wasEverMember: Bool, hasPlus: Bool) -> Bool {
+        wasEverMember && !hasPlus
+    }
+
+    /// Whether Settings should show the quiet "Renew your card" band instead
+    /// of the ordinary Plus band on the free-tier library card.
+    var isLapsed: Bool {
+        Self.isLapsed(wasEverMember: wasEverMember, hasPlus: hasPlus)
     }
 
     // MARK: - Lifecycle
@@ -213,11 +250,14 @@ final class PlusEntitlements {
 
     private func refreshFromCurrentEntitlements() async {
         var entitled = false
+        var active: (productID: String, expirationDate: Date?)?
+
         for await result in Transaction.currentEntitlements {
             switch result {
             case .verified(let transaction):
                 guard isPlusProduct(transaction.productID) else { continue }
                 entitled = true
+                active = (transaction.productID, transaction.expirationDate)
             case .unverified(let transaction, let error):
                 guard isPlusProduct(transaction.productID) else { continue }
                 AppLogger.error("Plus entitlement unverified for \(transaction.productID): \(error.localizedDescription)", category: "plus")
@@ -228,22 +268,62 @@ final class PlusEntitlements {
         }
         logEvent("Entitlement refresh: hasPlus=\(entitled)")
         setHasPlus(entitled)
+
+        if let active {
+            markWasEverMember(productID: active.productID)
+        }
+        await updateRenewalReminder(active: active)
     }
 
     private func handle(_ update: VerificationResult<Transaction>) async {
         switch update {
         case .verified(let transaction):
-            if isPlusProduct(transaction.productID) {
+            let isPlus = isPlusProduct(transaction.productID)
+            if isPlus {
                 logEvent("Transaction update: \(transaction.productID) verified")
-                setHasPlus(true)
             }
             await transaction.finish()
+            if isPlus {
+                // Re-derive from `currentEntitlements` (rather than just
+                // flipping `hasPlus` to true) so revocations/lapses
+                // surfaced via `Transaction.updates` also reschedule/cancel
+                // the renewal reminder and refresh the lapsed-state flags.
+                await refreshFromCurrentEntitlements()
+            }
         case .unverified(let transaction, let error):
             AppLogger.error("Plus transaction update unverified for \(transaction.productID): \(error.localizedDescription)", category: "plus")
             logEvent("Transaction update unverified: \(transaction.productID)")
         @unknown default:
             break
         }
+    }
+
+    /// Persists the "was ever a member" flag + last plan seen — never
+    /// cleared, even after lapse (see `isLapsed`).
+    private func markWasEverMember(productID: String) {
+        if !wasEverMember {
+            wasEverMember = true
+            defaults.set(true, forKey: Key.wasEverMember)
+        }
+        lastPlanProductID = productID
+        defaults.set(productID, forKey: Key.lastPlanProductID)
+    }
+
+    /// Renewal-reminder wiring (docs/design-v2/V2_BRIEF.md §4): annual plan
+    /// only — cancelled outright for monthly/lifetime/no-entitlement.
+    /// Reschedules from live StoreKit pricing so the reminder body always
+    /// quotes the real charge.
+    private func updateRenewalReminder(active: (productID: String, expirationDate: Date?)?) async {
+        guard let active, active.productID == PlusConfig.ProductID.yearly,
+              let expirationDate = active.expirationDate else {
+            RenewalReminder.cancel()
+            return
+        }
+        guard let product = try? await Product.products(for: [PlusConfig.ProductID.yearly]).first else {
+            RenewalReminder.cancel()
+            return
+        }
+        RenewalReminder.scheduleAnnual(expirationDate: expirationDate, priceText: product.displayPrice)
     }
 
     private func isPlusProduct(_ productID: String) -> Bool {
