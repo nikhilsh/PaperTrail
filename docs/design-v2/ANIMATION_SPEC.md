@@ -21,7 +21,7 @@ Global rule: animations run **once, on first appearance** — nothing loops, not
 ## 3. Paywall (P1 certificate)
 1. Sheet rises (spec above); certificate content static — the document itself is the hero.
 2. On BUY: button label → "Confirming with the App Store…" (opacity .7).
-3. On success (~900ms later): **PURCHASED ✓ stamp** slams onto certificate — scale 2.4→0.92→1.05→1 with rotate −16°→−3°, 500ms stampEase, on 88%-opaque paper chip. Haptic: `.success`.
+3. On success (~900ms later): **MEMBER ✓ stamp** slams onto certificate — scale 2.4→0.92→1.05→1 with rotate −16°→−3°, 500ms stampEase, on 88%-opaque paper chip. Haptic: `.success`.
 4. 1.2s later: paywall dismisses, Settings appears, library card **re-strikes in gold**.
 
 ## 4. Gold strike (P3 member card)
@@ -45,6 +45,12 @@ Global rule: animations run **once, on first appearance** — nothing loops, not
 - Copy serial: no animation on the row; toast confirms. Haptic `.light`.
 - Toggles: iOS default spring, sage tint.
 
+## 8b. Plan picker (paywall)
+- Selection: border + inset ring snap, 150ms ease-out; fine print crossfades 180ms. No layout shift between plans.
+
+## 9. Lapse (subscription end)
+- Gold card crossfades back to cream over 600ms on next Settings visit — no drama, no red.
+
 ## Don'ts
-- No parallax, no looping shimmer, no pulsing CTAs, no paywall countdowns.
+- No parallax, no looping shimmer, no pulsing CTAs, no paywall countdowns, no trial-ending scare screens.
 - Reduce Motion: replace all translations with 200ms crossfades; skip sheen and stamp overshoot.

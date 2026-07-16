@@ -64,11 +64,15 @@ Gold foil gradient: `linear(90°, goldDeep, gold 40%, goldHi 52%, gold 64%, gold
 - Numbers are the user's own ($3,116, 5 items) — never invented stats.
 - Forbidden: "unlock", "supercharge", exclamation marks, urgency countdowns on paywalls.
 
-## 7. IAP presentation rules
-- One product, one price, "pay once" always adjacent to price.
-- Anchor against a denied claim (~$300), not against subscriptions.
-- Paywall dismissible ✕ top-right, Restore/Privacy/Terms always visible.
-- Post-purchase: library card re-strikes in gold (P3) — persistent visible status in Settings.
+## 7. IAP presentation rules (subscription)
+- Plus is an **annual membership** — framed as renewing your library card, never "unlock features".
+- Two plans max: Annual (default-selected, ≈/month math shown) and Monthly. No lifetime tier.
+- Trial: "First 2 weeks free" — always stated with the renewal price in the same breath.
+- Honesty is the differentiator: "We'll remind you before every renewal. Cancel keeps everything." Renewal reminder is a REAL notification (counts toward the 2/month cap in its month).
+- Anchor against a denied claim (~$300), not against other subscriptions.
+- Paywall dismissible ✕ top-right, Restore/Privacy/Terms always visible. No countdowns, no fake discounts, no pre-selected upsells.
+- Post-purchase: library card re-strikes in gold (P3) with MEMBER Nº · ANNUAL and the renewal date + MANAGE link (deep-link to App Store subscription settings).
+- Lapsed state: gold card fades back to cream with a quiet "Renew your card" band. Nothing is deleted; free features keep working — data is never hostage.
 
 ## 8. Notifications
 Types: warranty-ending (once, at user-set lead), return-window (once), monthly digest (1st, 9am), registration nudge (once, 3 days after add). Hard cap ≈2/month; digest absorbs overflow. Title = item + stake; body = date + reassurance. No promotional category exists.
