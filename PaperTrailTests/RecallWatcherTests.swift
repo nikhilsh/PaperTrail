@@ -105,6 +105,44 @@ struct RecallWatcherTests {
         // Every fixture should carry at least one model pattern OR be an
         // explicit brand-wide notice — a completely empty notice would
         // silently match every record from every brand.
-        #expect(notices.contains { $0.brand == "Anker" })
+        #expect(notices.contains { $0.brand == "Volta Labs" })
+    }
+
+    // MARK: - Fixture never notifies (HIGH: fixture recall honesty)
+    //
+    // `checkIfNeeded` itself gates on `FeatureFlags.isOn` +
+    // `PlusEntitlements.shared.hasPlus` (a live singleton), so it isn't
+    // exercised directly here — same "pure logic only" scope as the rest of
+    // this file. `RecallWatcher.shouldNotify` is the pure decision
+    // `checkIfNeeded` defers to before calling the untestable
+    // `UNUserNotificationCenter` path; testing it directly covers the actual
+    // honesty guarantee (fixture data never fires a real notification)
+    // without needing a live notification center or entitlement state.
+
+    @Test func fixtureRecallFeedIsFixture() {
+        #expect(FixtureRecallFeed().isFixture)
+    }
+
+    @Test func shouldNotifyIsFalseForFixtureDataEvenOnNewMatch() {
+        #expect(!RecallWatcher.shouldNotify(isNewMatch: true, isFixture: true))
+    }
+
+    @Test func shouldNotifyIsTrueForRealFeedOnNewMatch() {
+        #expect(RecallWatcher.shouldNotify(isNewMatch: true, isFixture: false))
+    }
+
+    @Test func shouldNotifyIsFalseWhenMatchAlreadyKnown() {
+        #expect(!RecallWatcher.shouldNotify(isNewMatch: false, isFixture: false))
+    }
+
+    // MARK: - Passed-on records are skipped
+
+    @Test func eligibleForRecallCheckExcludesPassedOnRecords() {
+        let kept = PurchaseRecord(productName: "Kept")
+        let passedOn = PurchaseRecord(productName: "Passed on")
+        passedOn.passedOnDate = .now
+
+        let eligible = RecallWatcher.eligibleForRecallCheck([kept, passedOn])
+        #expect(eligible.map(\.id) == [kept.id])
     }
 }

@@ -326,13 +326,23 @@ struct EditRecordView: View {
 
         // Coverage-line reminders (v3 multiCoverage, docs/design-v3/V3_BRIEF.md
         // §3) — reschedule on every save, mirroring the warranty/return-window
-        // blocks above. `CoverageReminders.reschedule` itself no-ops when the
-        // flag is off, so this is safe to call unconditionally, but the guard
-        // keeps a flag-off save from even spinning up the Task.
-        if FeatureFlags.isOn(.multiCoverage) {
+        // blocks above, and now also respecting the same
+        // `warrantyRemindersEnabled` toggle those use (§6 coverage reminders
+        // discipline — coverage lines shouldn't keep notifying after the
+        // user turned warranty reminders off). When either the flag or the
+        // toggle is off, explicitly clear any reminders scheduled from
+        // before — `CoverageReminders.reschedule` no-ops entirely when the
+        // flag is off (it wouldn't even clear stale requests), so this is
+        // the one place that has to do it.
+        let recordIDForCoverage = record.id
+        if FeatureFlags.isOn(.multiCoverage), reminderPrefs.warrantyRemindersEnabled {
             let leadDays = reminderPrefs.warrantyLeadTime.days
             Task {
                 await CoverageReminders.reschedule(for: record, leadDays: leadDays)
+            }
+        } else {
+            Task {
+                await CoverageReminders.removeReminders(for: recordIDForCoverage)
             }
         }
 

@@ -1,5 +1,6 @@
 #if !APPSTORE
 import SwiftUI
+import WidgetKit
 
 /// The v3 flag board — per `docs/design-v3/V3_BRIEF.md` §0 and the V3-3 mock
 /// (`docs/design-v3/PaperTrail v3 Screens.html`). Appended to Advanced &
@@ -26,6 +27,14 @@ struct FlagsView: View {
                         if index > 0 { SettingsRowDivider() }
                         FlagRow(flag: flag, refreshToken: refreshToken) { toggledOn in
                             FeatureFlags.setOn(toggledOn, for: flag)
+                            // shelfWidgets renders differently depending on
+                            // the flag (fallback vs. real content) — nudge
+                            // WidgetKit to re-render existing placed
+                            // instances immediately rather than waiting for
+                            // its own refresh budget (item 10).
+                            if flag == .shelfWidgets {
+                                WidgetCenter.shared.reloadAllTimelines()
+                            }
                             refreshToken += 1
                         }
                     }

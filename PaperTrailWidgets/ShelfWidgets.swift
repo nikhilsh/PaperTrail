@@ -11,16 +11,20 @@ import SwiftUI
 // — one snapshot-loading path for every widget kind in the extension — and
 // are added to the `WidgetBundle` in `PaperTrailWidgetsBundle.swift`.
 //
-// The `WidgetBundle` composition is static: these kinds always appear in
-// the widget gallery, flag or no flag (WidgetKit has no runtime way to hide
-// a bundle member). When the flag is off, every view here renders the same
-// "Open PaperTrail to update" graceful fallback the v2 widget already uses
-// for a missing/undecodable snapshot — so an App Store user who somehow
-// adds one of these (they can't reach the Flags screen to turn the flag on,
-// since that screen is itself compiled out of APPSTORE builds) sees an
-// inert, on-brand card rather than broken or placeholder-shimmer content.
-// This is a deliberate tradeoff called out in the PR: the widget *kind*
-// ships to the gallery ahead of the feature being turned on.
+// The `WidgetBundle` composition is static: within a non-APPSTORE build
+// these three kinds always appear in the widget gallery, flag or no flag
+// (WidgetKit has no runtime way to hide a bundle member). When the flag is
+// off, every view here renders the same "Open PaperTrail to update"
+// graceful fallback the v2 widget already uses for a missing/undecodable
+// snapshot — an inert, on-brand card rather than broken or
+// placeholder-shimmer content.
+//
+// **APPSTORE builds compile these three kinds out of the bundle entirely**
+// (`PaperTrailWidgetsBundle`'s `#if !APPSTORE`, item 4 HIGH) — "the widget
+// kind ships to the gallery ahead of the feature being turned on" was a
+// deliberate tradeoff for TestFlight/DEBUG builds, but wasn't an acceptable
+// one for App Store: the v3 widget kind existing at all is itself a surface
+// an App Store binary must be provably free of.
 
 private let shelfPaperBackground = LinearGradient(
     colors: [WidgetPalette.paperTop, WidgetPalette.paperBottom],

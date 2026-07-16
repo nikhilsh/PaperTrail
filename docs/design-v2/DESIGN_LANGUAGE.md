@@ -75,7 +75,7 @@ Gold foil gradient: `linear(90°, goldDeep, gold 40%, goldHi 52%, gold 64%, gold
 - Lapsed state: gold card fades back to cream with a quiet "Renew your card" band. Nothing is deleted; free features keep working — data is never hostage.
 
 ## 8. Notifications
-Types: warranty-ending (once, at user-set lead), return-window (once), monthly digest (1st, 9am), registration nudge (once, 3 days after add). Hard cap ≈2/month; digest absorbs overflow. Title = item + stake; body = date + reassurance. No promotional category exists.
+Types: warranty-ending (once, at user-set lead), return-window (once), coverage-line reminders (v3 `multiCoverage`, once per dated line/cluster at lead-time only — no day-of nudge, deduped within 7 days of each other and of the record's own warranty-ending reminder), monthly digest (1st, 9am), registration nudge (once, 3 days after add). Hard cap ≈2/month; digest absorbs overflow. Safety recall notices (v3 `recallWatch`) are the one exception to the cap: they fire on every new real match regardless of budget, since a safety alert overrides the "don't nag" promise — never for fixture/preview data, which is never allowed to trigger a real notification. Title = item + stake; body = date + reassurance. No promotional category exists.
 
 ## 9. Motion
 - Push: slideIn 280ms cubic-bezier(.2,.7,.3,1); back 260ms; sheets fade+scale 220ms.

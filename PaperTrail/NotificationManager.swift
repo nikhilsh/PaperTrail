@@ -163,7 +163,7 @@ struct NotificationManager {
         guard let plan = Self.warrantyReminderPlan(for: record, leadDays: leadDays) else { return 0 }
 
         let content = UNMutableNotificationContent()
-        content.title = "Warranty Expiring"
+        content.title = "Warranty ending"
         content.body = "\(record.productName) warranty expires in \(plan.leadDays) day\(plan.leadDays == 1 ? "" : "s")."
         content.sound = .default
         content.categoryIdentifier = "WARRANTY_EXPIRY"
@@ -315,6 +315,25 @@ struct NotificationManager {
                 let count = scheduleReturnWindowReminder(for: record)
                 record.returnWindowNotificationScheduled = count > 0
                 if count > 0 { returnWindowRescheduled += 1 }
+                totalRequests += count
+            }
+        }
+
+        // Coverage-line reminders (v3 multiCoverage, §6 coverage reminders
+        // discipline): included in the full reschedule sweep so a migration/
+        // permission-grant re-arm doesn't leave these behind. Iterates every
+        // fetched record (not just `eligible`, which is keyed off warranty/
+        // return-window dates) since a record can carry only coverage lines.
+        // Flag- and toggle-gated the same way the coverage-line save path is
+        // (`EditRecordView.saveEdits`); `CoverageReminders.reschedule` itself
+        // also no-ops when the flag is off, so this guard is belt-and-braces.
+        if FeatureFlags.isOn(.multiCoverage), reminderPrefs.warrantyRemindersEnabled {
+            for record in records where !record.coverageLines.isEmpty {
+                guard totalRequests < requestCap else {
+                    skippedRecords += 1
+                    continue
+                }
+                let count = await CoverageReminders.reschedule(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
                 totalRequests += count
             }
         }

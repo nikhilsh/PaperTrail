@@ -54,11 +54,19 @@ struct SettingsView: View {
 
     // MARK: Derived
 
-    private var itemCount: Int { records.count }
+    /// Same passed-on exclusion every other aggregation surface applies
+    /// (`LibraryView`, `WarrantyView`, `WidgetSnapshotWriter`,
+    /// `DigestScheduler`) — item 8, MEDIUM: Settings' library-card counts
+    /// were the one place still counting sold/given-away items.
+    private var activeRecords: [PurchaseRecord] {
+        records.filter { !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn)) }
+    }
+
+    private var itemCount: Int { activeRecords.count }
 
     private var totalValue: String {
-        let sum = records.compactMap(\.amount).reduce(0, +)
-        let currency = records.compactMap(\.currency).first ?? "SGD"
+        let sum = activeRecords.compactMap(\.amount).reduce(0, +)
+        let currency = activeRecords.compactMap(\.currency).first ?? "SGD"
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = currency
@@ -279,7 +287,11 @@ struct SettingsView: View {
                 // v3 animPassV3 §9 #8 "Odometer numbers": rolls to a new
                 // value instead of snapping — never on mere appearance,
                 // since `.animation(value:)` only fires on an actual change.
-                .contentTransition(FeatureFlags.isOn(.animPassV3) ? .numericText() : .identity)
+                // Reduce Motion: `.numericText()` rolls digits regardless of
+                // the `.animation` curve driving it — RM needs the
+                // transition itself swapped out, not just a faster curve
+                // (item 10).
+                .contentTransition(FeatureFlags.isOn(.animPassV3) && !reduceMotion ? .numericText() : .identity)
                 .animation(
                     FeatureFlags.isOn(.animPassV3) ? PTMotion.reduced(.default, reduceMotion: reduceMotion) : nil,
                     value: "\(itemCount)-\(totalValue)"

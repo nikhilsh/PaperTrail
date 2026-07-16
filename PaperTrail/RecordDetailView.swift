@@ -40,6 +40,13 @@ struct RecordDetailView: View {
 
     // MARK: v3 recallWatch (docs/design-v3/V3_BRIEF.md §6, flagged + Plus)
     @State private var recallRowState: RecallWatcher.RowState?
+    /// True only while the artificial "Watching…" resolve hold (below) is
+    /// actively running. The ellipsis animates ONLY during this window —
+    /// `recallRowState == .checking` can also be a genuine, possibly
+    /// long-lived state (no check has actually run yet this session), and
+    /// that case must render a static "Watching…" rather than animate
+    /// forever (see item 9, the "Watching…" loop).
+    @State private var isRecallResolveHolding = false
 
     // MARK: v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged + Plus)
     @State private var showPassItOnBuilder = false
@@ -71,7 +78,14 @@ struct RecordDetailView: View {
 
                 detailsCard
 
-                if record.warrantyExpiryDate != nil {
+                // v3 multiCoverage: a record can carry dated coverage lines
+                // with no legacy `warrantyExpiryDate` at all (flag-on,
+                // no single warranty date entered) — gating on the legacy
+                // date alone made the whole passport unreachable for that
+                // record. `passportSummary` is non-nil exactly when there's
+                // a dated coverage line to show, so either condition opens
+                // the card.
+                if record.warrantyExpiryDate != nil || passportSummary != nil {
                     coveragePassport
                 }
 
@@ -205,7 +219,9 @@ struct RecordDetailView: View {
                 return
             }
             recallRowState = .checking
+            isRecallResolveHolding = true
             try? await Task.sleep(for: .seconds(AnimPass.Duration.recallEllipsisHold))
+            isRecallResolveHolding = false
             guard !Task.isCancelled else { return }
             withAnimation(AnimPass.animation(PTMotion.archiveEase(AnimPass.Duration.recallResolve), reduceMotion: reduceMotion)) {
                 recallRowState = resolved
@@ -849,7 +865,15 @@ struct RecordDetailView: View {
     private var visibleDossierTabs: [DossierTab] {
         var tabs: [DossierTab] = [.proof]
         if FeatureFlags.isOn(.serviceLedger) { tabs.append(.service) }
-        if FeatureFlags.isOn(.serviceLedger) || FeatureFlags.isOn(.manualOnFile) { tabs.append(.papers) }
+        // `.papers` also needs to appear for the recallWatch-only
+        // combination (serviceLedger + manualOnFile both off, recallWatch +
+        // Plus on) — otherwise `recallRowState` gets computed in `.task`
+        // above but has no tab to render into, an orphaned row that's
+        // silently never shown (see item 5, recallWatch orphan UI).
+        if FeatureFlags.isOn(.serviceLedger) || FeatureFlags.isOn(.manualOnFile)
+            || (FeatureFlags.isOn(.recallWatch) && PlusEntitlements.shared.hasPlus) {
+            tabs.append(.papers)
+        }
         return tabs
     }
 
@@ -943,14 +967,17 @@ struct RecordDetailView: View {
                     Text("Recall watch")
                         .font(PTFont.serif(15, weight: 600))
                         .foregroundStyle(PT.txt)
-                    // v3 animPassV3 §9 #4: the 3-dot ellipsis actually
-                    // animates while this hold is on-screen; "Watching…"
-                    // (static) is what v2/off-flag/Reduce-Motion shows.
+                    // v3 animPassV3 §9 #4: the 3-dot ellipsis animates ONLY
+                    // during the artificial resolve hold this view drives in
+                    // `.task` (`isRecallResolveHolding`) — `.checking` can
+                    // also be shown indefinitely (no check has actually run
+                    // yet), and that case must render the static "Watching…"
+                    // rather than animate forever (item 9).
                     HStack(spacing: 5) {
                         Text("Watching")
                             .font(.system(size: 11.5))
                             .foregroundStyle(PT.txt2)
-                        if AnimPass.isOn, !reduceMotion {
+                        if AnimPass.isOn, !reduceMotion, isRecallResolveHolding {
                             RecallEllipsisView()
                         } else {
                             Text("…")
@@ -964,40 +991,56 @@ struct RecordDetailView: View {
             .padding(.vertical, 4)
             .transition(.opacity)
 
-        case .clear(let checkedAt):
+        case .clear(let checkedAt, let isFixture):
             HStack(spacing: 12) {
-                Image(systemName: "checkmark.shield")
+                Image(systemName: "shield.lefthalf.filled")
                     .font(.system(size: 15))
-                    .foregroundStyle(PT.sage)
+                    .foregroundStyle(isFixture ? PT.amber : PT.sage)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Recall watch")
-                        .font(PTFont.serif(15, weight: 600))
-                        .foregroundStyle(PT.txt)
+                    if isFixture {
+                        // Fixture data (docs/design-v3/V3_BRIEF.md §6 real
+                        // sourcing is a follow-up): never present this as a
+                        // real "no recalls" clearance — amber mono preview
+                        // label, not the sage checkmark.
+                        Text("RECALL WATCH — PREVIEW DATA")
+                            .font(PTFont.mono(10.5, medium: true))
+                            .tracking(0.6)
+                            .foregroundStyle(PT.amber)
+                    } else {
+                        Text("Recall watch")
+                            .font(PTFont.serif(15, weight: 600))
+                            .foregroundStyle(PT.txt)
+                    }
                     Text("No recalls for this model · checked \(PTDate.dayMonthYear.string(from: checkedAt))")
                         .font(.system(size: 11.5))
                         .foregroundStyle(PT.txt2)
                 }
                 Spacer(minLength: 8)
-                Text("✓ Clear")
-                    .font(PTFont.mono(10.5, medium: true))
-                    .foregroundStyle(PT.sageDeep)
+                if !isFixture {
+                    Text("✓ Clear")
+                        .font(PTFont.mono(10.5, medium: true))
+                        .foregroundStyle(PT.sageDeep)
+                }
             }
             .padding(.vertical, 4)
             .transition(.opacity)
 
-        case .notice(let notice):
+        case .notice(let notice, let isFixture):
             Button {
                 openURL(notice.detailURL)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.shield.fill")
+                    Image(systemName: isFixture ? "shield.lefthalf.filled" : "exclamationmark.shield.fill")
                         .font(.system(size: 15))
-                        .foregroundStyle(PT.terra)
+                        .foregroundStyle(isFixture ? PT.amber : PT.terra)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Recall notice — read this")
+                        // Fixture matches are never presented as a real
+                        // recall (never terra, never the "read this" copy)
+                        // — amber "Preview:" prefix makes it unmistakable.
+                        Text(isFixture ? "Preview: \(notice.title)" : "Recall notice — read this")
                             .font(PTFont.serif(15, weight: 600))
-                            .foregroundStyle(PT.terra)
-                        Text(notice.title)
+                            .foregroundStyle(isFixture ? PT.amber : PT.terra)
+                        Text(isFixture ? "Fixture data, not a real recall" : notice.title)
                             .font(.system(size: 11.5))
                             .foregroundStyle(PT.txt2)
                     }
@@ -1102,7 +1145,7 @@ struct RecordDetailView: View {
                         .font(PTFont.serif(15, weight: 600))
                         .foregroundStyle(PT.txt)
                     if let manualRecord {
-                        Text("\(manualRecord.displayName) · PDF · \(manualRecord.formattedSize)")
+                        Text("\(manualRecord.displayName) · PDF · \(manualRecord.formattedSize) · on this device only")
                             .font(.system(size: 11.5))
                             .foregroundStyle(PT.txt2)
                     } else {
@@ -1497,11 +1540,12 @@ struct RecordDetailView: View {
         NotificationManager.shared.removeWarrantyReminders(for: record)
         NotificationManager.shared.removeReturnWindowReminder(for: record)
         // v3 multiCoverage (§3): same remove-on-delete path as the warranty/
-        // return-window reminders above. No-ops when the flag is off.
-        if FeatureFlags.isOn(.multiCoverage) {
-            let recordID = record.id
-            Task { await CoverageReminders.removeReminders(for: recordID) }
-        }
+        // return-window reminders above. Unconditional — a record deleted
+        // after the flag was turned off could still have coverage-line
+        // reminders scheduled from when the flag was on, and those would
+        // otherwise leak forever (§6 coverage reminders discipline).
+        let recordID = record.id
+        Task { await CoverageReminders.removeReminders(for: recordID) }
         SpotlightIndexer.deindex(recordID: record.id)
         // v3 manualOnFile (§5): local-only store, not part of the SwiftData
         // graph — needs its own explicit cleanup here. No-op if no manual

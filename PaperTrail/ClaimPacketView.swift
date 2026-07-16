@@ -167,7 +167,11 @@ struct ClaimPacketView: View {
             // proof thumbnails below have flown in — a leading-anchored
             // scale-x from 0→1 stands in for a literal stroke draw-on.
             GoldRule()
-                .scaleEffect(x: (!animPassOn || packetAssembled) ? 1 : 0.001, y: 1, anchor: .leading)
+                // Reduce Motion: render at the drawn-on end state
+                // immediately rather than starting from a near-zero scale-x
+                // — ANIMATION_SPEC's RM rule is "200ms crossfade, no
+                // transforms", and a 0.001→1 scale IS a transform (item 10).
+                .scaleEffect(x: (!animPassOn || packetAssembled || reduceMotion) ? 1 : 0.001, y: 1, anchor: .leading)
                 .animation(
                     animPassOn
                         ? AnimPass.animation(PTMotion.archiveEase(0.4), reduceMotion: reduceMotion)
@@ -215,7 +219,10 @@ struct ClaimPacketView: View {
                         // v3 animPassV3 §9 #5: thumbnails fly to center,
                         // staggered 60ms apart.
                         .opacity(!animPassOn || packetAssembled ? 1 : 0)
-                        .scaleEffect(!animPassOn || packetAssembled ? 1 : 0.7)
+                        // Reduce Motion: opacity fade is the allowed
+                        // crossfade, but the scale transform isn't — render
+                        // thumbnails already at rest under RM (item 10).
+                        .scaleEffect(!animPassOn || packetAssembled || reduceMotion ? 1 : 0.7)
                         .animation(
                             animPassOn
                                 ? AnimPass.animation(PTMotion.archiveEase(0.28), reduceMotion: reduceMotion)

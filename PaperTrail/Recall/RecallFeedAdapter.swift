@@ -24,6 +24,13 @@ nonisolated struct RecallNotice: Codable, Hashable, Identifiable, Sendable {
 /// Source of recall notices for `RecallWatcher` to match records against.
 /// One implementation per feed; `RecallWatcher` doesn't care which.
 protocol RecallFeedAdapter: Sendable {
+    /// `true` when this feed's notices are hand-curated fixture data rather
+    /// than a real recall source. `RecallWatcher` uses this to (a) never
+    /// fire a real safety notification off fixture data, and
+    /// `RecordDetailView`'s recall row uses it to (b) never present a
+    /// fixture match as a genuine recall — both are load-bearing honesty
+    /// guards, not cosmetic. See `FixtureRecallFeed`.
+    var isFixture: Bool { get }
     func fetchRecalls() async throws -> [RecallNotice]
 }
 
@@ -40,6 +47,10 @@ struct FixtureRecallFeed: RecallFeedAdapter {
     enum FeedError: Error {
         case resourceNotFound
     }
+
+    /// Always `true` — every notice this feed returns is fixture data, not
+    /// a real recall. See the protocol doc for why this matters.
+    let isFixture = true
 
     /// `Bundle` is injectable so tests can point at `Bundle.module`/a test
     /// bundle rather than depending on `Bundle.main` (which isn't

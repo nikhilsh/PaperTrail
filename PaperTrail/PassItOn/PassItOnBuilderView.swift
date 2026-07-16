@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import PDFKit
 
 /// "Pass it on" buyer-packet builder (docs/design-v3/V3_BRIEF.md §7, V3-1
@@ -7,6 +8,7 @@ import PDFKit
 struct PassItOnBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Query private var allAttachments: [Attachment]
     @Bindable var record: PurchaseRecord
 
     @State private var selection = PassItOnPacket.Selection()
@@ -34,6 +36,17 @@ struct PassItOnBuilderView: View {
 
     // MARK: Availability
 
+    /// Non-photo attachments actually on file — the product photo isn't
+    /// proof of purchase, same distinction `RecordDetailView.documentAttachments`
+    /// draws. See `PassItOnPacket.hasProofOfPurchase` for the pure predicate
+    /// and why this replaced a hardcoded `true` stub (item 2, HIGH).
+    private var hasProofOfPurchase: Bool {
+        PassItOnPacket.hasProofOfPurchase(
+            attachmentIDs: allAttachments.filter { $0.recordID == record.id }.map(\.id),
+            productImageAttachmentID: record.productImageAttachmentID
+        )
+    }
+
     private var hasRemainingWarranty: Bool {
         guard let expiry = record.warrantyExpiryDate else { return false }
         return expiry > .now
@@ -48,7 +61,7 @@ struct PassItOnBuilderView: View {
 
     private var availability: PassItOnPacket.Availability {
         PassItOnPacket.Availability(
-            hasProofOfPurchase: true,
+            hasProofOfPurchase: hasProofOfPurchase,
             hasRemainingWarranty: hasRemainingWarranty,
             hasServiceHistory: hasServiceHistory,
             hasManual: manualRecord != nil,
@@ -151,7 +164,12 @@ struct PassItOnBuilderView: View {
             manualRecord = ManualStore.manual(for: record.id)
         }
         .sheet(isPresented: $showShareSheet) {
-            if let shareURL { ShareSheetView(activityItems: [shareURL]) }
+            if let shareURL {
+                // item 10: `hasShared` (which arms "Mark as passed on")
+                // flips on the share sheet's own completion, not on merely
+                // presenting it — presenting isn't sharing.
+                ShareSheetView(activityItems: [shareURL], onComplete: { hasShared = true })
+            }
         }
         .ptToast($toast)
     }
@@ -181,19 +199,26 @@ struct PassItOnBuilderView: View {
 
     private var checklist: some View {
         VStack(spacing: 0) {
+            // Fixed copy, not conditional on `showPricePaid` (item 2, HIGH):
+            // (a) "serial", not "receipt image" — the generated PDF only
+            // ever draws store/date/serial as text (`PassItOnPacketPDF`),
+            // it never embeds the receipt image itself, so claiming
+            // "receipt image" overclaimed what the buyer actually gets; and
+            // (b) price redaction state is already the separate "Show price
+            // paid" row below — this row's own copy stays fixed so it never
+            // implies the price ships by default (it's off by default).
             checklistRow(
                 title: "Proof of purchase",
-                subtitle: selection.showPricePaid
-                    ? "Store, date, receipt image · price included"
-                    : "Store, date, receipt image · price REDACTED",
-                isOn: $selection.includeProofOfPurchase
+                subtitle: hasProofOfPurchase ? "Store, date, serial · price REDACTED" : "No proof attached yet",
+                isOn: hasProofOfPurchase ? $selection.includeProofOfPurchase : .constant(false)
             )
+            .disabled(!hasProofOfPurchase)
 
             if hasRemainingWarranty {
                 Rectangle().fill(PT.hair).frame(height: 1)
                 checklistRow(
                     title: "Remaining warranty",
-                    subtitle: "\(monthsRemainingText) transferable · \(brandName) terms attached",
+                    subtitle: "\(brandName) · \(monthsRemainingText) · transferability note included",
                     isOn: $selection.includeRemainingWarranty
                 )
             }
@@ -211,7 +236,7 @@ struct PassItOnBuilderView: View {
                 Rectangle().fill(PT.hair).frame(height: 1)
                 checklistRow(
                     title: "Manual",
-                    subtitle: "\(manualRecord.displayName) · adds \(manualRecord.formattedSize)",
+                    subtitle: "\(manualRecord.displayName) · adds \(manualRecord.formattedSize) · on this device only",
                     isOn: $selection.includeManual
                 )
             }
@@ -353,7 +378,6 @@ struct PassItOnBuilderView: View {
         }
         shareURL = url
         showShareSheet = true
-        hasShared = true
         AppLogger.info("Pass-it-on packet shared for record \(record.id), \(pageCount) content page(s)", category: "passiton")
     }
 }
