@@ -222,8 +222,11 @@ final class SoftAskCoordinator {
     }
 
     /// The nearest not-yet-expired warranty within the next 30 days, if any —
-    /// the real record the re-ask's sample banner shows.
-    static func nearestExpiring(records: [PurchaseRecord], now: Date = .now) -> (record: PurchaseRecord, days: Int)? {
+    /// the real record the re-ask's sample banner shows. `nonisolated`: pure
+    /// date math over the records passed in, no `SoftAskCoordinator` state —
+    /// same reasoning as `SoftAskEligibility`, and needed so tests can call
+    /// it from non-`@MainActor` contexts.
+    nonisolated static func nearestExpiring(records: [PurchaseRecord], now: Date = .now) -> (record: PurchaseRecord, days: Int)? {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         return records
