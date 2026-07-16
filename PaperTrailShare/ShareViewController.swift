@@ -1,5 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
+import os
 
 /// Share-sheet entry point ("Share… → PaperTrail" from Photos, Files, Mail,
 /// Safari, etc). Does **no** OCR/extraction here — the extension process has
@@ -7,6 +8,10 @@ import UniformTypeIdentifiers
 /// only ferries files into the App Group container; `ShareInboxDrain` (app
 /// target) picks them up on next foreground and runs the same pipeline as
 /// Mail/Files "Open in PaperTrail".
+///
+/// No Sentry here — the extension target deliberately doesn't link it (its
+/// own tight memory/process limits). Failures instead go through `os_log`,
+/// visible in Console.app/sysdiagnose even without a debugger attached.
 final class ShareViewController: UIViewController {
 
     private static let maxItems = 10
@@ -36,7 +41,7 @@ final class ShareViewController: UIViewController {
         iconView.image = UIImage(systemName: "hourglass")
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        statusLabel.text = "Saving to PaperTrail…"
+        statusLabel.text = "Adding to PaperTrail…"
         statusLabel.textColor = gold
         statusLabel.font = .systemFont(ofSize: 15, weight: .medium)
         statusLabel.textAlignment = .center
@@ -66,19 +71,28 @@ final class ShareViewController: UIViewController {
     private func beginImport() async {
         let providers = attachmentProviders()
         guard !providers.isEmpty else {
-            finish(successCount: 0)
+            finish(successCount: 0, totalCount: 0, containerUnavailable: false)
             return
         }
 
         // At most 10 small files — sequential copies keep this simple and
         // avoid handing an `NSItemProvider` across a `Sendable` boundary.
+        // Each individual copy still races its own 15s timeout internally
+        // (`ShareInboxWriter.copy`), so one hung provider can't stall the
+        // whole loop.
         var successCount = 0
+        var containerUnavailable = false
         for provider in providers {
-            if await ShareInboxWriter.copy(provider: provider) {
+            switch await ShareInboxWriter.copy(provider: provider) {
+            case .success:
                 successCount += 1
+            case .containerUnavailable:
+                containerUnavailable = true
+            case .failure:
+                break
             }
         }
-        finish(successCount: successCount)
+        finish(successCount: successCount, totalCount: providers.count, containerUnavailable: containerUnavailable)
     }
 
     private func attachmentProviders() -> [NSItemProvider] {
@@ -93,14 +107,23 @@ final class ShareViewController: UIViewController {
         return providers
     }
 
+    /// `containerUnavailable` takes priority over the generic failure copy
+    /// when nothing succeeded — a shared-storage problem is a distinct,
+    /// more actionable failure than "this particular file didn't work".
     @MainActor
-    private func finish(successCount: Int) {
+    private func finish(successCount: Int, totalCount: Int, containerUnavailable: Bool) {
         guard !didComplete else { return }
         didComplete = true
 
-        if successCount > 0 {
+        if successCount > 0 && successCount == totalCount {
             iconView.image = UIImage(systemName: "checkmark.circle.fill")
-            statusLabel.text = "Saved to PaperTrail"
+            statusLabel.text = "Ready to import — opens in PaperTrail"
+        } else if successCount > 0 {
+            iconView.image = UIImage(systemName: "checkmark.circle.fill")
+            statusLabel.text = "Added \(successCount) of \(totalCount) — opens in PaperTrail"
+        } else if containerUnavailable {
+            iconView.image = UIImage(systemName: "exclamationmark.triangle.fill")
+            statusLabel.text = "Couldn't reach PaperTrail's shared storage"
         } else {
             iconView.image = UIImage(systemName: "exclamationmark.triangle.fill")
             statusLabel.text = "Couldn't import"
@@ -121,13 +144,42 @@ enum ShareInboxWriter {
     static let appGroupID = "group.nikhilsh.PaperTrail"
     static let inboxSubdirectory = "ShareInbox"
 
-    /// Attempts to copy `provider`'s content into the shared inbox as a
-    /// file. Returns whether a file was written.
-    static func copy(provider: NSItemProvider) async -> Bool {
-        guard let kind = preferredKind(for: provider) else { return false }
+    private static let logger = Logger(subsystem: "nikhilsh.PaperTrail.PaperTrailShare", category: "share")
 
-        if await loadFileRepresentation(provider: provider, contentType: kind.contentType) != nil {
-            return true
+    enum CopyOutcome: Equatable {
+        case success
+        /// The App Group container itself was unreachable (nil
+        /// `containerURL`, or the inbox directory couldn't be created) —
+        /// distinct from an ordinary per-item failure so the UI can show
+        /// more specific copy.
+        case containerUnavailable
+        case failure
+    }
+
+    /// The App Group container being unreachable is a fixed condition for
+    /// the whole extension run — surfaced as a thrown error so every I/O
+    /// site downstream of `prepareInboxDirectory()` can tell it apart from
+    /// an ordinary per-item failure without re-deriving it.
+    private enum InboxError: Error {
+        case containerUnavailable
+    }
+
+    /// Attempts to copy `provider`'s content into the shared inbox as a
+    /// file. Raced against a 15s timeout: some third-party File Provider
+    /// extensions have been seen to simply never call their completion
+    /// handler, which would otherwise hang the whole share sheet. On
+    /// timeout this item is counted as failed and the sequential loop in
+    /// `ShareViewController.beginImport` moves on to the next provider.
+    static func copy(provider: NSItemProvider) async -> CopyOutcome {
+        await withTimeout(seconds: 15, operation: { await performCopy(provider: provider) }, onTimeout: { .failure })
+    }
+
+    private static func performCopy(provider: NSItemProvider) async -> CopyOutcome {
+        guard let kind = preferredKind(for: provider) else { return .failure }
+
+        let fileOutcome = await loadFileRepresentation(provider: provider, kind: kind)
+        if fileOutcome != .failure {
+            return fileOutcome
         }
 
         // Some sources (e.g. a freshly-taken screenshot handed straight from
@@ -138,7 +190,26 @@ enum ShareInboxWriter {
             return write(data: data, extension: ext)
         }
 
-        return false
+        return .failure
+    }
+
+    // MARK: Timeout racing
+
+    private static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async -> T,
+        onTimeout: @escaping @Sendable () -> T
+    ) async -> T {
+        await withTaskGroup(of: T.self) { group in
+            group.addTask { await operation() }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(seconds))
+                return onTimeout()
+            }
+            let result = await group.next() ?? onTimeout()
+            group.cancelAll()
+            return result
+        }
     }
 
     // MARK: Type inference (pure)
@@ -172,13 +243,20 @@ enum ShareInboxWriter {
         return nil
     }
 
-    /// Walks a provider's registered UTIs looking for one with a known
-    /// filename extension (png/heic/jpeg/pdf/…); falls back to a generic
-    /// extension for the item's kind if none resolve. Pure function of the
+    /// Walks a provider's registered UTIs looking for one that actually
+    /// conforms to the kind being loaded (pdf vs image) with a known
+    /// filename extension; falls back to a generic extension for the item's
+    /// kind if none resolve. A provider can register unrelated UTIs
+    /// alongside the one that matched `preferredKind` (e.g. a generic
+    /// `public.data` alongside `public.image`) — matching the *first*
+    /// resolvable extension regardless of conformance previously risked
+    /// naming a PDF's bytes `.png` or vice versa. Pure function of the
     /// identifier list, so it's unit-testable without an `NSItemProvider`.
     static func fileExtension(forTypeIdentifiers identifiers: [String], kind: ShareItemKind) -> String {
         for identifier in identifiers {
-            if let type = UTType(identifier), let ext = type.preferredFilenameExtension {
+            if let type = UTType(identifier),
+               type.conforms(to: kind.contentType),
+               let ext = type.preferredFilenameExtension {
                 return ext
             }
         }
@@ -187,26 +265,32 @@ enum ShareInboxWriter {
 
     // MARK: NSItemProvider bridging
 
-    private static func loadFileRepresentation(provider: NSItemProvider, contentType: UTType) async -> URL? {
+    private static func loadFileRepresentation(provider: NSItemProvider, kind: ShareItemKind) async -> CopyOutcome {
         await withCheckedContinuation { continuation in
-            provider.loadFileRepresentation(for: contentType) { url, _, error in
+            provider.loadFileRepresentation(for: kind.contentType) { url, _, error in
                 guard let url, error == nil else {
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: .failure)
                     return
                 }
                 // The URL is only valid for the lifetime of this callback —
                 // copy it into the App Group inbox synchronously, right
-                // here, before returning.
-                let destination = writeInboxURL(preserving: url.pathExtension)
-                let copied: URL?
+                // here, before returning. An empty `pathExtension` (seen
+                // from some providers) previously produced an extensionless
+                // file that later extension-sniffing would misidentify —
+                // default to the kind's own extension instead.
+                let ext = url.pathExtension.isEmpty ? kind.fallbackExtension : url.pathExtension
+                let destination = writeInboxURL(preserving: ext)
                 do {
                     try prepareInboxDirectory()
                     try FileManager.default.copyItem(at: url, to: destination)
-                    copied = destination
+                    continuation.resume(returning: .success)
+                } catch InboxError.containerUnavailable {
+                    logger.error("ShareInboxWriter: App Group container unavailable (file copy)")
+                    continuation.resume(returning: .containerUnavailable)
                 } catch {
-                    copied = nil
+                    logger.error("ShareInboxWriter: file copy failed: \(error.localizedDescription, privacy: .public)")
+                    continuation.resume(returning: .failure)
                 }
-                continuation.resume(returning: copied)
             }
         }
     }
@@ -223,20 +307,24 @@ enum ShareInboxWriter {
         }
     }
 
-    private static func write(data: Data, extension ext: String) -> Bool {
+    private static func write(data: Data, extension ext: String) -> CopyOutcome {
         let destination = writeInboxURL(preserving: ext)
         do {
             try prepareInboxDirectory()
             try data.write(to: destination, options: .atomic)
-            return true
+            return .success
+        } catch InboxError.containerUnavailable {
+            logger.error("ShareInboxWriter: App Group container unavailable (data write)")
+            return .containerUnavailable
         } catch {
-            return false
+            logger.error("ShareInboxWriter: data write failed: \(error.localizedDescription, privacy: .public)")
+            return .failure
         }
     }
 
     private static func prepareInboxDirectory() throws {
         guard let dir = inboxDirectory else {
-            throw CocoaError(.fileWriteUnknown)
+            throw InboxError.containerUnavailable
         }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }

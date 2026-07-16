@@ -69,6 +69,16 @@ final class AppRouter {
     /// presents the same review screen a manual scan would.
     var pendingImportPayload: DraftPayload?
 
+    /// Cross-entry-point in-flight guard for import. Two importers can race
+    /// to both pass their `pendingImportPayload == nil` guard — Mail/Files
+    /// "Open in PaperTrail" (`AppShellView.importIncomingFile`) and the
+    /// share-extension drain (`ShareInboxDrain`) — and then both try to
+    /// assign `pendingImportPayload`. Each import path checks this
+    /// synchronously at its own entry, before any `await`, and sets it
+    /// before doing any work; it's cleared in a `defer` once that import
+    /// concludes (success or failure).
+    var isImporting = false
+
     func navigate(to route: Route) {
         switch route {
         case .record(let id):
@@ -80,6 +90,41 @@ final class AppRouter {
             selectedTab = .warranty
         }
         AppLogger.info("Routed to \(route)", category: "deeplink")
+    }
+}
+
+// MARK: - Foreground refresh coalescing
+
+/// Coalesces `DigestScheduler.reschedule` and `WidgetSnapshotWriter.write`
+/// behind one ~1.5s debounce, mirroring `SpotlightIndexer.reindexAllDebounced`.
+/// Each of those used to run its own full `PurchaseRecord` fetch off the
+/// same app-foreground hook — two fetches per foreground, and rapid
+/// foreground/background flips (e.g. a quick app-switcher peek) used to
+/// repeat both. This does exactly one fetch per debounce firing and feeds
+/// both consumers from it. `SpotlightIndexer` and `ShareInboxDrain` are
+/// deliberately not included here: Spotlight has its own independent
+/// debounce, and the share-inbox drain must run promptly on every
+/// foreground, not sit behind a delay.
+@MainActor
+private enum ForegroundRefreshCoordinator {
+    private static var task: Task<Void, Never>?
+    private static let debounceInterval: Duration = .seconds(1.5)
+
+    static func scheduleDebounced(modelContext: ModelContext) {
+        task?.cancel()
+        task = Task {
+            try? await Task.sleep(for: debounceInterval)
+            guard !Task.isCancelled else { return }
+            let records: [PurchaseRecord]
+            do {
+                records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
+            } catch {
+                AppLogger.error("Foreground refresh fetch failed: \(error.localizedDescription)", category: "app")
+                return
+            }
+            DigestScheduler.reschedule(records: records)
+            WidgetSnapshotWriter.write(records: records)
+        }
     }
 }
 
@@ -159,8 +204,10 @@ struct AppShellView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 SpotlightIndexer.reindexAllDebounced()
-                DigestScheduler.reschedule(modelContext: modelContext)
-                WidgetSnapshotWriter.write(modelContext: modelContext)
+                ForegroundRefreshCoordinator.scheduleDebounced(modelContext: modelContext)
+                // Not debounced with the above — a share-sheet import is
+                // something the user is actively waiting on, so it must run
+                // promptly on every foreground, not coalesced behind a delay.
                 ShareInboxDrain.drainIfPossible(modelContext: modelContext)
             }
         }
@@ -217,6 +264,16 @@ struct AppShellView: View {
     /// scope is released, then run through the same extraction pipeline as
     /// manual Photos/Files import (`ImportPipeline`, shared with `ImportView`).
     private func importIncomingFile(_ url: URL) async {
+        // Checked and set synchronously, before any `await` in this
+        // function, so a concurrently-running `ShareInboxDrain` can't slip
+        // past this guard and race to assign `pendingImportPayload` too.
+        guard !router.isImporting else {
+            AppLogger.warn("Import ignored — another import is already in flight", category: "import")
+            return
+        }
+        router.isImporting = true
+        defer { router.isImporting = false }
+
         let needsStop = url.startAccessingSecurityScopedResource()
         defer { if needsStop { url.stopAccessingSecurityScopedResource() } }
 

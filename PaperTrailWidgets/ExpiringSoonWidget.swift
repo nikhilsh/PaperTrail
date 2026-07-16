@@ -6,6 +6,13 @@ import SwiftUI
 struct ExpiringSoonEntry: TimelineEntry {
     let date: Date
     let items: [WidgetSnapshotItem]
+    /// `false` when the App Group snapshot was missing, undecodable, or the
+    /// container itself was unreachable — as opposed to `true` with empty
+    /// `items`, which means the snapshot decoded fine and there's genuinely
+    /// nothing upcoming. The two used to be indistinguishable and both
+    /// rendered "Nothing expiring soon", which is a false reassurance when
+    /// the widget actually just can't see the app's data.
+    let isDataAvailable: Bool
 }
 
 // MARK: - Provider
@@ -13,23 +20,29 @@ struct ExpiringSoonEntry: TimelineEntry {
 /// Reads the App Group JSON snapshot the app writes on every foreground —
 /// never touches SwiftData/CloudKit directly (CLAUDE.md high-risk rule: the
 /// widget target must stay off the store). Missing container, missing file,
-/// or undecodable JSON all fall back to an empty snapshot rather than
-/// crashing the widget.
+/// or undecodable JSON never crash the widget — they fall back to an empty
+/// item list, same as a snapshot that decoded fine with nothing upcoming,
+/// but are flagged via `ExpiringSoonEntry.isDataAvailable` so the two don't
+/// render the same "nothing to worry about" copy.
 struct ExpiringSoonProvider: TimelineProvider {
     private static let appGroupIdentifier = "group.nikhilsh.PaperTrail"
     private static let snapshotFileName = "widget-snapshot.json"
 
     func placeholder(in context: Context) -> ExpiringSoonEntry {
-        ExpiringSoonEntry(date: .now, items: Self.placeholderItems)
+        ExpiringSoonEntry(date: .now, items: Self.placeholderItems, isDataAvailable: true)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ExpiringSoonEntry) -> Void) {
-        let items = context.isPreview ? Self.placeholderItems : Self.readSnapshot().items
-        completion(ExpiringSoonEntry(date: .now, items: items))
+        if context.isPreview {
+            completion(ExpiringSoonEntry(date: .now, items: Self.placeholderItems, isDataAvailable: true))
+            return
+        }
+        let (items, isDataAvailable) = Self.entryData()
+        completion(ExpiringSoonEntry(date: .now, items: items, isDataAvailable: isDataAvailable))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ExpiringSoonEntry>) -> Void) {
-        let items = Self.readSnapshot().items
+        let (items, isDataAvailable) = Self.entryData()
         let now = Date.now
         let calendar = Calendar.current
         let nextMidnight = calendar.nextDate(
@@ -43,32 +56,37 @@ struct ExpiringSoonProvider: TimelineProvider {
         // reload; `.after(nextMidnight)` asks WidgetKit for a fresh timeline
         // once that entry is stale.
         let entries = [
-            ExpiringSoonEntry(date: now, items: items),
-            ExpiringSoonEntry(date: nextMidnight, items: items),
+            ExpiringSoonEntry(date: now, items: items, isDataAvailable: isDataAvailable),
+            ExpiringSoonEntry(date: nextMidnight, items: items, isDataAvailable: isDataAvailable),
         ]
         completion(Timeline(entries: entries, policy: .after(nextMidnight)))
     }
 
-    private static func readSnapshot() -> WidgetSnapshot {
+    /// `nil` covers every "can't tell" case (no container, no file,
+    /// undecodable JSON) — collapsed to `isDataAvailable: false` by the
+    /// caller, distinct from a snapshot that decoded fine with zero items.
+    private static func readSnapshot() -> WidgetSnapshot? {
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
-            return WidgetSnapshot(generatedAt: .now, items: [])
+            return nil
         }
         let fileURL = containerURL.appendingPathComponent(snapshotFileName)
         guard let data = try? Data(contentsOf: fileURL) else {
-            return WidgetSnapshot(generatedAt: .now, items: [])
+            return nil
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(WidgetSnapshot.self, from: data) else {
-            return WidgetSnapshot(generatedAt: .now, items: [])
-        }
-        return snapshot
+        return try? decoder.decode(WidgetSnapshot.self, from: data)
+    }
+
+    private static func entryData() -> (items: [WidgetSnapshotItem], isDataAvailable: Bool) {
+        guard let snapshot = readSnapshot() else { return ([], false) }
+        return (snapshot.items, true)
     }
 
     private static var placeholderItems: [WidgetSnapshotItem] {
         [
             WidgetSnapshotItem(
-                id: UUID(),
+                recordID: UUID(),
                 name: "Sample Warranty",
                 kind: "warranty",
                 date: Calendar.current.date(byAdding: .day, value: 14, to: .now) ?? .now
@@ -114,22 +132,26 @@ private enum ExpiringSoonFormatting {
     }
 
     static func deepLink(for item: WidgetSnapshotItem) -> URL? {
-        URL(string: "papertrail://record/\(item.id.uuidString)")
+        URL(string: "papertrail://record/\(item.recordID.uuidString)")
     }
 }
 
 // MARK: - Views
 
-/// Shown when there's no upcoming warranty/return to surface — an empty
-/// snapshot, a missing App Group container, or an unreadable file all land
-/// here rather than crashing the widget.
+/// Shown when there's no item to surface — either a genuinely empty
+/// snapshot ("Nothing expiring soon") or a missing/undecodable snapshot or
+/// unreachable App Group container ("Open PaperTrail to update"), never
+/// crashing the widget either way. Which message applies is the caller's
+/// call, driven by `ExpiringSoonEntry.isDataAvailable`.
 private struct EmptyStateView: View {
+    let message: String
+
     var body: some View {
         VStack(spacing: 4) {
             Text("PaperTrail")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(WidgetPalette.gold)
-            Text("Nothing expiring soon")
+            Text(message)
                 .font(.footnote)
                 .foregroundStyle(WidgetPalette.cream)
                 .multilineTextAlignment(.center)
@@ -137,6 +159,12 @@ private struct EmptyStateView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .containerBackground(WidgetPalette.background, for: .widget)
+    }
+}
+
+private extension ExpiringSoonEntry {
+    var emptyStateMessage: String {
+        isDataAvailable ? "Nothing expiring soon" : "Open PaperTrail to update"
     }
 }
 
@@ -156,6 +184,7 @@ private struct SmallWidgetView: View {
                     .foregroundStyle(WidgetPalette.cream)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
+                    .privacySensitive()
 
                 Spacer(minLength: 0)
 
@@ -168,7 +197,7 @@ private struct SmallWidgetView: View {
             .containerBackground(WidgetPalette.background, for: .widget)
             .widgetURL(ExpiringSoonFormatting.deepLink(for: item))
         } else {
-            EmptyStateView()
+            EmptyStateView(message: entry.emptyStateMessage)
         }
     }
 }
@@ -187,6 +216,7 @@ private struct MediumWidgetRow: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(WidgetPalette.cream)
                     .lineLimit(1)
+                    .privacySensitive()
                 Text(ExpiringSoonFormatting.kindLabel(item.kind))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(WidgetPalette.gold.opacity(0.8))
@@ -210,7 +240,7 @@ private struct MediumWidgetView: View {
 
     var body: some View {
         if entry.items.isEmpty {
-            EmptyStateView()
+            EmptyStateView(message: entry.emptyStateMessage)
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(entry.items.prefix(3)) { item in
@@ -234,12 +264,13 @@ private struct AccessoryRectangularView: View {
                 Text(item.name)
                     .font(.headline)
                     .lineLimit(1)
+                    .privacySensitive()
                 Text(ExpiringSoonFormatting.lockScreenPhrase(daysLeft))
                     .font(.caption)
             }
             .containerBackground(.clear, for: .widget)
         } else {
-            Text("Nothing expiring soon")
+            Text(entry.emptyStateMessage)
                 .font(.caption)
                 .containerBackground(.clear, for: .widget)
         }

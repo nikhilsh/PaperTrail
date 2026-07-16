@@ -13,8 +13,27 @@ enum DigestScheduler {
     static let notificationIdentifier = "monthly-digest"
 
     /// Call from app-foreground, alongside the Spotlight reindex hook in
-    /// `AppShellView`.
+    /// `AppShellView`. Fetches its own records — kept for tests and any
+    /// other direct caller. The foreground hook itself goes through
+    /// `ForegroundRefreshCoordinator`, which fetches once and feeds both
+    /// this and `WidgetSnapshotWriter` from the same records via
+    /// `reschedule(records:)`.
     static func reschedule(modelContext: ModelContext) {
+        let records: [PurchaseRecord]
+        do {
+            records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
+        } catch {
+            AppLogger.error("Digest fetch failed: \(error.localizedDescription)", category: "digest")
+            return
+        }
+        reschedule(records: records)
+    }
+
+    /// Same as `reschedule(modelContext:)` but over already-fetched
+    /// records, so a caller that also needs those records elsewhere (e.g.
+    /// `ForegroundRefreshCoordinator`, which feeds `WidgetSnapshotWriter`
+    /// from the same fetch) doesn't pay for a second SwiftData fetch.
+    static func reschedule(records: [PurchaseRecord]) {
         let center = UNUserNotificationCenter.current()
 
         guard ReminderSettings.shared.digestEnabled else {
@@ -22,7 +41,7 @@ enum DigestScheduler {
             return
         }
 
-        let summary = buildSummary(modelContext: modelContext)
+        let summary = DigestBuilder.build(from: records.map(\.digestSnapshot))
         guard !summary.isEmpty else {
             center.removePendingNotificationRequests(withIdentifiers: [notificationIdentifier])
             AppLogger.info("Digest empty — nothing to schedule", category: "digest")
