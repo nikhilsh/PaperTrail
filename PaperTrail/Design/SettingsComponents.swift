@@ -153,12 +153,18 @@ enum BackupState {
     case synced(relative: String)
     case syncing(remaining: Int)
     case paused
+    /// No sync has ever completed and none is in flight right now — the
+    /// honest state for a fresh install/record before the first backup
+    /// lands. NEVER collapsed into `.synced` with a fabricated "just now"
+    /// (§6): that reads as a promise already kept when it hasn't been yet.
+    case neverSynced
 
     var dotColor: Color {
         switch self {
         case .synced: PT.sageDeep
         case .syncing: PT.goldDeep
         case .paused: PT.terra
+        case .neverSynced: PT.txt3
         }
     }
 
@@ -167,13 +173,19 @@ enum BackupState {
         case let .synced(relative): "Backed up · \(relative)"
         case let .syncing(remaining): "Backing up · \(remaining) to go"
         case .paused: "Backup paused · tap to retry"
+        case .neverSynced: "Not backed up yet"
         }
     }
 
     var isPaused: Bool { if case .paused = self { return true }; return false }
 }
 
-/// Computes the honest backup state from the available sync signals.
+/// Computes the honest backup state from the available sync signals. A
+/// `nil` `lastSync` — no completed sync yet — is `.neverSynced`, never a
+/// fabricated `.synced(relative: "just now")` (§6): the timestamp is only
+/// ever stamped by the caller (`PaperTrailApp.syncCloudImages`) on an
+/// actually-successful round, so `nil` here means truthfully "hasn't
+/// happened".
 @MainActor
 func currentBackupState(
     syncManager: CloudImageSyncManager,
@@ -186,14 +198,12 @@ func currentBackupState(
     if activeSyncBackend == "Local fallback" || !syncManager.transferErrors.isEmpty {
         return .paused
     }
-    let relative: String
-    if let lastSync {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        relative = formatter.localizedString(for: lastSync, relativeTo: .now)
-    } else {
-        relative = "just now"
+    guard let lastSync else {
+        return .neverSynced
     }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .full
+    let relative = formatter.localizedString(for: lastSync, relativeTo: .now)
     return .synced(relative: relative)
 }
 

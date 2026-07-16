@@ -30,9 +30,18 @@ enum PlusConfig {
     ///
     /// ⚠️ MUST NEVER SHIP TO THE APP STORE. This is a debug-only escape
     /// hatch (entitlement override, raw transaction dump) that has no
-    /// business in a production build. Re-evaluate — and flip to `false` —
-    /// before any App Store submission, independently of `enabled` above.
-    static let debugConsoleEnabled = true
+    /// business in a production build. Compile-time gated on the
+    /// `APPSTORE` build flag (set for the App Store release configuration)
+    /// rather than a plain `Bool` constant — a stray `true` can no longer
+    /// slip into a store submission, since it's not something a future edit
+    /// to this line can silently override for that configuration.
+    static let debugConsoleEnabled: Bool = {
+        #if APPSTORE
+        false
+        #else
+        true
+        #endif
+    }()
 
     /// StoreKit product identifiers (App Store Connect: subscription group
     /// "PaperTrail Plus" for the two subscriptions, non-consumable for lifetime).
