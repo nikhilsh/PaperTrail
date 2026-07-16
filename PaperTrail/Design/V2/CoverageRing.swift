@@ -16,6 +16,12 @@ struct CoverageRing: View {
     /// Months remaining right now — drives both the arc fraction and the
     /// center count-up.
     let monthsRemaining: Int
+    /// Suffix after the center count, e.g. "mo" (default) or "d" when the
+    /// caller is displaying days instead of months (V2_BRIEF §2: "days when
+    /// <2 months" left). Purely a label — `totalMonths`/`monthsRemaining` are
+    /// unitless counts the caller is free to pass in whatever unit this
+    /// suffix names.
+    var unitSuffix: String = "mo"
     var diameter: CGFloat = 150
     var lineWidth: CGFloat = 9
 
@@ -39,7 +45,7 @@ struct CoverageRing: View {
                 .stroke(PT.sage, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 2) {
-                Text("\(displayedMonths) mo")
+                Text("\(displayedMonths) \(unitSuffix)")
                     .font(PTFont.serif(38, weight: 600))
                     .foregroundStyle(PT.onPaper)
                 Text("REMAINING")

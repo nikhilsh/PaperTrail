@@ -19,6 +19,10 @@ struct RecordDetailView: View {
     @State private var isAddingProductPhoto = false
     @State private var toastMessage: String?
     @State private var showRegisterSafari = false
+    /// Coverage Passport (v2 design wave, W2) toast — separate from the
+    /// legacy `toastMessage` overlay above; drives the shared `PTToast`
+    /// component for the serial-copy confirmation per ANIMATION_SPEC §7.
+    @State private var passportToast: PTToastItem?
 
     private let scanningService = ScanningService()
 
@@ -48,7 +52,7 @@ struct RecordDetailView: View {
                 detailsCard
 
                 if record.warrantyExpiryDate != nil {
-                    warrantyBlock
+                    coveragePassport
                 }
 
                 if record.returnWindowDays != nil {
@@ -157,6 +161,7 @@ struct RecordDetailView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .ptToast($passportToast)
     }
 
     @State private var showProductPhotoPicker = false
@@ -361,40 +366,252 @@ struct RecordDetailView: View {
         }
     }
 
-    // MARK: Warranty block
+    // MARK: Coverage Passport (v2 design wave, W2 — docs/design-v2/V2_BRIEF.md §2)
+    //
+    // Replaces the old dark "Warranty" NavigationLink card with the cream
+    // passport card + two grouped sections the v2 brief specifies. The old
+    // card's destination (`WarrantyAnswerView`, the "Yes/No — covered."
+    // verdict screen) is untouched and still reachable — this view doesn't
+    // route there, since the passport surfaces the same status inline via
+    // the stamp + ring instead of asking the user to tap through for it.
 
-    private var warrantyBlock: some View {
-        NavigationLink {
-            WarrantyAnswerView(record: record)
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
+    /// Ring total/remaining span in whichever unit reads best (months, or
+    /// days inside the last stretch) — `nil` when there's no expiry date
+    /// (the whole section is gated on that already, but keeps this optional
+    /// rather than force-unwrapping).
+    private var passportRing: CoverageRingValues? {
+        guard let expiry = record.warrantyExpiryDate else { return nil }
+        return coverageRingValues(purchaseDate: record.purchaseDate, expiryDate: expiry)
+    }
+
+    private var passportStamp: (text: String, state: PTStampState) {
+        switch record.warrantyStatus {
+        case .active: ("Covered", .covered)
+        case .expiringSoon: ("Expiring", .expiring)
+        case .expired: ("Expired", .expired)
+        case .unknown: ("Covered", .covered) // unreachable — gated on warrantyExpiryDate != nil
+        }
+    }
+
+    private var coveragePassport: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            passportCard
+            coveredGroup
+            supportContactRow
+            passportCTAs
+        }
+    }
+
+    private var passportCard: some View {
+        PaperCardV2 {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    SectionLabel(text: "Warranty", tone: warranty.status.tone)
+                    Text("Coverage passport")
+                        .ptMonoLabel(9.5, tracking: 2)
+                        .foregroundStyle(PT.onPaper3)
                     Spacer()
+                    PTStamp(text: passportStamp.text, state: passportStamp.state)
+                }
+
+                if let ring = passportRing {
+                    CoverageRing(totalMonths: ring.total, monthsRemaining: ring.remaining, unitSuffix: ring.unit.suffix)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 4)
+                }
+
+                Rectangle().fill(PT.onPaperHair).frame(height: 1)
+
+                LedgerRow(key: "Bought", value: record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                LedgerRow(key: "Expires", value: record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+
+                if let serial = record.serialNumber, !serial.isEmpty {
+                    Rectangle().fill(PT.onPaperHair).frame(height: 1)
+                    passportSerialRow(serial)
+                }
+
+                if !record.productName.isEmpty {
+                    LedgerRow(key: "Model", value: record.productName)
+                }
+            }
+            .padding(18)
+        }
+    }
+
+    /// Serial row with the acceptance-criterion COPY affordance: copies to
+    /// the pasteboard, `.light` haptic, `PTToast` confirmation, and a
+    /// VoiceOver label reading "Copy serial number, button".
+    private func passportSerialRow(_ serial: String) -> some View {
+        Button {
+            UIPasteboard.general.string = serial
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            passportToast = PTToastItem(message: "Serial copied")
+        } label: {
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text("SERIAL")
+                    .font(PTFont.mono(11))
+                    .foregroundStyle(PT.onPaper2)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(serial)
+                    .font(PTFont.mono(11.5, medium: true))
+                    .foregroundStyle(PT.onPaper)
+                    .lineLimit(1)
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(PT.goldDeep)
+            }
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Copy serial number")
+    }
+
+    // MARK: What's covered group
+
+    private var coveredGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel(text: "What's covered", tone: PT.txt3)
+            VStack(spacing: 0) {
+                coverageCheckRow(label: "Parts", covered: true)
+                Rectangle().fill(PT.hair).frame(height: 1)
+                coverageCheckRow(label: "Labour", covered: true)
+                ForEach(Array(record.coverageLines.enumerated()), id: \.offset) { _, line in
+                    Rectangle().fill(PT.hair).frame(height: 1)
+                    coverageCheckRow(label: line.label, covered: line.covered)
+                }
+                if record.coverageLines.isEmpty {
+                    Rectangle().fill(PT.hair).frame(height: 1)
+                    coverageGhostRow
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+    }
+
+    private func coverageCheckRow(label: String, covered: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: covered ? "checkmark.circle.fill" : "xmark.circle")
+                .font(.system(size: 13))
+                .foregroundStyle(covered ? PT.sage : PT.txt3)
+            Text(label)
+                .font(.system(size: 13.5))
+                .foregroundStyle(PT.txt)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 9)
+    }
+
+    private var coverageGhostRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "circle.dashed")
+                .font(.system(size: 12))
+                .foregroundStyle(PT.txt3)
+            Text("Not recorded — add from your warranty card")
+                .font(.system(size: 12.5))
+                .italic()
+                .foregroundStyle(PT.txt3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 9)
+    }
+
+    // MARK: Support contact row
+    //
+    // Prefers the record's own saved support fields; falls back to the
+    // curated brand directory (same lookup SupportView uses), respecting the
+    // existing "Suggest support contacts" toggle. Hidden entirely when
+    // neither source has anything.
+
+    private typealias PassportSupportContact = (name: String, phone: String?, urlString: String?, verified: Bool)
+
+    private var passportSupportContact: PassportSupportContact? {
+        if let support = record.supportInfo {
+            return (support.providerName, support.phoneNumber, support.note, support.confidence == .verified)
+        }
+        guard ReminderSettings.shared.suggestSupportContacts,
+              let suggestion = SupportContactDirectory.match(merchantName: record.merchantName, productName: record.productName) else {
+            return nil
+        }
+        return (suggestion.displayName, suggestion.phone, suggestion.url, false)
+    }
+
+    @ViewBuilder
+    private var supportContactRow: some View {
+        if let contact = passportSupportContact {
+            Button {
+                openSupportContact(contact)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "phone.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(PT.gold)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(contact.name)
+                            .font(PTFont.serif(15, weight: 600))
+                            .foregroundStyle(PT.txt)
+                        Text(contact.phone ?? "Visit support site")
+                            .font(PTFont.mono(11.5, medium: true))
+                            .foregroundStyle(PT.txt2)
+                        label(
+                            symbol: contact.verified ? "checkmark.seal.fill" : "questionmark.circle",
+                            text: contact.verified ? "Verified from your receipt" : "Best guess · verify before calling.",
+                            tone: contact.verified ? PT.sageDeep : Color(hex: 0x9A7A33)
+                        )
+                    }
+                    Spacer(minLength: 8)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(PT.txt3)
                 }
-                Text(warranty.pillText)
-                    .font(PTFont.serif(20, weight: 600, italic: true))
-                    .foregroundStyle(PT.txt)
-                WarrantyProgressBar(progress: warranty.progressElapsed, tone: warranty.status.tone, onPaper: false)
-                HStack {
-                    Text("\(record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—") — purchased")
-                        .font(PTFont.mono(10))
-                        .foregroundStyle(PT.txt3)
-                    Spacer()
-                    Text("\(record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—") — \(record.warrantyStatus == .expired ? "expired" : "expires")")
-                        .font(PTFont.mono(10))
-                        .foregroundStyle(PT.txt3)
+            }
+            .buttonStyle(.plain)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(hex: 0xE7DCC4, alpha: 0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+        }
+    }
+
+    /// Tap = call when a phone number is on file; falls back to the brand's
+    /// support site when only a URL is known.
+    private func openSupportContact(_ contact: PassportSupportContact) {
+        if let phone = contact.phone {
+            let digits = phone.filter { $0.isNumber || $0 == "+" }
+            if let url = URL(string: "tel://\(digits)") {
+                openURL(url)
+                return
+            }
+        }
+        if let urlString = contact.urlString, let url = URL(string: urlString) {
+            openURL(url)
+        }
+    }
+
+    // MARK: CTAs
+
+    private var passportCTAs: some View {
+        VStack(spacing: 10) {
+            NavigationLink {
+                ClaimPacketView(record: record)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "shippingbox")
+                    Text("Build claim packet")
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(warranty.status.tone.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(warranty.status.tone.opacity(0.25), lineWidth: 1))
+            .buttonStyle(FoilButtonStyle())
+
+            NavigationLink {
+                SupportView(record: record)
+            } label: {
+                Text("Something's wrong with it  →")
+            }
+            .buttonStyle(PTOutlineButtonStyle())
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: Return window
