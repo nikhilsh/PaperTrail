@@ -160,6 +160,35 @@ final class PlusEntitlements {
         Self.isLapsed(wasEverMember: wasEverMember, hasPlus: hasPlus)
     }
 
+    /// Picks which of several simultaneously-"current" entitlements should
+    /// drive the membership card, for the (rare but real) case where more
+    /// than one is current at once — e.g. a legacy lifetime purchase
+    /// alongside a live subscription; `Transaction.currentEntitlements`
+    /// yields both, since a lifetime entitlement never expires. An active
+    /// subscription (has an `expirationDate`) always wins over a lifetime
+    /// entitlement (no expiration); among subscriptions, the one expiring
+    /// latest wins. `nil` if `candidates` is empty. `nonisolated` and
+    /// StoreKit-free — callers pass a closure extracting the plain
+    /// `Date?` rather than a live `StoreKit.Transaction` shape, so this is
+    /// testable without a StoreKit session (`MembershipCardStateTests`).
+    nonisolated static func preferredMembership<T>(
+        among candidates: [T],
+        expirationDate: (T) -> Date?
+    ) -> T? {
+        candidates.max { lhs, rhs in
+            switch (expirationDate(lhs), expirationDate(rhs)) {
+            case let (.some(left), .some(right)):
+                return left < right   // later expiration wins
+            case (.none, .some):
+                return true            // lhs is lifetime, rhs is a live subscription
+            case (.some, .none):
+                return false           // lhs is a live subscription, rhs is lifetime
+            case (.none, .none):
+                return false           // both lifetime — keep as tied
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     /// Call once at app launch. No-ops entirely when the flag is off — no
@@ -250,14 +279,14 @@ final class PlusEntitlements {
 
     private func refreshFromCurrentEntitlements() async {
         var entitled = false
-        var active: (productID: String, expirationDate: Date?)?
+        var active: (productID: String, expirationDate: Date?, isIntroductory: Bool)?
 
         for await result in Transaction.currentEntitlements {
             switch result {
             case .verified(let transaction):
                 guard isPlusProduct(transaction.productID) else { continue }
                 entitled = true
-                active = (transaction.productID, transaction.expirationDate)
+                active = (transaction.productID, transaction.expirationDate, transaction.offerType == .introductory)
             case .unverified(let transaction, let error):
                 guard isPlusProduct(transaction.productID) else { continue }
                 AppLogger.error("Plus entitlement unverified for \(transaction.productID): \(error.localizedDescription)", category: "plus")
@@ -310,20 +339,39 @@ final class PlusEntitlements {
     }
 
     /// Renewal-reminder wiring (docs/design-v2/V2_BRIEF.md §4): annual plan
-    /// only — cancelled outright for monthly/lifetime/no-entitlement.
-    /// Reschedules from live StoreKit pricing so the reminder body always
-    /// quotes the real charge.
-    private func updateRenewalReminder(active: (productID: String, expirationDate: Date?)?) async {
+    /// only — cancelled outright for monthly/lifetime/no-entitlement. During
+    /// the 14-day intro trial, the 14-day-before-renewal reminder would fire
+    /// before (or right at) the trial's own start, so a trial period gets
+    /// the shorter TRIAL-ENDING reminder (3 days before the trial's own
+    /// expiration/billing date) instead — never both at once for the same
+    /// entitlement. Reschedules from live StoreKit pricing so the reminder
+    /// body always quotes the real charge.
+    ///
+    /// Offline safety: a `Product.products(for:)` fetch failure (no network)
+    /// must NOT cancel an already-scheduled reminder — that would silently
+    /// drop the one notification the honest-renewal promise depends on, just
+    /// because this particular refresh happened to run offline. Only a real
+    /// lapse/monthly/lifetime state (the guard above) cancels; a fetch
+    /// failure here just leaves whatever's already scheduled alone and
+    /// retries on the next refresh.
+    private func updateRenewalReminder(active: (productID: String, expirationDate: Date?, isIntroductory: Bool)?) async {
         guard let active, active.productID == PlusConfig.ProductID.yearly,
               let expirationDate = active.expirationDate else {
             RenewalReminder.cancel()
+            RenewalReminder.cancelTrialEnding()
             return
         }
         guard let product = try? await Product.products(for: [PlusConfig.ProductID.yearly]).first else {
-            RenewalReminder.cancel()
+            logEvent("Renewal reminder: products fetch failed, keeping existing schedule")
             return
         }
-        RenewalReminder.scheduleAnnual(expirationDate: expirationDate, priceText: product.displayPrice)
+        if active.isIntroductory {
+            RenewalReminder.cancel()
+            RenewalReminder.scheduleTrialEnding(expirationDate: expirationDate, priceText: product.displayPrice)
+        } else {
+            RenewalReminder.cancelTrialEnding()
+            RenewalReminder.scheduleAnnual(expirationDate: expirationDate, priceText: product.displayPrice)
+        }
     }
 
     private func isPlusProduct(_ productID: String) -> Bool {

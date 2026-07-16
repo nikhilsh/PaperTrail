@@ -121,8 +121,10 @@ struct TrustFeatureTests {
         #expect(BackupState.synced(relative: "just now").text == "Backed up · just now")
         #expect(BackupState.syncing(remaining: 2).text == "Backing up · 2 to go")
         #expect(BackupState.paused.text == "Backup paused · tap to retry")
+        #expect(BackupState.neverSynced.text == "Not backed up yet")
         #expect(BackupState.paused.isPaused)
         #expect(!BackupState.synced(relative: "just now").isPaused)
+        #expect(!BackupState.neverSynced.isPaused)
     }
 
     @Test @MainActor func localFallbackReadsAsPaused() {
@@ -132,12 +134,32 @@ struct TrustFeatureTests {
             lastSync: nil
         )
         #expect(state.isPaused)
+    }
 
-        let healthy = currentBackupState(
+    /// §6: a `nil` `lastSync` must never read as a fabricated "just now" —
+    /// it's honestly "hasn't backed up yet" until a sync actually completes.
+    @Test @MainActor func nilLastSyncNeverFabricatesJustNow() {
+        let state = currentBackupState(
             syncManager: CloudImageSyncManager.shared,
             activeSyncBackend: "CloudKit",
             lastSync: nil
         )
-        #expect(healthy.text == "Backed up · just now")
+        #expect(state.text == "Not backed up yet")
+        if case .synced = state {
+            Issue.record("nil lastSync must never be reported as .synced")
+        }
+    }
+
+    @Test @MainActor func realLastSyncReadsAsSynced() {
+        let state = currentBackupState(
+            syncManager: CloudImageSyncManager.shared,
+            activeSyncBackend: "CloudKit",
+            lastSync: Date.now.addingTimeInterval(-60)
+        )
+        if case .synced = state {
+            // Expected.
+        } else {
+            Issue.record("A real lastSync should report .synced, got \(state)")
+        }
     }
 }
