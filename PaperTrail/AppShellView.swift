@@ -160,6 +160,7 @@ struct AppShellView: View {
             if newPhase == .active {
                 SpotlightIndexer.reindexAllDebounced()
                 DigestScheduler.reschedule(modelContext: modelContext)
+                WidgetSnapshotWriter.write(modelContext: modelContext)
             }
         }
         .onChange(of: router.selectedTab) { _, newTab in
