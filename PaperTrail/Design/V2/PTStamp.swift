@@ -5,19 +5,25 @@ import SwiftUI
 // `StampBadge` (`PaperTrail/Design/PTComponents.swift`) already implements
 // the v2 rubber-stamp spec exactly: 2pt `currentColor` border, mono caps,
 // rotate(-3°). It takes an arbitrary `tone: Color`; `PTStamp` wraps it with
-// the three named states the spec calls out, so v2 call sites don't have to
-// know the raw hex-to-tone mapping.
+// the named states the spec calls out, so v2 call sites don't have to know
+// the raw hex-to-tone mapping.
 
 enum PTStampState {
     case covered
     case expired
     case paper
+    /// Coverage Passport (W2) needs a distinct third warranty-status stamp
+    /// beyond covered/expired — DESIGN_LANGUAGE.md §2 reserves amber for
+    /// exactly this ("expiring / closing soon"), so this reuses that token
+    /// rather than inventing a new one.
+    case expiring
 
     var tone: Color {
         switch self {
         case .covered: PT.sageDeep
         case .expired: PT.terra
         case .paper: PT.goldDeep
+        case .expiring: PT.amber
         }
     }
 }
@@ -38,6 +44,7 @@ struct PTStamp: View {
         PTStamp(text: "Covered", state: .covered)
         PTStamp(text: "Expired", state: .expired)
         PTStamp(text: "Paper", state: .paper)
+        PTStamp(text: "Expiring", state: .expiring)
         PTStamp(text: "Covered", state: .covered, compact: true)
     }
     .padding(40)

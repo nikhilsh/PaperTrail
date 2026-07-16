@@ -46,6 +46,14 @@ final class PurchaseRecord {
     /// receipt and warranty card. Links to an Attachment by id.
     var productImageAttachmentID: UUID?
 
+    /// Named coverage lines for the Coverage Passport's "What's covered" group
+    /// (v2 design wave, W2), JSON-encoded `[CoverageLine]`. Additive + optional
+    /// so existing CloudKit records migrate via lightweight migration — same
+    /// pattern as `returnWindowDays`. Access via the `coverageLines` computed
+    /// property below, never this raw blob directly. NOT mirrored into
+    /// `SharedRecordDTO` / household sharing in this wave (follow-up).
+    var coverageLinesData: Data? = nil
+
     // NOTE: No @Relationship to Attachment. Both models share one CloudKit-backed store,
     // but we intentionally avoid @Relationship to keep the schema simple and avoid
     // SwiftData relationship issues with CloudKit. Link via Attachment.recordID == PurchaseRecord.id.
@@ -76,6 +84,7 @@ final class PurchaseRecord {
         coverageSummary: String? = nil,
         isRegistered: Bool = false,
         productImageAttachmentID: UUID? = nil,
+        coverageLinesData: Data? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -101,6 +110,7 @@ final class PurchaseRecord {
         self.coverageSummary = coverageSummary
         self.isRegistered = isRegistered
         self.productImageAttachmentID = productImageAttachmentID
+        self.coverageLinesData = coverageLinesData
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -139,6 +149,22 @@ extension PurchaseRecord {
         supportPhoneNumber = info?.phoneNumber
         supportConfidence = info?.confidence.rawValue
         supportNote = info?.note
+    }
+
+    /// Named coverage lines (Coverage Passport "What's covered" group),
+    /// decoded from `coverageLinesData`. Empty when nothing's recorded yet or
+    /// the blob fails to decode — never throws.
+    var coverageLines: [CoverageLine] {
+        get {
+            guard let coverageLinesData,
+                  let decoded = try? JSONDecoder().decode([CoverageLine].self, from: coverageLinesData) else {
+                return []
+            }
+            return decoded
+        }
+        set {
+            coverageLinesData = try? JSONEncoder().encode(newValue)
+        }
     }
 
     /// Formatted display string for amount + currency.

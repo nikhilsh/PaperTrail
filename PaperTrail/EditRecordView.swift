@@ -23,6 +23,10 @@ struct EditRecordView: View {
     @State private var coverageSummary: String
     @State private var isRegistered: Bool
     @State private var showBarcodeScanner = false
+    /// Coverage Passport (v2 design wave, W2) "What's covered" lines.
+    @State private var coverageLines: [CoverageLine]
+    @State private var newCoverageLineLabel = ""
+    @State private var newCoverageLineCovered = true
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -50,6 +54,7 @@ struct EditRecordView: View {
         _serialNumber = State(initialValue: record.serialNumber ?? "")
         _coverageSummary = State(initialValue: record.coverageSummary ?? "")
         _isRegistered = State(initialValue: record.isRegistered)
+        _coverageLines = State(initialValue: record.coverageLines)
     }
 
     var body: some View {
@@ -103,6 +108,28 @@ struct EditRecordView: View {
                 }
                 TextField("Covers (e.g. Parts & labor)", text: $coverageSummary)
                 Toggle("Registered with manufacturer", isOn: $isRegistered)
+            }
+
+            Section("Coverage passport — what's covered") {
+                ForEach($coverageLines, id: \.label) { $line in
+                    HStack {
+                        TextField("Coverage line", text: $line.label)
+                        Toggle("", isOn: $line.covered).labelsHidden()
+                    }
+                }
+                .onDelete { coverageLines.remove(atOffsets: $0) }
+
+                HStack {
+                    TextField("Add coverage line (e.g. Accidental damage)", text: $newCoverageLineLabel)
+                    Toggle("", isOn: $newCoverageLineCovered).labelsHidden()
+                    Button {
+                        addCoverageLine()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(newCoverageLineLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
 
             Section("Organization") {
@@ -162,6 +189,14 @@ struct EditRecordView: View {
         }
     }
 
+    private func addCoverageLine() {
+        let trimmed = newCoverageLineLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        coverageLines.append(CoverageLine(label: trimmed, covered: newCoverageLineCovered))
+        newCoverageLineLabel = ""
+        newCoverageLineCovered = true
+    }
+
     private func saveEdits() {
         record.productName = productName
         record.merchantName = merchantName.isEmpty ? nil : merchantName
@@ -175,6 +210,7 @@ struct EditRecordView: View {
         record.serialNumber = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         record.coverageSummary = coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : coverageSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         record.isRegistered = isRegistered
+        record.coverageLines = coverageLines
         record.updatedAt = .now
 
         // Update warranty & notifications
