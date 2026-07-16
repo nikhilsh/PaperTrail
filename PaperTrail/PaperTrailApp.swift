@@ -66,6 +66,18 @@ private func configureSentry() {
     addStartupBreadcrumb(level: .info, category: "app.lifecycle", message: "PaperTrail launch started")
 }
 
+/// True when the app process was launched to host a unit test bundle (the
+/// standard `XCTestConfigurationFilePath` environment-variable check). The
+/// unit test host has no `com.apple.developer.icloud-services` entitlement,
+/// and `CKContainer.accountStatus()`/`userRecordID()` don't just error out
+/// there — they wedge the whole process indefinitely (reproduced in CI:
+/// even a `withThrowingTaskGroup` timeout race around them never resolves).
+/// CloudKit preflight is diagnostics-only (Settings/Sentry tags), never
+/// required for correctness, so it's skipped entirely under test rather than
+/// chased further — the actual sync path (SwiftData's CloudKit-backed
+/// `ModelContainer`) is unaffected.
+private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
 private func accountStatusDescription(_ status: CKAccountStatus) -> String {
     switch status {
     case .available: return "Available"
@@ -235,7 +247,9 @@ struct PaperTrailApp: App {
                         _ = await NotificationManager.shared.requestPermission()
                     }
                     await NotificationManager.shared.migrateIdentifiersIfNeeded(modelContext: modelContainer.mainContext)
-                    await runCloudKitPreflight()
+                    if !isRunningUnitTests {
+                        await runCloudKitPreflight()
+                    }
                     await syncCloudImages()
                     if HouseholdManager.recordSharingEnabled {
                         addStartupBreadcrumb(level: .info, category: "cloud.sharing", message: "Starting household sync engines at launch")
