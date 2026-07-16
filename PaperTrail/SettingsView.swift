@@ -153,6 +153,12 @@ struct SettingsView: View {
     @ViewBuilder
     private var heroCard: some View {
         if PlusConfig.enabled, PlusEntitlements.shared.hasPlus, let membershipInfo {
+            // Explicitly typed local, not an inline ternary in the call
+            // below — folded into the `GoldMemberCard(...)` argument list
+            // directly, the type checker couldn't produce a diagnostic for
+            // the expression (CI: "failed to produce diagnostic for
+            // expression"). Lifetime has no App Store subscription to manage.
+            let onManage: (() -> Void)? = membershipInfo.term == .lifetime ? nil : manageSubscriptions
             GoldMemberCard(
                 name: "Your library",
                 memberNumber: membershipInfo.memberNumber,
@@ -160,8 +166,7 @@ struct SettingsView: View {
                 itemCount: itemCount,
                 totalValue: totalValue,
                 synced: !backupState.isPaused,
-                // Lifetime has no App Store subscription to manage.
-                onManage: membershipInfo.term == .lifetime ? nil : manageSubscriptions
+                onManage: onManage
             )
         } else {
             libraryCard
