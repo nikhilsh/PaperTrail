@@ -25,7 +25,7 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
 
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
 
-        func previewItem(in controller: QLPreviewController, at index: Int) -> QLPreviewItem {
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
             url as NSURL
         }
     }
