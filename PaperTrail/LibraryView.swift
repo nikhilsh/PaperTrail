@@ -22,6 +22,20 @@ struct LibraryView: View {
         allAttachments.filter { $0.recordID == record.id }
     }
 
+    /// Add-sheet §2 "Photograph the thing": a record whose only image is the
+    /// product photo (no receipt/warranty/invoice attached yet) reads as
+    /// unproven — flag-gated and purely computed, no schema field.
+    private func needsProof(_ record: PurchaseRecord) -> Bool {
+        guard FeatureFlags.isOn(.addSheetV2) else { return false }
+        let snapshot = NeedsProofSnapshot(
+            productImageAttachmentID: record.productImageAttachmentID,
+            otherAttachmentIDs: attachments(for: record)
+                .filter { $0.id != record.productImageAttachmentID }
+                .map(\.id)
+        )
+        return NeedsProofPredicate.needsProof(snapshot)
+    }
+
     /// Records mirrored *to* this device by another household member — cache
     /// DTOs with no matching local `PurchaseRecord`. Excludes the owner's own
     /// mirrors (those DO have a local record) so this only ever shows what a
@@ -183,7 +197,7 @@ struct LibraryView: View {
                 NavigationLink {
                     RecordDetailView(record: record)
                 } label: {
-                    RecordFilingCard(record: record)
+                    RecordFilingCard(record: record, needsProof: needsProof(record))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -274,6 +288,7 @@ struct LibraryView: View {
 
 struct RecordFilingCard: View {
     let record: PurchaseRecord
+    var needsProof: Bool = false
 
     private var warranty: PTWarranty { PTWarranty(record: record) }
     private var returnWindow: PTReturnWindow { PTReturnWindow(record: record) }
@@ -312,6 +327,9 @@ struct RecordFilingCard: View {
                     .foregroundStyle(PT.onPaper2)
                     .lineLimit(1)
                 Spacer(minLength: 8)
+                if needsProof {
+                    TonedStatusPill(text: "Add proof", tone: PT.amber, textColor: Color(hex: 0xF0D49A), background: Color(hex: 0xD7A64C, alpha: 0.15))
+                }
                 if record.warrantyExpiryDate != nil {
                     StatusPill(status: warranty.status, text: warranty.pillText)
                 }

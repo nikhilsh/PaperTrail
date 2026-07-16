@@ -59,6 +59,10 @@ final class AppRouter {
 
     var selectedTab: AppTab = .library
     var showCapture = false
+    /// The v3 "five ways to shelve" paper sheet (`addSheetV2`, §3 of
+    /// `docs/design-v3/V3_BRIEF.md`). Flag-gated at the FAB tap site; when the
+    /// flag is off the FAB goes straight to `showCapture` exactly as in v2.
+    var showAddSheet = false
 
     /// A record to push onto the Library tab's stack, consumed by
     /// `navigationDestination(item:)` in `AppShellView`.
@@ -83,7 +87,7 @@ final class AppRouter {
     /// about to be. `SoftAskCoordinator` checks this before ever presenting
     /// the notification soft-ask — nothing may interrupt an in-progress scan
     /// or import (V2_BRIEF §4 acceptance criteria).
-    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting }
+    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting || showAddSheet }
 
     func navigate(to route: Route) {
         switch route {
@@ -174,7 +178,15 @@ struct AppShellView: View {
 
             PTTabBar(
                 selection: $router.selectedTab,
-                onCapture: { router.showCapture = true }
+                onCapture: {
+                    // v3 §3 "five ways to shelve": flag on → the paper add
+                    // sheet; flag off → straight to capture, exactly as v2.
+                    if FeatureFlags.isOn(.addSheetV2) {
+                        router.showAddSheet = true
+                    } else {
+                        router.showCapture = true
+                    }
+                }
             )
         }
         .background(PT.inkCanvas.ignoresSafeArea())
@@ -182,6 +194,7 @@ struct AppShellView: View {
         .preferredColorScheme(.dark)
         .tint(PT.gold)
         .softAskPresentation()
+        .addSheetV2Presentation()
         .fullScreenCover(isPresented: $router.showCapture) {
             NavigationStack {
                 CaptureView()
@@ -191,7 +204,7 @@ struct AppShellView: View {
         }
         .fullScreenCover(item: $router.pendingImportPayload) { payload in
             NavigationStack {
-                DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr)
+                DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr, seedsProductImage: payload.seedsProductImage)
             }
             .tint(PT.gold)
             .preferredColorScheme(.dark)
