@@ -165,6 +165,19 @@ struct AdvancedDiagnosticsView: View {
                     SettingsRowDivider()
                     SettingsRow(title: "Build", value: buildString)
                 }
+
+                // Plus (debug) — only when the debug console is compiled in.
+                // MUST be false (and this section gone) before an App Store
+                // submission; see PlusConfig.debugConsoleEnabled.
+                if PlusConfig.debugConsoleEnabled {
+                    SettingsSectionLabel(text: "Plus (debug)")
+                    SettingsCard {
+                        NavigationLink { PlusDebugView() } label: {
+                            SettingsRow(icon: "sparkles", iconColor: PT.gold, title: "Plus Debug",
+                                        subtitle: "IAP entitlements, products & event log", showChevron: true)
+                        }.buttonStyle(.plain)
+                    }
+                }
             }
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.top, 6)

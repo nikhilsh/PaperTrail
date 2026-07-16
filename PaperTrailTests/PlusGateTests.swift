@@ -29,10 +29,42 @@ struct PlusGateTests {
 
     // MARK: - PlusConfig
 
-    @Test func masterSwitchIsOffByDefault() {
-        // ASC products don't exist yet — this MUST stay false until they do
-        // and StoreKit integration is verified on-device.
-        #expect(PlusConfig.enabled == false)
+    @Test func masterSwitchState() {
+        // Flipped on for the build-36 IAP debug pass (ASC sandbox products
+        // exist). Both this and `debugConsoleEnabled` MUST be re-evaluated
+        // before any App Store submission — see PlusConfig's doc comments.
+        #expect(PlusConfig.enabled == true)
+    }
+
+    @Test func debugConsoleMustNeverShipEnabled() {
+        // Not a guarantee this stays false forever — it's a tripwire: if
+        // this test starts failing, someone needs to consciously decide
+        // whether the debug console (entitlement override, raw transaction
+        // dump) is really meant to ship, which it never should be to the
+        // App Store.
+        #expect(PlusConfig.debugConsoleEnabled == true, "Flip to false before App Store submission.")
+    }
+
+    // MARK: - effectiveHasPlus precedence (Simulate Plus override)
+
+    @Test func realEntitlementAlwaysGrantsPlus() {
+        #expect(PlusEntitlements.effectiveHasPlus(real: true, simulateOverride: false, debugConsoleEnabled: true) == true)
+        #expect(PlusEntitlements.effectiveHasPlus(real: true, simulateOverride: false, debugConsoleEnabled: false) == true)
+    }
+
+    @Test func overrideGrantsPlusOnlyWhenDebugConsoleEnabled() {
+        #expect(PlusEntitlements.effectiveHasPlus(real: false, simulateOverride: true, debugConsoleEnabled: true) == true)
+    }
+
+    @Test func overrideIsIgnoredWhenDebugConsoleDisabled() {
+        // The compile-time guard that makes the override impossible to leak
+        // into a store build (where debugConsoleEnabled would be false).
+        #expect(PlusEntitlements.effectiveHasPlus(real: false, simulateOverride: true, debugConsoleEnabled: false) == false)
+    }
+
+    @Test func noRealEntitlementNoOverrideMeansNoPlus() {
+        #expect(PlusEntitlements.effectiveHasPlus(real: false, simulateOverride: false, debugConsoleEnabled: true) == false)
+        #expect(PlusEntitlements.effectiveHasPlus(real: false, simulateOverride: false, debugConsoleEnabled: false) == false)
     }
 
     @Test func freeForeverListIsNonEmpty() {
