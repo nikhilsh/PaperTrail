@@ -24,6 +24,10 @@ struct HouseholdView: View {
     @State private var preparing = false
     @State private var sharePrep: SharePresentation?
     @State private var errorMessage: String?
+    /// Set when `makeShare()` throws `HouseholdError.plusRequired` — shows
+    /// the paywall instead of the generic error alert. Flag-gated at the
+    /// source (`PlusConfig.enabled`), so this never fires while off.
+    @State private var showPaywall = false
 
     private var displayMembers: [HouseholdMember] {
         if !manager.members.isEmpty {
@@ -113,6 +117,11 @@ struct HouseholdView: View {
         .sheet(item: $sharePrep, onDismiss: { Task { await manager.refresh() } }) { prep in
             CloudSharingController(share: prep.share, container: prep.container)
                 .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showPaywall) {
+            NavigationStack { PaywallView() }
+                .tint(PT.gold)
+                .preferredColorScheme(.dark)
         }
         .alert("Couldn't start sharing", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
@@ -217,6 +226,12 @@ struct HouseholdView: View {
         do {
             let (share, container) = try await manager.makeShare()
             sharePrep = SharePresentation(share: share, container: container)
+        } catch let error as HouseholdError {
+            if case .plusRequired = error {
+                showPaywall = true
+            } else {
+                errorMessage = error.errorDescription ?? error.localizedDescription
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

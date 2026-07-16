@@ -1,0 +1,136 @@
+{
+  "identifier" : "37B67A3A-6E3E-4E7E-9B1B-8B6D6E9E7A11",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "49.99",
+      "familyShareable" : false,
+      "internalID" : "48E41B7E-48F1-4BC8-8BBC-BEB818AC3034",
+      "localizations" : [
+        {
+          "description" : "Own PaperTrail Plus forever — pay once, no renewals.",
+          "displayName" : "PaperTrail Plus Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "plus.lifetime",
+      "referenceName" : "Plus Lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "4E26D37D-1DC2-4C48-B0EE-95DC4684803B",
+      "localizations" : [],
+      "name" : "PaperTrail Plus",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "2.99",
+          "familyShareable" : true,
+          "groupNumber" : 1,
+          "internalID" : "A5FBF736-572C-40D9-876C-256623895CB7",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited household sharing, whole-home insurance report, priority digest features.",
+              "displayName" : "PaperTrail Plus Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "plus.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Plus Monthly",
+          "subscriptionGroupID" : "4E26D37D-1DC2-4C48-B0EE-95DC4684803B",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "19.99",
+          "familyShareable" : true,
+          "groupNumber" : 1,
+          "internalID" : "4849CEEF-96F2-4299-87A7-06B9EBB245D0",
+          "introductoryOffer" : {
+            "internalID" : "F5F1716F-CC1C-45C8-B4AD-3D3993FAF406",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P2W"
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited household sharing, whole-home insurance report, priority digest features. 14-day free trial.",
+              "displayName" : "PaperTrail Plus Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "plus.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Plus Yearly",
+          "subscriptionGroupID" : "4E26D37D-1DC2-4C48-B0EE-95DC4684803B",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

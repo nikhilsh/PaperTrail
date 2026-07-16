@@ -21,6 +21,9 @@ struct SettingsView: View {
     @State private var showLoggedValueInfo = false
     @State private var iCloudStatusText = "Checking iCloud status…"
     @State private var iCloudStatusTone: Color = PT.txt3
+    /// PaperTrail Plus section — entirely hidden while `PlusConfig.enabled`
+    /// is false, so Settings renders byte-identically to today.
+    @State private var showPaywall = false
 
     // MARK: Derived
 
@@ -96,6 +99,20 @@ struct SettingsView: View {
 
                 libraryCard
                     .padding(.bottom, 26)
+
+                // PaperTrail Plus — inert and invisible until PlusConfig.enabled flips.
+                if PlusConfig.enabled {
+                    SettingsSectionLabel(text: "PaperTrail Plus")
+                    SettingsCard {
+                        SettingsRow(icon: "sparkles", iconColor: PT.gold, title: "PaperTrail Plus",
+                                    value: PlusEntitlements.shared.hasPlus ? "Plus" : "Free", showChevron: true,
+                                    action: { showPaywall = true })
+                        SettingsRowDivider()
+                        SettingsRow(icon: "arrow.clockwise", iconColor: PT.gold, title: "Restore purchases",
+                                    action: { Task { await PlusEntitlements.shared.restore() } })
+                    }
+                    .padding(.bottom, 22)
+                }
 
                 // Reminders
                 SettingsSectionLabel(text: "Reminders")
@@ -248,6 +265,11 @@ struct SettingsView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await refreshICloudStatus() }
         .task { await HouseholdManager.shared.refresh() }
+        .sheet(isPresented: $showPaywall) {
+            NavigationStack { PaywallView() }
+                .tint(PT.gold)
+                .preferredColorScheme(.dark)
+        }
         .alert("Logged value", isPresented: $showLoggedValueInfo) {
             Button("OK", role: .cancel) { }
         } message: {

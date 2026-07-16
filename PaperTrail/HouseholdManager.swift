@@ -32,6 +32,12 @@ enum HouseholdError: LocalizedError {
     case missingShareSaveResult
     /// Fix 5: the saved record CloudKit handed back wasn't a `CKShare`.
     case unexpectedShareRecordType
+    /// PaperTrail Plus gate (docs/MONETIZATION.md): the first household
+    /// member is free, but growing beyond that requires Plus. Thrown by
+    /// `makeShare()` before it ever touches CloudKit — `HouseholdView.invite`
+    /// catches this specific case and presents `PaywallView` instead of the
+    /// generic error alert. Only reachable when `PlusConfig.enabled` is true.
+    case plusRequired
 
     var errorDescription: String? {
         switch self {
@@ -41,6 +47,8 @@ enum HouseholdError: LocalizedError {
             "CloudKit didn't confirm the household share was saved."
         case .unexpectedShareRecordType:
             "CloudKit returned an unexpected record for the household share."
+        case .plusRequired:
+            "Sharing with more than one person is part of PaperTrail Plus."
         }
     }
 }
@@ -120,6 +128,21 @@ final class HouseholdManager {
     /// Ensure a household root record + CKShare exist, returning the share and
     /// container for `UICloudSharingController`.
     func makeShare() async throws -> (CKShare, CKContainer) {
+        // PaperTrail Plus gate: growing a household past its first member
+        // (any share that already has ≥1 non-owner participant) requires
+        // Plus. Checked before either share path below, so both the
+        // zone-share (flag-on) and decoy-share (flag-off record-sharing)
+        // paths are covered by one gate. No-op entirely while
+        // `PlusConfig.enabled` is false.
+        if PlusConfig.enabled {
+            let nonOwnerCount = members.filter { $0.role != .owner }.count
+            if nonOwnerCount >= 1 && !PlusEntitlements.shared.canUseHousehold {
+                let error = HouseholdError.plusRequired
+                lastError = error.errorDescription
+                throw error
+            }
+        }
+
         if Self.recordSharingEnabled {
             return try await makeZoneShare()
         }
