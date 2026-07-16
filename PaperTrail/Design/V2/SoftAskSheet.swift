@@ -42,7 +42,8 @@ struct SoftAskSheet: View {
             sampleBanner
                 .padding(.top, 16)
                 .opacity(bannerIn ? 1 : 0)
-                .offset(y: bannerIn ? 0 : -16)
+                // Reduce Motion: pure crossfade, no translation.
+                .offset(y: bannerIn || reduceMotion ? 0 : -16)
                 .onAppear(perform: dropBannerIn)
 
             Button(action: onYes) {

@@ -27,6 +27,12 @@ struct EditRecordView: View {
     @State private var coverageLines: [CoverageLine]
     @State private var newCoverageLineLabel = ""
     @State private var newCoverageLineCovered = true
+    /// v3 `multiCoverage` (docs/design-v3/V3_BRIEF.md §2) additions to the
+    /// "add coverage line" mini-form — only surfaced in the UI when the flag
+    /// is on (see `coverageLineDetailEditor`/the add-row below).
+    @State private var newCoverageLineKind: CoverageLineKind?
+    @State private var newCoverageLineStartDate: Date?
+    @State private var newCoverageLineEndDate: Date?
 
     private var attachments: [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -111,24 +117,42 @@ struct EditRecordView: View {
             }
 
             Section("Coverage passport — what's covered") {
-                ForEach($coverageLines, id: \.label) { $line in
-                    HStack {
-                        TextField("Coverage line", text: $line.label)
-                        Toggle("", isOn: $line.covered).labelsHidden()
+                ForEach($coverageLines) { $line in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            TextField("Coverage line", text: $line.label)
+                            Toggle("", isOn: $line.covered).labelsHidden()
+                        }
+                        if FeatureFlags.isOn(.multiCoverage) {
+                            coverageLineDetailEditor(line: $line)
+                        }
                     }
                 }
                 .onDelete { coverageLines.remove(atOffsets: $0) }
 
-                HStack {
-                    TextField("Add coverage line (e.g. Accidental damage)", text: $newCoverageLineLabel)
-                    Toggle("", isOn: $newCoverageLineCovered).labelsHidden()
-                    Button {
-                        addCoverageLine()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        TextField("Add coverage line (e.g. Accidental damage)", text: $newCoverageLineLabel)
+                        Toggle("", isOn: $newCoverageLineCovered).labelsHidden()
+                        Button {
+                            addCoverageLine()
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(newCoverageLineLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(newCoverageLineLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if FeatureFlags.isOn(.multiCoverage) {
+                        Picker("Kind", selection: $newCoverageLineKind) {
+                            Text("None").tag(CoverageLineKind?.none)
+                            ForEach(CoverageLineKind.allCases) { kind in
+                                Text(kind.label).tag(CoverageLineKind?.some(kind))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        optionalDateRow(title: "Starts", date: $newCoverageLineStartDate)
+                        optionalDateRow(title: "Ends", date: $newCoverageLineEndDate)
+                    }
                 }
             }
 
@@ -189,12 +213,68 @@ struct EditRecordView: View {
         }
     }
 
+    /// v3 `multiCoverage` per-line kind picker + optional start/end dates —
+    /// extends Wave C's minimal editor per docs/design-v3/V3_BRIEF.md §2.
+    /// Only reachable when the flag is on (both call sites gate on it).
+    private func coverageLineDetailEditor(line: Binding<CoverageLine>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Kind", selection: Binding(
+                get: { line.wrappedValue.kindEnum },
+                set: { line.wrappedValue.kindEnum = $0 }
+            )) {
+                Text("None").tag(CoverageLineKind?.none)
+                ForEach(CoverageLineKind.allCases) { kind in
+                    Text(kind.label).tag(CoverageLineKind?.some(kind))
+                }
+            }
+            .pickerStyle(.menu)
+
+            optionalDateRow(title: "Starts", date: Binding(
+                get: { line.wrappedValue.startDate },
+                set: { line.wrappedValue.startDate = $0 }
+            ))
+            optionalDateRow(title: "Ends", date: Binding(
+                get: { line.wrappedValue.endDate },
+                set: { line.wrappedValue.endDate = $0 }
+            ))
+        }
+    }
+
+    /// A toggle that, when on, reveals a date picker — the same
+    /// present-or-absent pattern `includeWarranty`/`warrantyExpiryDate`
+    /// already use above, generalized for `Binding<Date?>`.
+    private func optionalDateRow(title: String, date: Binding<Date?>) -> some View {
+        HStack {
+            Toggle(title, isOn: Binding(
+                get: { date.wrappedValue != nil },
+                set: { isOn in date.wrappedValue = isOn ? (date.wrappedValue ?? .now) : nil }
+            ))
+            if date.wrappedValue != nil {
+                DatePicker(
+                    "",
+                    selection: Binding(get: { date.wrappedValue ?? .now }, set: { date.wrappedValue = $0 }),
+                    displayedComponents: .date
+                )
+                .labelsHidden()
+            }
+        }
+    }
+
     private func addCoverageLine() {
         let trimmed = newCoverageLineLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        coverageLines.append(CoverageLine(label: trimmed, covered: newCoverageLineCovered))
+        coverageLines.append(CoverageLine(
+            label: trimmed,
+            covered: newCoverageLineCovered,
+            startDate: newCoverageLineStartDate,
+            endDate: newCoverageLineEndDate,
+            kind: newCoverageLineKind?.rawValue
+        ))
         newCoverageLineLabel = ""
         newCoverageLineCovered = true
+        newCoverageLineKind = nil
+        newCoverageLineStartDate = nil
+        newCoverageLineEndDate = nil
     }
 
     private func saveEdits() {
@@ -242,6 +322,18 @@ struct EditRecordView: View {
         } else {
             record.returnWindowNotificationScheduled = false
             NotificationManager.shared.removeReturnWindowReminder(for: record)
+        }
+
+        // Coverage-line reminders (v3 multiCoverage, docs/design-v3/V3_BRIEF.md
+        // §3) — reschedule on every save, mirroring the warranty/return-window
+        // blocks above. `CoverageReminders.reschedule` itself no-ops when the
+        // flag is off, so this is safe to call unconditionally, but the guard
+        // keeps a flag-off save from even spinning up the Task.
+        if FeatureFlags.isOn(.multiCoverage) {
+            let leadDays = reminderPrefs.warrantyLeadTime.days
+            Task {
+                await CoverageReminders.reschedule(for: record, leadDays: leadDays)
+            }
         }
 
         dismiss()

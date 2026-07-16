@@ -49,7 +49,7 @@ struct V2ComponentsTests {
 
     @Test func membershipTermMemberLineSuffixes() {
         let annual = PTMembershipTerm.annual(renewsOn: "12 Aug 2027").memberLineSuffix
-        let monthly = PTMembershipTerm.monthly(renewsOn: "16 Aug 2026").memberLineSuffix
+        let monthly = PTMembershipTerm.monthly(renewsOn: "16 Aug 2026", dayText: "the 16th").memberLineSuffix
         let trial = PTMembershipTerm.trial(billsOn: "30 Jul 2026").memberLineSuffix
         #expect(annual == "ANNUAL")
         #expect(monthly == "MONTHLY")
@@ -58,7 +58,7 @@ struct V2ComponentsTests {
 
     @Test func membershipTermStatusTextRenewsAndUppercases() {
         let annual = PTMembershipTerm.annual(renewsOn: "12 Aug 2027").statusText
-        let monthly = PTMembershipTerm.monthly(renewsOn: "16 Aug 2026").statusText
+        let monthly = PTMembershipTerm.monthly(renewsOn: "16 Aug 2026", dayText: "the 16th").statusText
         let trial = PTMembershipTerm.trial(billsOn: "30 Jul 2026").statusText
         #expect(annual == "RENEWS 12 AUG 2027")
         #expect(monthly == "RENEWS 16 AUG 2026")

@@ -22,12 +22,22 @@ struct CoverageRing: View {
     /// unitless counts the caller is free to pass in whatever unit this
     /// suffix names.
     var unitSuffix: String = "mo"
+    /// Center caption under the count, e.g. "REMAINING" (default, v2) or
+    /// "longest line" (v3 `multiCoverage` — V3_BRIEF §2, mock V3-2) when the
+    /// ring is showing the longest of several coverage lines rather than a
+    /// single warranty span. Purely a label swap; the count/arc math is
+    /// unaffected either way.
+    var caption: String = "REMAINING"
     var diameter: CGFloat = 150
     var lineWidth: CGFloat = 9
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animatedFraction: CGFloat = 0
     @State private var displayedMonths: Int = 0
+    /// The in-flight count-up, so a rapid `monthsRemaining` change (or the
+    /// view disappearing) cancels the previous run instead of leaving it to
+    /// race the new one and stomp `displayedMonths` out of order.
+    @State private var countUpTask: Task<Void, Never>?
 
     private var clampedRemaining: Int { max(0, monthsRemaining) }
 
@@ -48,7 +58,7 @@ struct CoverageRing: View {
                 Text("\(displayedMonths) \(unitSuffix)")
                     .font(PTFont.serif(38, weight: 600))
                     .foregroundStyle(PT.onPaper)
-                Text("REMAINING")
+                Text(caption)
                     .ptMonoLabel(9, tracking: 2)
                     .foregroundStyle(PT.onPaper3)
             }
@@ -56,9 +66,11 @@ struct CoverageRing: View {
         .frame(width: diameter, height: diameter)
         .onAppear(perform: animate)
         .onChange(of: monthsRemaining) { _, _ in animate() }
+        .onDisappear { countUpTask?.cancel() }
     }
 
     private func animate() {
+        countUpTask?.cancel()
         if reduceMotion {
             animatedFraction = targetFraction
             displayedMonths = clampedRemaining
@@ -74,14 +86,23 @@ struct CoverageRing: View {
 
     /// ~70ms/step, but scaled down for large `monthsRemaining` so the count
     /// still finishes with the 900ms (250ms-delayed) arc rather than running
-    /// long past it.
+    /// long past it. A single cancellable `Task` sleeping in a loop, rather
+    /// than a batch of `DispatchQueue.asyncAfter` callbacks — those can't be
+    /// cancelled, so a value change mid-count used to leave the old run's
+    /// callbacks free to fire later and stomp the new one's `displayedMonths`.
     private func countUp() {
         guard clampedRemaining > 0 else { return }
         let arcDuration = 0.65 // 0.9s sweep minus its own 0.25s delay
-        let stepDuration = min(0.07, arcDuration / Double(clampedRemaining))
-        for step in 0...clampedRemaining {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25 + Double(step) * stepDuration) {
+        let remaining = clampedRemaining
+        let stepDuration = min(0.07, arcDuration / Double(remaining))
+        countUpTask = Task {
+            try? await Task.sleep(for: .seconds(0.25))
+            guard !Task.isCancelled else { return }
+            for step in 0...remaining {
+                guard !Task.isCancelled else { return }
                 displayedMonths = step
+                guard step < remaining else { break }
+                try? await Task.sleep(for: .seconds(stepDuration))
             }
         }
     }

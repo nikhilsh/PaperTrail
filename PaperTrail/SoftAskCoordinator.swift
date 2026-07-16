@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import UserNotifications
 
 // MARK: - SoftAskEligibility (docs/design-v2/V2_BRIEF.md §4 N1)
@@ -9,16 +10,17 @@ import UserNotifications
 // target defaults new declarations to `@MainActor`.
 
 enum SoftAskEligibility {
-    /// The initial ask: only the user's very first successful record save
-    /// ever triggers it ("total records saved == 1 (first ever)"), only
-    /// while permission is still undetermined, and only if it's never been
-    /// shown before.
+    /// The initial ask: any save once the user has at least one record saved
+    /// ever (`>= 1`, not `== 1` — a first-ever save can save more than one
+    /// record at once, e.g. a multi-item receipt scan, which would jump
+    /// straight past `== 1` and never trigger this), only while permission is
+    /// still undetermined, and only if it's never been shown before.
     nonisolated static func shouldShowInitial(
         recordsSavedLifetime: Int,
         authorizationStatus: UNAuthorizationStatus,
         hasShownInitial: Bool
     ) -> Bool {
-        recordsSavedLifetime == 1
+        recordsSavedLifetime >= 1
             && authorizationStatus == .notDetermined
             && !hasShownInitial
     }
@@ -73,6 +75,10 @@ final class SoftAskCoordinator {
         let id = UUID()
         let itemName: String
         let stakeText: String
+        /// Whether this is the once-ever re-ask rather than the initial ask —
+        /// carried through so `markShown` knows which UserDefaults flag(s) to
+        /// burn once the sheet actually renders.
+        let isReAsk: Bool
     }
 
     private enum Keys {
@@ -84,6 +90,15 @@ final class SoftAskCoordinator {
     private let defaults: UserDefaults
     private let authorizationStatusProvider: () async -> UNAuthorizationStatus
     private let hasActiveCoverProvider: @MainActor () -> Bool
+
+    /// Single-flight guard for `checkReAsk`: it awaits `authorizationStatusProvider()`
+    /// before presenting, so two concurrent callers (e.g. the foreground
+    /// debounce and a cover-close transition landing at nearly the same
+    /// moment) could otherwise both pass every guard and both burn the
+    /// once-ever re-ask budget. Plain `Bool` is enough — this class is
+    /// `@MainActor`, so setting/checking it around the only `await` in
+    /// `checkReAsk` fully serializes concurrent callers.
+    private var isCheckingReAsk = false
 
     init(
         defaults: UserDefaults = .standard,
@@ -169,9 +184,18 @@ final class SoftAskCoordinator {
     @discardableResult
     func checkReAsk(records: [PurchaseRecord]) async -> Bool {
         guard pendingAsk == nil, !hasActiveCoverProvider() else { return false }
+        guard !isCheckingReAsk else { return false }
         guard let nearest = Self.nearestExpiring(records: records) else { return false }
 
+        isCheckingReAsk = true
+        defer { isCheckingReAsk = false }
+
         let status = await authorizationStatusProvider()
+
+        // Re-check after the only await: another caller could have presented
+        // something, or a cover could have appeared, while this was suspended.
+        guard pendingAsk == nil, !hasActiveCoverProvider() else { return false }
+
         guard SoftAskEligibility.shouldReAsk(
             hasShownInitial: hasShownInitial,
             authorizationStatus: status,
@@ -186,14 +210,21 @@ final class SoftAskCoordinator {
     // MARK: Responses
 
     /// "Yes, notify me" — request the real system prompt, then (either
-    /// outcome) toast and dismiss together, per ANIMATION_SPEC §6.
-    func respondYes() {
+    /// outcome) toast and dismiss together, per ANIMATION_SPEC §6. On a
+    /// grant, re-arms reminders for every already-saved record: anything
+    /// saved before this moment never got a real reminder scheduled (the
+    /// per-record schedule path guards against stamping "scheduled" while
+    /// permission wasn't there), so nothing else would ever re-arm them.
+    func respondYes(modelContext: ModelContext) {
         Task {
             let granted = await NotificationManager.shared.requestPermission()
             pendingAsk = nil
             pendingToast = granted
-                ? "You're set — we'll only knock once, right before it matters."
+                ? "We'll knock before things expire — never for marketing."
                 : "No worries — turn this on anytime from Settings."
+            if granted {
+                await NotificationManager.shared.rescheduleAll(modelContext: modelContext)
+            }
         }
     }
 
@@ -210,14 +241,23 @@ final class SoftAskCoordinator {
         pendingToast = nil
     }
 
+    /// Burns the once-ever budget (`hasShownInitial` / `reAskCount`) for the
+    /// ask that's now actually on screen. Called from the presented
+    /// `SoftAskSheet`'s own `onAppear` — not from `present()` — so a sheet
+    /// that's scheduled but never actually renders (replaced mid-transition,
+    /// say) doesn't silently spend the one-time budget on nothing.
+    func markShown(_ ask: PendingAsk) {
+        defaults.set(true, forKey: Keys.hasShownInitial)
+        if ask.isReAsk {
+            defaults.set(reAskCount + 1, forKey: Keys.reAskCount)
+        }
+        AppLogger.info("Soft-ask shown (reAsk: \(ask.isReAsk))", category: "notifications")
+    }
+
     // MARK: Helpers
 
     private func present(itemName: String, stakeText: String, isReAsk: Bool) {
-        defaults.set(true, forKey: Keys.hasShownInitial)
-        if isReAsk {
-            defaults.set(reAskCount + 1, forKey: Keys.reAskCount)
-        }
-        pendingAsk = PendingAsk(itemName: itemName, stakeText: stakeText)
+        pendingAsk = PendingAsk(itemName: itemName, stakeText: stakeText, isReAsk: isReAsk)
         AppLogger.info("Soft-ask presented (reAsk: \(isReAsk))", category: "notifications")
     }
 
@@ -258,6 +298,7 @@ final class SoftAskCoordinator {
 /// 420ms `sheetEase`; Reduce Motion collapses both to a 200ms crossfade.
 private struct SoftAskPresentationModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.modelContext) private var modelContext
     private var coordinator = SoftAskCoordinator.shared
     @State private var toast: PTToastItem?
 
@@ -273,14 +314,19 @@ private struct SoftAskPresentationModifier: ViewModifier {
                         SoftAskSheet(
                             itemName: ask.itemName,
                             stakeText: ask.stakeText,
-                            onYes: { coordinator.respondYes() },
+                            onYes: { coordinator.respondYes(modelContext: modelContext) },
                             onNotNow: { coordinator.respondNotNow() }
                         )
                         .padding(14)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                        // Reduce Motion: crossfade only, no slide — ANIMATION_SPEC's
+                        // "Don'ts" (no translation under Reduce Motion).
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                        .onAppear { coordinator.markShown(ask) }
                     }
                     .accessibilityAddTraits(.isModal)
                     .zIndex(100)
