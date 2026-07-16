@@ -4,79 +4,16 @@ import PhotosUI
 import AVFoundation
 import Speech
 
-// MARK: - Presentation (docs/design-v3/V3_BRIEF.md §3, "addSheetV2")
-//
-// Attach once at the app root (`AppShellView`, alongside `.softAskPresentation()`)
-// so the paper sheet rises over the dimmed app exactly like the soft-ask sheet
-// does — same dim/rise choreography (`PTMotion.sheetEase`), same overlay
-// pattern (`SoftAskCoordinator`'s `SoftAskPresentationModifier`). Row taps that
-// produce a draft hand a `DraftPayload` back through the router's existing
-// `pendingImportPayload` — the same full-screen review cover Mail/Files import
-// and Photos import already use — so `DraftRecordView` only needed one small,
-// additive seam (`seedsProductImage`) rather than a second review screen.
-
-private struct AddSheetPresentationModifier: ViewModifier {
-    @Environment(AppRouter.self) private var router
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        content
-            .overlay {
-                if router.showAddSheet {
-                    ZStack {
-                        Color.black.opacity(0.66)
-                            .ignoresSafeArea()
-                            .transition(.opacity)
-                            .onTapGesture { router.showAddSheet = false }
-
-                        AddSheetView(
-                            onScanReceipt: { presentCapture() },
-                            onDraftReady: { payload in presentDraft(payload) },
-                            onCancel: { router.showAddSheet = false }
-                        )
-                        .padding(14)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                    }
-                    .accessibilityAddTraits(.isModal)
-                    .zIndex(90)
-                }
-            }
-            .animation(PTMotion.reduced(PTMotion.sheetEase(0.42), reduceMotion: reduceMotion), value: router.showAddSheet)
-    }
-
-    /// Dismisses the add sheet, then — after its own dismiss transition has
-    /// had time to settle — presents the real full-screen capture cover.
-    /// Mirrors `AppShellView.importIncomingFile`'s "let the first cover's
-    /// dismissal animation settle" delay so the two presentations don't fight.
-    private func presentCapture() {
-        router.showAddSheet = false
-        Task {
-            try? await Task.sleep(for: .milliseconds(420))
-            router.showCapture = true
-        }
-    }
-
-    private func presentDraft(_ payload: DraftPayload) {
-        router.showAddSheet = false
-        Task {
-            try? await Task.sleep(for: .milliseconds(420))
-            router.pendingImportPayload = payload
-        }
-    }
-}
-
-extension View {
-    /// Presents the v3 add sheet whenever `AppRouter.shared.showAddSheet` is
-    /// true. Attach once, at the app root (`AppShellView`).
-    func addSheetV2Presentation() -> some View {
-        modifier(AddSheetPresentationModifier())
-    }
-}
-
 // MARK: - The sheet (C3 mock: "Five ways to shelve")
+//
+// Presented from `AppShellView` (which already holds `AppRouter` as a plain
+// `@State` property, not via `@Environment`) as an `.overlay` alongside
+// `.softAskPresentation()` — same dim/rise choreography (`PTMotion.sheetEase`).
+// Row taps that produce a draft hand a `DraftPayload` back through the
+// router's existing `pendingImportPayload` — the same full-screen review
+// cover Mail/Files import and Photos import already use — so `DraftRecordView`
+// only needed one small, additive seam (`seedsProductImage`) rather than a
+// second review screen.
 
 /// The paper sheet the FAB opens when `addSheetV2` is on. Five rows over a
 /// dimmed app: scan (hero, hands off to the existing capture flow), photo,
