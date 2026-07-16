@@ -391,7 +391,10 @@ struct PlusDebugView: View {
 
     private func loadEntitlementDump() async {
         var rows: [EntitlementRow] = []
-        for await result in Transaction.currentEntitlements {
+        // Qualified: SwiftUI also exports a `Transaction` type (animation
+        // transactions), so plain `Transaction` is ambiguous once this file
+        // imports both SwiftUI and StoreKit.
+        for await result in StoreKit.Transaction.currentEntitlements {
             switch result {
             case .verified(let transaction):
                 rows.append(EntitlementRow(transaction: transaction, verified: true, verificationError: nil))
@@ -430,7 +433,7 @@ private struct EntitlementRow: Identifiable {
     let verified: Bool
     let verificationError: String?
 
-    init(transaction: Transaction, verified: Bool, verificationError: String?) {
+    init(transaction: StoreKit.Transaction, verified: Bool, verificationError: String?) {
         self.id = String(transaction.id)
         self.productID = transaction.productID
         self.purchaseDate = transaction.purchaseDate
