@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import UIKit
 import StoreKit
+import UserNotifications
 
 /// Settings, rebuilt as the v2 "front desk" (docs/design-v2/V2_BRIEF.md §1,
 /// S1): a Library Card hero (re-struck in gold once Plus is active — P3) and
@@ -45,6 +46,10 @@ struct SettingsView: View {
     private struct PlusMembershipInfo {
         let memberNumber: String
         let term: PTMembershipTerm
+        /// Denied/undetermined system notification permission — passed
+        /// through to `GoldMemberCard` so its footer can honestly disclose
+        /// when it's promising a "knock" that won't actually fire (§3c).
+        let notificationsAuthorized: Bool
     }
 
     // MARK: Derived
@@ -85,6 +90,7 @@ struct SettingsView: View {
         case .synced: "SYNCED"
         case .syncing: "SYNCING"
         case .paused: "SYNC PAUSED"
+        case .neverSynced: "NOT SYNCED"
         }
     }
 
@@ -140,6 +146,14 @@ struct SettingsView: View {
         .task { await HouseholdManager.shared.refresh() }
         .task { await loadYearlyPrice() }
         .task { await loadMembershipInfo() }
+        .onChange(of: PlusEntitlements.shared.hasPlus) {
+            // Catches every path that can flip `hasPlus` besides this
+            // screen's own paywall sheet — PlusDebugView's "Simulate Plus"/
+            // direct buy, a background `Transaction.updates` event, etc. —
+            // so the gold card shows up wherever the purchase actually
+            // happened (§5), not only when it happened through this screen.
+            Task { await loadMembershipInfo() }
+        }
         .sheet(isPresented: $showPaywall, onDismiss: handlePaywallDismiss) {
             NavigationStack { PaywallView() }
                 .tint(PT.gold)
@@ -159,7 +173,8 @@ struct SettingsView: View {
                 term: membershipInfo.term,
                 itemCount: itemCount,
                 totalValue: totalValue,
-                synced: !backupState.isPaused,
+                syncState: syncChipState(for: backupState),
+                notificationsAuthorized: membershipInfo.notificationsAuthorized,
                 onManage: manageAction(for: membershipInfo.term)
             )
         } else {
@@ -289,6 +304,12 @@ struct SettingsView: View {
     /// here (ANIMATION_SPEC §9: 600ms, on next Settings visit) — a fresh
     /// grant doesn't need this wrapper because `GoldMemberCard` animates its
     /// own gold-strike entrance on appear.
+    ///
+    /// More than one entitlement can be simultaneously "current" (a legacy
+    /// lifetime purchase alongside a live subscription) — `currentEntitlements`
+    /// doesn't order them, so `PlusEntitlements.preferredMembership` picks
+    /// the one that should actually drive the card (§5: active subscription
+    /// over legacy lifetime, latest expiration among subscriptions).
     private func loadMembershipInfo() async {
         guard PlusConfig.enabled, PlusEntitlements.shared.hasPlus else {
             if membershipInfo != nil {
@@ -301,23 +322,59 @@ struct SettingsView: View {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "d MMM yyyy"
 
+        // Qualified `StoreKit.Transaction`: SwiftUI also exports a
+        // `Transaction` type (animation transactions), which is ambiguous
+        // for an explicit type annotation once a file imports both
+        // (mirrors `PlusDebugView`'s same qualification).
+        var candidates: [StoreKit.Transaction] = []
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
                   PlusConfig.ProductID.all.contains(transaction.productID) else { continue }
+            candidates.append(transaction)
+        }
 
-            let number = memberNumber(fromTransactionID: String(transaction.originalID))
-            let renewalText = transaction.expirationDate.map { dateFormatter.string(from: $0) } ?? "—"
-            let term = PTMembershipTerm.from(
-                productID: transaction.productID,
-                isIntroductoryOffer: transaction.offerType == .introductory,
-                renewalDateText: renewalText,
-                lifetimeProductID: PlusConfig.ProductID.lifetime,
-                monthlyProductID: PlusConfig.ProductID.monthly
-            )
-            membershipInfo = PlusMembershipInfo(memberNumber: number, term: term)
+        guard let transaction = PlusEntitlements.preferredMembership(among: candidates, expirationDate: \.expirationDate) else {
+            membershipInfo = nil
             return
         }
-        membershipInfo = nil
+
+        let number = memberNumber(fromTransactionID: String(transaction.originalID))
+        let renewalText = transaction.expirationDate.map { dateFormatter.string(from: $0) } ?? "—"
+        let monthlyDayText = transaction.expirationDate.map { PTMembershipTerm.ordinalDayText(for: $0) } ?? ""
+        let term = PTMembershipTerm.from(
+            productID: transaction.productID,
+            isIntroductoryOffer: transaction.offerType == .introductory,
+            renewalDateText: renewalText,
+            lifetimeProductID: PlusConfig.ProductID.lifetime,
+            monthlyProductID: PlusConfig.ProductID.monthly,
+            monthlyDayText: monthlyDayText
+        )
+        let notificationsAuthorized = await currentNotificationsAuthorized()
+        membershipInfo = PlusMembershipInfo(memberNumber: number, term: term, notificationsAuthorized: notificationsAuthorized)
+    }
+
+    /// Maps the honest library-card backup state to the gold card's
+    /// three-value sync chip (§6) — never reads "SYNCED" while a transfer
+    /// is actually still in flight, and never fabricates a synced state at
+    /// all before the first backup completes.
+    private func syncChipState(for backupState: BackupState) -> PTSyncChipState {
+        switch backupState {
+        case .synced: .synced
+        case .syncing: .syncing
+        case .paused, .neverSynced: .paused
+        }
+    }
+
+    /// Whether the system would actually deliver a local notification right
+    /// now — `.authorized`/`.provisional`/`.ephemeral` only. Used to decide
+    /// whether the gold card's renewal-knock promise needs the honest
+    /// "turn on notifications" disclosure (§3c).
+    private func currentNotificationsAuthorized() async -> Bool {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .authorized, .provisional, .ephemeral: true
+        case .denied, .notDetermined: false
+        @unknown default: false
+        }
     }
 
     /// Snapshots `hasPlus` before presenting the paywall so
