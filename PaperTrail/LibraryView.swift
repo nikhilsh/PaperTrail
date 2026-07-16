@@ -48,25 +48,43 @@ struct LibraryView: View {
         HouseholdManager.recordSharingEnabled && !sharedWithMe.isEmpty
     }
 
+    // MARK: v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged) — passed-on
+    // exclusion. `activeRecords` feeds every value/count aggregation and the
+    // normal Newest/A–Z/By room lists; `passedOnRecords` feeds the "Passed
+    // on" shelf at the bottom. When the flag is off both collapse back to
+    // v2 behavior exactly (`activeRecords == records`, `passedOnRecords` is
+    // always empty) via `PassItOnAggregation.isExcludedFromAggregates`.
+
+    private var activeRecords: [PurchaseRecord] {
+        records.filter { !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn)) }
+    }
+
+    private var passedOnRecords: [PurchaseRecord] {
+        guard FeatureFlags.isOn(.passItOn) else { return [] }
+        return records
+            .filter { $0.passedOnDate != nil }
+            .sorted { ($0.passedOnDate ?? .distantPast) > ($1.passedOnDate ?? .distantPast) }
+    }
+
     private var attentionCount: Int {
-        records.filter { $0.warrantyStatus == .expiringSoon || $0.warrantyStatus == .expired }.count
+        activeRecords.filter { $0.warrantyStatus == .expiringSoon || $0.warrantyStatus == .expired }.count
     }
 
     private var sortedRecords: [PurchaseRecord] {
         switch sortMode {
         case .newest:
-            return records.sorted { $0.updatedAt > $1.updatedAt }
+            return activeRecords.sorted { $0.updatedAt > $1.updatedAt }
         case .az:
-            return records.sorted { $0.productName.localizedCompare($1.productName) == .orderedAscending }
+            return activeRecords.sorted { $0.productName.localizedCompare($1.productName) == .orderedAscending }
         case .byRoom:
-            return records
+            return activeRecords
         }
     }
 
     /// Grouped by room for the "By room" view. Records with no room fall under
     /// an "Unfiled" bucket sorted last — never forced to assign one.
     private var roomGroups: [(room: String, records: [PurchaseRecord])] {
-        let grouped = Dictionary(grouping: records) { record -> String in
+        let grouped = Dictionary(grouping: activeRecords) { record -> String in
             let trimmed = record.room?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (trimmed?.isEmpty ?? true) ? "Unfiled" : trimmed!
         }
@@ -83,8 +101,10 @@ struct LibraryView: View {
         Group {
             // A household member with no records of their own still has a
             // library to show — the empty state hid Vanessa's 5 shared-in
-            // records behind "start your paper trail".
-            if records.isEmpty && !hasSharedRecords {
+            // records behind "start your paper trail". Same reasoning
+            // extends to a library that's ALL passed-on records — that's
+            // still a library, just an empty active one.
+            if activeRecords.isEmpty && !hasSharedRecords && passedOnRecords.isEmpty {
                 EmptyLibraryView { router.showCapture = true }
             } else {
                 content
@@ -122,6 +142,10 @@ struct LibraryView: View {
                     roomList
                 } else {
                     flatList
+                }
+
+                if !passedOnRecords.isEmpty {
+                    passedOnSection
                 }
             }
             .padding(.horizontal, PT.Metric.screenPad)
@@ -253,6 +277,33 @@ struct LibraryView: View {
                         SharedRecordRow(record: dto)
                     }
                     .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: Passed on (docs/design-v3/V3_BRIEF.md §7)
+
+    private var passedOnSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                SectionLabel(text: "Passed on", tone: PT.txt3)
+                Text("\(passedOnRecords.count)")
+                    .font(PTFont.mono(10))
+                    .foregroundStyle(PT.txt3)
+                GoldRule()
+            }
+            VStack(spacing: 0) {
+                ForEach(passedOnRecords) { record in
+                    NavigationLink {
+                        RecordDetailView(record: record)
+                    } label: {
+                        PassedOnRow(record: record)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Delete", role: .destructive) { deleteRecord(record) }
+                    }
                 }
             }
         }
@@ -423,6 +474,52 @@ private struct SharedRecordRow: View {
             Image(systemName: "house.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(PT.gold)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(PT.txt3)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PT.hair).frame(height: 1)
+        }
+    }
+}
+
+// MARK: - Passed-on row ("Passed on" shelf)
+
+/// Row for a record marked passed-on (docs/design-v3/V3_BRIEF.md §7) —
+/// styled after `RoomRow`, with a mono "SOLD · PASSED ON" stamp in place of
+/// the warranty dot. Tapping still opens the full detail view, where "Mark
+/// as not passed on" lives.
+private struct PassedOnRow: View {
+    let record: PurchaseRecord
+    private var warranty: PTWarranty { PTWarranty(record: record) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            GlyphTile(symbol: warranty.glyph, size: 34)
+                .opacity(0.6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.productName)
+                    .font(PTFont.serif(16, weight: 500))
+                    .foregroundStyle(PT.txt2)
+                    .lineLimit(1)
+                if let passedOnDate = record.passedOnDate {
+                    Text("Passed on \(PTDate.dayMonthYear.string(from: passedOnDate))")
+                        .font(PTFont.mono(10))
+                        .foregroundStyle(PT.txt3)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("SOLD · PASSED ON")
+                .font(PTFont.mono(9, medium: true))
+                .tracking(1)
+                .foregroundStyle(PT.txt3)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(PT.hair, lineWidth: 1))
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(PT.txt3)

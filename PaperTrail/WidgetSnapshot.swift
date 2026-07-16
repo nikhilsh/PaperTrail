@@ -88,6 +88,13 @@ enum WidgetSnapshotWriter {
     /// `ForegroundRefreshCoordinator`, which feeds `DigestScheduler` from
     /// the same fetch) doesn't pay for a second SwiftData fetch.
     static func write(records: [PurchaseRecord]) {
+        // v3 passItOn (docs/design-v3/V3_BRIEF.md §7, flagged): a passed-on
+        // item shouldn't show up on the widget's "closing soon" list or
+        // count toward its coverage ring/total-value text — it's not owned
+        // anymore. Collapses back to `records` exactly when the flag is off.
+        let records = records.filter {
+            !PassItOnAggregation.isExcludedFromAggregates(passedOnDate: $0.passedOnDate, flagOn: FeatureFlags.isOn(.passItOn))
+        }
         let candidates = records.flatMap(\.widgetCandidates)
         let items = nearestUpcoming(from: candidates, limit: maxItems)
         let coverage = coverageCounts(for: records)

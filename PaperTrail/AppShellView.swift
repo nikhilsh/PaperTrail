@@ -145,6 +145,10 @@ private enum ForegroundRefreshCoordinator {
             }
             DigestScheduler.reschedule(records: records)
             WidgetSnapshotWriter.write(records: records)
+            // v3 recallWatch (§6): no-ops instantly unless the flag AND Plus
+            // are both on, and throttles itself to once per 24h — safe to
+            // call on every debounced foreground.
+            await RecallWatcher.checkIfNeeded(records: records)
             // Soft-ask retry (N1): catches the initial ask if it was skipped
             // earlier because a scan/import cover was still up, otherwise
             // tries the one allowed re-ask. No-ops instantly otherwise.
