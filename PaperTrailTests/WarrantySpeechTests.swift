@@ -76,7 +76,32 @@ struct WarrantySpeechTests {
     @Test func snippetAnswerHandlesCovered() {
         let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
         let expiry = Calendar.current.date(from: DateComponents(year: 2027, month: 9, day: 12))!
+        // 14 months — stays in months (never "1 year"), per the V3-4 mock.
         #expect(WarrantySpeech.snippetAnswer(expiryDate: expiry, now: now) == "Yes — 14 months left. Expires 12 Sep 2027.")
+    }
+
+    // MARK: - snippetRemainingPhrase boundaries
+
+    @Test func snippetPhraseUsesDaysUnderSixtyDays() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in59Days = date(daysFromNow: 59, reference: now)
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in59Days) == "59 days")
+        let inOneDay = date(daysFromNow: 1, reference: now)
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: inOneDay) == "1 day")
+    }
+
+    @Test func snippetPhraseUsesMonthsUnderTwoYears() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in23Months = Calendar.current.date(byAdding: .month, value: 23, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in23Months) == "23 months")
+    }
+
+    @Test func snippetPhraseUsesYearsFromTwoYears() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 12))!
+        let in24Months = Calendar.current.date(byAdding: .month, value: 24, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in24Months) == "2 years")
+        let in25Months = Calendar.current.date(byAdding: .month, value: 25, to: now)!
+        #expect(WarrantySpeech.snippetRemainingPhrase(from: now, to: in25Months) == "2 years, 1 month")
     }
 
     // MARK: - progressElapsed

@@ -72,8 +72,31 @@ enum WarrantySpeech {
         if expiryDate < now {
             return "No — expired on \(PTDate.dayMonthYear.string(from: expiryDate))."
         }
-        let remaining = remainingPhrase(from: now, to: expiryDate)
+        let remaining = snippetRemainingPhrase(from: now, to: expiryDate)
         return "Yes — \(remaining) left. Expires \(PTDate.dayMonthYear.string(from: expiryDate))."
+    }
+
+    /// Remaining-time phrasing for the snippet card, per the V3-4 mock's
+    /// "14 months left": days under 60 days, calendar months up to 24 months
+    /// (so "14 months", never "1 year" — the card favors month precision),
+    /// and years + leftover months from 24 months on ("2 years, 3 months").
+    /// Distinct from `remainingPhrase`, which optimizes for Siri TTS and
+    /// rolls a year+ into coarse whole years.
+    static func snippetRemainingPhrase(from now: Date, to date: Date) -> String {
+        let calendar = Calendar.current
+        let days = max(0, calendar.dateComponents([.day], from: now, to: date).day ?? 0)
+        if days < 60 {
+            return "\(days) day\(days == 1 ? "" : "s")"
+        }
+        let months = max(1, calendar.dateComponents([.month], from: now, to: date).month ?? 0)
+        if months < 24 {
+            return "\(months) month\(months == 1 ? "" : "s")"
+        }
+        let years = months / 12
+        let leftover = months % 12
+        let yearPart = "\(years) year\(years == 1 ? "" : "s")"
+        guard leftover > 0 else { return yearPart }
+        return "\(yearPart), \(leftover) month\(leftover == 1 ? "" : "s")"
     }
 
     /// Fraction of the warranty window elapsed (0...1) — what the snippet
