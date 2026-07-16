@@ -11,7 +11,18 @@ import AppIntents
 import Foundation
 import SwiftData
 
-struct RecordEntity: AppEntity, Identifiable {
+/// `IndexedEntity` (iOS 18+, v3 §8 `siriIntents`) opts this entity into the
+/// system's own Siri/Spotlight suggestion indexing — separate from, and in
+/// addition to, `SpotlightIndexer`'s own `CSSearchableItem` indexing, which
+/// this doesn't touch. Unlike the rest of this wave, this conformance can't
+/// be gated behind `FeatureFlags.isOn(.siriIntents)`: Swift protocol
+/// conformance is resolved at compile time, and `RecordEntity` is also the
+/// parameter type for `CheckWarrantyIntent`/`OpenRecordIntent`, which predate
+/// v3 and aren't themselves flagged. In practice this only changes how
+/// proactively the system offers those pre-existing intents — it adds no new
+/// UI and writes nothing, so it's left unconditional rather than forked into
+/// a second entity type just to satisfy the flag.
+struct RecordEntity: AppEntity, Identifiable, IndexedEntity {
     /// `PurchaseRecord.id` — a stable, non-optional `UUID` stored property —
     /// is the natural key here, not SwiftData's `PersistentIdentifier`. The
     /// persistent identifier isn't guaranteed stable across CloudKit sync
