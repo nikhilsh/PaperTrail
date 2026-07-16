@@ -21,7 +21,11 @@ import SwiftUI
 /// The membership shapes the card can represent. Date strings are
 /// pre-formatted, display-ready (formatting is the caller's concern — this
 /// view has no opinion on date style/locale).
-enum PTMembershipTerm {
+///
+/// `nonisolated`: pure value logic with no UI state — keeps it callable from
+/// the test target, which (unlike the app target) doesn't default to
+/// MainActor isolation.
+nonisolated enum PTMembershipTerm {
     case annual(renewsOn: String)
     case monthly(renewsOn: String)
     /// Free-trial period: bills (rather than renews) on the given date.
