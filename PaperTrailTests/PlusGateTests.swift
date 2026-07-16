@@ -10,6 +10,7 @@
 //
 
 import Testing
+import Foundation
 @testable import PaperTrail
 
 struct PlusGateTests {
