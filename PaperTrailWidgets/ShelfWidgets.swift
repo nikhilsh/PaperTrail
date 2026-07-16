@@ -1,0 +1,441 @@
+import WidgetKit
+import SwiftUI
+
+// MARK: - v3 shelfWidgets (Ideas C1)
+//
+// Three new widget kinds behind `FeatureFlags.isOn(.shelfWidgets)`
+// (`docs/design-v3/V3_BRIEF.md` §1): a medium paper "Closing soon" card, a
+// small paper coverage ring, and a small dark "Next up" card (which also
+// supplies the `.accessoryInline` Lock Screen family). All three reuse
+// `ExpiringSoonProvider`/`ExpiringSoonEntry` from `ExpiringSoonWidget.swift`
+// — one snapshot-loading path for every widget kind in the extension — and
+// are added to the `WidgetBundle` in `PaperTrailWidgetsBundle.swift`.
+//
+// The `WidgetBundle` composition is static: these kinds always appear in
+// the widget gallery, flag or no flag (WidgetKit has no runtime way to hide
+// a bundle member). When the flag is off, every view here renders the same
+// "Open PaperTrail to update" graceful fallback the v2 widget already uses
+// for a missing/undecodable snapshot — so an App Store user who somehow
+// adds one of these (they can't reach the Flags screen to turn the flag on,
+// since that screen is itself compiled out of APPSTORE builds) sees an
+// inert, on-brand card rather than broken or placeholder-shimmer content.
+// This is a deliberate tradeoff called out in the PR: the widget *kind*
+// ships to the gallery ahead of the feature being turned on.
+
+private let shelfPaperBackground = LinearGradient(
+    colors: [WidgetPalette.paperTop, WidgetPalette.paperBottom],
+    startPoint: .top,
+    endPoint: .bottom
+)
+
+// MARK: - Shared day/date phrasing
+
+/// Formatting specific to the shelf widgets' paper-mock copy (spelled-out
+/// day counts, "d MMM" dates) — distinct from `ExpiringSoonFormatting`'s
+/// compact "6d" Lock Screen/v2 style, which the shelf widgets also reuse
+/// directly for `daysLeft`/`deepLink`/`kindLabel`.
+enum ShelfFormatting {
+    /// "22 Jul" — fixed locale so the string is deterministic across
+    /// devices/regions, same rationale as `DigestSummary.totalsText`.
+    static func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM"
+        return formatter.string(from: date)
+    }
+
+    /// "today", "1 day", "6 days", "expired" — the spelled-out form the C1
+    /// mock uses for the urgency pill and "Next up" headline.
+    static func dayPhrase(_ daysLeft: Int) -> String {
+        if daysLeft < 0 { return "expired" }
+        if daysLeft == 0 { return "today" }
+        if daysLeft == 1 { return "1 day" }
+        return "\(daysLeft) days"
+    }
+
+    /// Two-line serif headline for the "Next up" widget, keyed by event
+    /// kind — e.g. "Return window\ncloses in 6 days" (the C1 mock's exact
+    /// copy for a return event) or "Warranty\nends in 6 days".
+    static func headline(kind: String, daysLeft: Int) -> String {
+        let phrase = dayPhrase(daysLeft)
+        let verb = daysLeft <= 0 ? phrase : "in \(phrase)"
+        switch kind {
+        case "return":
+            return "Return window\ncloses \(verb)"
+        default:
+            return "Warranty\nends \(verb)"
+        }
+    }
+}
+
+// MARK: - Paper empty state
+
+/// The cream/paper counterpart to `EmptyStateView` — used by the "Closing
+/// soon" and coverage-ring widgets, which render on the paper background
+/// rather than the dark one.
+private struct PaperEmptyStateView: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("PaperTrail")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(WidgetPalette.goldDeep)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(WidgetPalette.ink)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerBackground(shelfPaperBackground, for: .widget)
+    }
+}
+
+/// A short horizontal dashed rule — the divider between the two urgency
+/// rows on the "Closing soon" card, matching the mock's
+/// `border-top:1px dashed`.
+private struct DashedRule: View {
+    var body: some View {
+        DashedLine()
+            .stroke(WidgetPalette.ink.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .frame(height: 1)
+            .padding(.vertical, 10)
+    }
+
+    private struct DashedLine: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            return path
+        }
+    }
+}
+
+// MARK: - "Closing soon" (medium, paper)
+
+/// The amber "N days"/"today"/"expired" pill next to the return-window row.
+private struct UrgencyPill: View {
+    let daysLeft: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(WidgetPalette.amber).frame(width: 5, height: 5)
+            Text(ShelfFormatting.dayPhrase(daysLeft))
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+        }
+        .foregroundStyle(WidgetPalette.amber)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(WidgetPalette.amber.opacity(0.14), in: Capsule())
+    }
+}
+
+private struct ReturnWindowRow: View {
+    let item: WidgetSnapshotItem
+    let asOf: Date
+
+    var body: some View {
+        let daysLeft = ExpiringSoonFormatting.daysLeft(from: asOf, to: item.date)
+        let row = HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(item.name) — return window")
+                    .font(.system(.subheadline, design: .serif).weight(.semibold))
+                    .foregroundStyle(WidgetPalette.ink)
+                    .lineLimit(1)
+                    .privacySensitive()
+                Text("Last day to change your mind: \(ShelfFormatting.shortDate(item.date))")
+                    .font(.caption2)
+                    .foregroundStyle(WidgetPalette.inkSecondary)
+                    .lineLimit(1)
+                    .privacySensitive()
+            }
+            Spacer(minLength: 8)
+            UrgencyPill(daysLeft: daysLeft)
+        }
+        if let destination = ExpiringSoonFormatting.deepLink(for: item) {
+            Link(destination: destination) { row }
+        } else {
+            row
+        }
+    }
+}
+
+private struct RegisterNudgeRow: View {
+    let nudge: WidgetRegisterNudge
+
+    var body: some View {
+        let row = HStack(alignment: .center, spacing: 8) {
+            Text("\(nudge.name) — register it")
+                .font(.system(.subheadline, design: .serif).weight(.semibold))
+                .foregroundStyle(WidgetPalette.ink)
+                .lineLimit(1)
+                .privacySensitive()
+            Spacer(minLength: 8)
+            Text("DO IT →")
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .foregroundStyle(WidgetPalette.goldDeep)
+        }
+        if let destination = URL(string: "papertrail://record/\(nudge.recordID.uuidString)") {
+            Link(destination: destination) { row }
+        } else {
+            row
+        }
+    }
+}
+
+/// Fallback row when neither a return-window item nor a register nudge is
+/// available — "fallback = nearest warranty rows" per the brief. Styled for
+/// the paper background, same information density as the v2 widget's
+/// `MediumWidgetRow`.
+private struct NearestEventRow: View {
+    let item: WidgetSnapshotItem
+    let asOf: Date
+
+    var body: some View {
+        let daysLeft = ExpiringSoonFormatting.daysLeft(from: asOf, to: item.date)
+        let row = HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(.subheadline, design: .serif).weight(.semibold))
+                    .foregroundStyle(WidgetPalette.ink)
+                    .lineLimit(1)
+                    .privacySensitive()
+                Text(ExpiringSoonFormatting.kindLabel(item.kind))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(WidgetPalette.goldDeep.opacity(0.85))
+            }
+            Spacer(minLength: 8)
+            Text(ShelfFormatting.dayPhrase(daysLeft))
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .foregroundStyle(WidgetPalette.ink)
+        }
+        if let destination = ExpiringSoonFormatting.deepLink(for: item) {
+            Link(destination: destination) { row }
+        } else {
+            row
+        }
+    }
+}
+
+/// Up to two urgency rows for the "Closing soon" card: the nearest return
+/// window, then the register nudge. When neither exists, falls back to the
+/// nearest one or two upcoming events of any kind.
+private struct ClosingSoonRows {
+    let returnRow: WidgetSnapshotItem?
+    let registerNudge: WidgetRegisterNudge?
+    let fallbackItems: [WidgetSnapshotItem]
+
+    init(entry: ExpiringSoonEntry) {
+        let returnItem = entry.items.first { $0.kind == "return" }
+        returnRow = returnItem
+        registerNudge = entry.registerNudge
+        fallbackItems = (returnItem == nil && entry.registerNudge == nil)
+            ? Array(entry.items.prefix(2))
+            : []
+    }
+
+    var isEmpty: Bool { returnRow == nil && registerNudge == nil && fallbackItems.isEmpty }
+}
+
+private struct ClosingSoonWidgetView: View {
+    let entry: ExpiringSoonEntry
+
+    var body: some View {
+        if !FeatureFlags.isOn(.shelfWidgets) {
+            PaperEmptyStateView(message: "Open PaperTrail to update")
+        } else {
+            let rows = ClosingSoonRows(entry: entry)
+            if rows.isEmpty {
+                PaperEmptyStateView(message: entry.emptyStateMessage)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("PAPERTRAIL · CLOSING SOON")
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(WidgetPalette.goldDeep)
+                        .padding(.bottom, 12)
+
+                    if let returnItem = rows.returnRow {
+                        ReturnWindowRow(item: returnItem, asOf: entry.date)
+                        if rows.registerNudge != nil {
+                            DashedRule()
+                        }
+                    }
+                    if let nudge = rows.registerNudge {
+                        RegisterNudgeRow(nudge: nudge)
+                    }
+                    if rows.returnRow == nil && rows.registerNudge == nil {
+                        ForEach(Array(rows.fallbackItems.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { DashedRule() }
+                            NearestEventRow(item: item, asOf: entry.date)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .containerBackground(shelfPaperBackground, for: .widget)
+            }
+        }
+    }
+}
+
+struct ClosingSoonWidget: Widget {
+    let kind: String = "ClosingSoonWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: ExpiringSoonProvider()) { entry in
+            ClosingSoonWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Closing Soon")
+        .description("Return windows and register-it nudges that need attention.")
+        .supportedFamilies([.systemMedium])
+    }
+}
+
+// MARK: - Coverage ring (small, paper)
+
+private struct CoverageRingWidgetView: View {
+    let entry: ExpiringSoonEntry
+
+    var body: some View {
+        if !FeatureFlags.isOn(.shelfWidgets) {
+            PaperEmptyStateView(message: "Open PaperTrail to update")
+        } else if let total = entry.totalCount, total > 0, let covered = entry.coveredCount {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .stroke(WidgetPalette.ringTrack, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                    Circle()
+                        .trim(from: 0, to: CGFloat(covered) / CGFloat(total))
+                        .stroke(WidgetPalette.sage, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Text("\(covered)/\(total)")
+                        .font(.system(.title3, design: .serif).weight(.semibold))
+                        .foregroundStyle(WidgetPalette.ink)
+                        .minimumScaleFactor(0.7)
+                        .privacySensitive()
+                }
+                .frame(width: 64, height: 64)
+
+                Text(captionText)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(WidgetPalette.inkTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .privacySensitive()
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .containerBackground(shelfPaperBackground, for: .widget)
+            .widgetURL(URL(string: "papertrail://expiring"))
+        } else {
+            PaperEmptyStateView(message: entry.emptyStateMessage)
+        }
+    }
+
+    private var captionText: String {
+        guard let totalValueText = entry.totalValueText else { return "covered" }
+        return "covered · \(totalValueText)"
+    }
+}
+
+struct CoverageRingWidget: Widget {
+    let kind: String = "CoverageRingWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: ExpiringSoonProvider()) { entry in
+            CoverageRingWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Coverage Ring")
+        .description("How much of your library is still under warranty.")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+// MARK: - Next up (small dark + accessoryInline)
+
+private struct NextUpSmallView: View {
+    let entry: ExpiringSoonEntry
+
+    var body: some View {
+        if let item = entry.items.first {
+            let daysLeft = ExpiringSoonFormatting.daysLeft(from: entry.date, to: item.date)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("NEXT UP")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(WidgetPalette.gold)
+
+                Text(ShelfFormatting.headline(kind: item.kind, daysLeft: daysLeft))
+                    .font(.system(.title3, design: .serif).weight(.semibold))
+                    .foregroundStyle(WidgetPalette.cream)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+
+                Spacer(minLength: 0)
+
+                Text("\(item.name.uppercased()) · \(ShelfFormatting.shortDate(item.date).uppercased())")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(WidgetPalette.cream.opacity(0.6))
+                    .lineLimit(1)
+                    .privacySensitive()
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .containerBackground(WidgetPalette.background, for: .widget)
+            .widgetURL(ExpiringSoonFormatting.deepLink(for: item))
+        } else {
+            EmptyStateView(message: entry.emptyStateMessage)
+        }
+    }
+}
+
+private struct NextUpAccessoryInlineView: View {
+    let entry: ExpiringSoonEntry
+
+    var body: some View {
+        if let item = entry.items.first {
+            let daysLeft = ExpiringSoonFormatting.daysLeft(from: entry.date, to: item.date)
+            Text("\(item.name) · \(ExpiringSoonFormatting.bigLabel(daysLeft))")
+                .privacySensitive()
+        } else {
+            Text(entry.emptyStateMessage)
+        }
+    }
+}
+
+private struct NextUpWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+    let entry: ExpiringSoonEntry
+
+    var body: some View {
+        if !FeatureFlags.isOn(.shelfWidgets) {
+            switch family {
+            case .accessoryInline:
+                Text("Open PaperTrail to update")
+            default:
+                EmptyStateView(message: "Open PaperTrail to update")
+            }
+        } else {
+            switch family {
+            case .accessoryInline:
+                NextUpAccessoryInlineView(entry: entry)
+            default:
+                NextUpSmallView(entry: entry)
+            }
+        }
+    }
+}
+
+struct NextUpWidget: Widget {
+    let kind: String = "NextUpWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: ExpiringSoonProvider()) { entry in
+            NextUpWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Next Up")
+        .description("The very next warranty or return deadline.")
+        .supportedFamilies([.systemSmall, .accessoryInline])
+    }
+}
