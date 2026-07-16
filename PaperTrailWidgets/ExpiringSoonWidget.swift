@@ -13,6 +13,20 @@ struct ExpiringSoonEntry: TimelineEntry {
     /// rendered "Nothing expiring soon", which is a false reassurance when
     /// the widget actually just can't see the app's data.
     let isDataAvailable: Bool
+
+    // MARK: v3 shelfWidgets fields
+    //
+    // Carried on the same entry as `items`/`isDataAvailable` rather than a
+    // separate provider/entry type — `ExpiringSoonProvider` already reads
+    // and decodes the one App Group snapshot; the shelf widgets
+    // (`ShelfWidgets.swift`) reuse this same provider so there's only one
+    // snapshot-loading path in the extension. `ExpiringSoonWidgetView`
+    // (the pre-v3 widget) ignores these — its rendering is unconditional,
+    // flag-independent v2 behavior.
+    let coveredCount: Int?
+    let totalCount: Int?
+    let totalValueText: String?
+    let registerNudge: WidgetRegisterNudge?
 }
 
 // MARK: - Provider
@@ -29,20 +43,20 @@ struct ExpiringSoonProvider: TimelineProvider {
     private static let snapshotFileName = "widget-snapshot.json"
 
     func placeholder(in context: Context) -> ExpiringSoonEntry {
-        ExpiringSoonEntry(date: .now, items: Self.placeholderItems, isDataAvailable: true)
+        Self.entry(date: .now, items: Self.placeholderItems, isDataAvailable: true)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ExpiringSoonEntry) -> Void) {
         if context.isPreview {
-            completion(ExpiringSoonEntry(date: .now, items: Self.placeholderItems, isDataAvailable: true))
+            completion(Self.entry(date: .now, items: Self.placeholderItems, isDataAvailable: true))
             return
         }
-        let (items, isDataAvailable) = Self.entryData()
-        completion(ExpiringSoonEntry(date: .now, items: items, isDataAvailable: isDataAvailable))
+        let snapshot = Self.readSnapshot()
+        completion(Self.entry(date: .now, snapshot: snapshot))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ExpiringSoonEntry>) -> Void) {
-        let (items, isDataAvailable) = Self.entryData()
+        let snapshot = Self.readSnapshot()
         let now = Date.now
         let calendar = Calendar.current
         let nextMidnight = calendar.nextDate(
@@ -56,8 +70,8 @@ struct ExpiringSoonProvider: TimelineProvider {
         // reload; `.after(nextMidnight)` asks WidgetKit for a fresh timeline
         // once that entry is stale.
         let entries = [
-            ExpiringSoonEntry(date: now, items: items, isDataAvailable: isDataAvailable),
-            ExpiringSoonEntry(date: nextMidnight, items: items, isDataAvailable: isDataAvailable),
+            Self.entry(date: now, snapshot: snapshot),
+            Self.entry(date: nextMidnight, snapshot: snapshot),
         ]
         completion(Timeline(entries: entries, policy: .after(nextMidnight)))
     }
@@ -78,9 +92,40 @@ struct ExpiringSoonProvider: TimelineProvider {
         return try? decoder.decode(WidgetSnapshot.self, from: data)
     }
 
-    private static func entryData() -> (items: [WidgetSnapshotItem], isDataAvailable: Bool) {
-        guard let snapshot = readSnapshot() else { return ([], false) }
-        return (snapshot.items, true)
+    /// Builds an entry directly from a decoded (or missing) snapshot,
+    /// carrying the v3 fields through unconditionally — `nil` on a
+    /// pre-v3/undecodable snapshot exactly like a missing App Group file
+    /// does, no separate "can't tell" path needed for those.
+    private static func entry(date: Date, snapshot: WidgetSnapshot?) -> ExpiringSoonEntry {
+        entry(
+            date: date,
+            items: snapshot?.items ?? [],
+            isDataAvailable: snapshot != nil,
+            coveredCount: snapshot?.coveredCount,
+            totalCount: snapshot?.totalCount,
+            totalValueText: snapshot?.totalValueText,
+            registerNudge: snapshot?.registerNudge
+        )
+    }
+
+    private static func entry(
+        date: Date,
+        items: [WidgetSnapshotItem],
+        isDataAvailable: Bool,
+        coveredCount: Int? = nil,
+        totalCount: Int? = nil,
+        totalValueText: String? = nil,
+        registerNudge: WidgetRegisterNudge? = nil
+    ) -> ExpiringSoonEntry {
+        ExpiringSoonEntry(
+            date: date,
+            items: items,
+            isDataAvailable: isDataAvailable,
+            coveredCount: coveredCount,
+            totalCount: totalCount,
+            totalValueText: totalValueText,
+            registerNudge: registerNudge
+        )
     }
 
     private static var placeholderItems: [WidgetSnapshotItem] {
@@ -97,7 +142,10 @@ struct ExpiringSoonProvider: TimelineProvider {
 
 // MARK: - Day-count formatting
 
-private enum ExpiringSoonFormatting {
+// Internal (not `private`) — `ShelfWidgets.swift`'s v3 widgets reuse
+// `daysLeft`/`deepLink`/`color` rather than re-deriving the same day-math
+// and deep-link logic.
+enum ExpiringSoonFormatting {
     /// Whole-day difference from `asOf` to `date`, anchored to start-of-day
     /// so it doesn't depend on time-of-day. Negative once the date has
     /// passed.
@@ -143,7 +191,10 @@ private enum ExpiringSoonFormatting {
 /// unreachable App Group container ("Open PaperTrail to update"), never
 /// crashing the widget either way. Which message applies is the caller's
 /// call, driven by `ExpiringSoonEntry.isDataAvailable`.
-private struct EmptyStateView: View {
+// Internal (not `private`) — the v3 dark "Next up" widget in
+// `ShelfWidgets.swift` reuses this same dark-background empty state rather
+// than duplicating it.
+struct EmptyStateView: View {
     let message: String
 
     var body: some View {
@@ -162,7 +213,10 @@ private struct EmptyStateView: View {
     }
 }
 
-private extension ExpiringSoonEntry {
+// Internal (not `private`) — `ShelfWidgets.swift` reuses `emptyStateMessage`
+// so the "nothing to show" copy stays identical between the v2 widget and
+// the v3 shelf widgets.
+extension ExpiringSoonEntry {
     var emptyStateMessage: String {
         isDataAvailable ? "Nothing expiring soon" : "Open PaperTrail to update"
     }

@@ -21,7 +21,21 @@ struct WidgetSnapshotItem: Codable, Sendable, Identifiable {
     var id: String { "\(recordID)-\(kind)" }
 }
 
+/// Mirrors `PaperTrail/WidgetRegisterNudge` — see that file for the
+/// duplication rationale.
+struct WidgetRegisterNudge: Codable, Sendable, Equatable {
+    var recordID: UUID
+    var name: String
+}
+
+/// `coveredCount`/`totalCount`/`totalValueText`/`registerNudge` are v3
+/// `shelfWidgets` additions — all `Optional` so a pre-v3 snapshot on disk
+/// (missing these keys) still decodes with them as `nil`.
 struct WidgetSnapshot: Codable, Sendable {
     var generatedAt: Date
     var items: [WidgetSnapshotItem]
+    var coveredCount: Int? = nil
+    var totalCount: Int? = nil
+    var totalValueText: String? = nil
+    var registerNudge: WidgetRegisterNudge? = nil
 }
