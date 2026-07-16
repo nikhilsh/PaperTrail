@@ -225,7 +225,7 @@ enum PassItOnPacketPDF {
 
                 // MARK: Manual (embedded verbatim)
 
-                if input.selection.includeManual, let manualURL,
+                if input.selection.includeManual, let manualURL = input.manualURL,
                    let manualDocument = CGPDFDocument(manualURL as CFURL) {
                     for pageIndex in 1...max(manualDocument.numberOfPages, 1) {
                         // Downsample/scale each manual page into our own
