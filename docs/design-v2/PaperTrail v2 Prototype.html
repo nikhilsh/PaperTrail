@@ -1,0 +1,319 @@
+<!doctype html><html><head><meta charset="utf-8"><title>PaperTrail v2 — Animated Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="pt.css">
+<style>
+html,body{height:100%}body{margin:0;background:#26231e;display:flex;align-items:center;justify-content:center;font-family:var(--serif)}
+a{color:var(--gold)}a:hover{color:var(--gold-hi)}
+.phone{width:390px;height:844px;border-radius:46px;overflow:hidden;position:relative;background:var(--ink-900);outline:1px solid rgba(231,220,196,.16);box-shadow:0 40px 100px -30px rgba(0,0,0,.85)}
+.phone .pt{height:100%}
+.scr{position:absolute;inset:0;display:none;flex-direction:column}
+.scr.on{display:flex}
+.sbar{display:flex;justify-content:space-between;align-items:center;padding:20px 30px 0;font:600 15px -apple-system,system-ui;color:var(--txt);flex:0 0 auto}
+.sbar .r{font-family:var(--mono);font-size:11px;letter-spacing:.08em}
+.body{flex:1;overflow:auto;padding:0 22px}.body::-webkit-scrollbar{display:none}
+.tabbar2{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-around;align-items:center;padding:14px 12px 28px;background:linear-gradient(180deg,rgba(14,12,9,0),#100e0a 45%);z-index:9}
+.t2{display:flex;flex-direction:column;align-items:center;gap:5px;font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-3);cursor:pointer;background:none;border:0;padding:0}
+.t2.on{color:var(--gold)}
+.fab{width:54px;height:54px;border-radius:50%;background:linear-gradient(180deg,#EFD9A0,#C2A15C);color:#2A2110;display:flex;align-items:center;justify-content:center;margin-top:-16px;box-shadow:0 0 36px rgba(194,161,92,.4);font:300 30px/1 var(--serif);border:0;cursor:pointer;transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
+.fab:active{transform:scale(.88)}
+.ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ic20{width:20px;height:20px}
+.h1{font-family:var(--serif);font-size:38px;font-weight:600;color:var(--txt);letter-spacing:-.01em;margin:8px 0 0}
+.grp{background:var(--ink-750);border-radius:16px;overflow:hidden}
+.srow{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer}
+.srow+.srow{border-top:1px solid var(--hair-2)}
+.srow:active{background:rgba(231,220,196,.04)}
+.sic{width:34px;height:34px;border-radius:9px;background:rgba(231,220,196,.06);display:flex;align-items:center;justify-content:center;color:var(--gold)}
+.st{flex:1;min-width:0}
+.st b{display:block;font:500 15.5px -apple-system,system-ui;color:var(--txt)}
+.st span{display:block;font:400 12px -apple-system,system-ui;color:var(--txt-3);margin-top:2px}
+.sval{font-family:var(--mono);font-size:11.5px;color:var(--txt-2);letter-spacing:.06em;white-space:nowrap}
+.chv{color:var(--txt-3);font:400 19px/1 -apple-system;margin-left:2px}
+.plusband{margin:16px -20px -18px;padding:13px 20px 15px;background:linear-gradient(90deg,#8A6E3A,#C2A15C 40%,#E0C588 52%,#C2A15C 64%,#8A6E3A);border-radius:0 0 12px 12px;display:flex;align-items:center;gap:10px;color:#2A2110;cursor:pointer;position:relative;overflow:hidden}
+.plusband .sheen{position:absolute;top:0;bottom:0;width:70px;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-18deg);left:-90px;animation:sheen 1.4s .8s ease-out 1 both}
+@keyframes sheen{to{left:120%}}
+.goldcard{border-radius:16px;background:linear-gradient(120deg,#6E5628 0%,#A98A4E 30%,#E5CD90 50%,#A98A4E 70%,#6E5628 100%);color:#241C0E;padding:20px;box-shadow:0 24px 50px -18px rgba(194,161,92,.5);position:relative;overflow:hidden}
+.goldcard::before{content:"";position:absolute;inset:0;background:radial-gradient(90% 70% at 70% 0%,rgba(255,255,255,.35),transparent 55%)}
+.goldcard>*{position:relative}
+.cert{background:linear-gradient(180deg,#F6EEDD,#EDE2C8);color:var(--on-paper);border-radius:18px;position:relative;padding:6px}
+.cert-in{border:1.5px solid #C2A15C;border-radius:13px;padding:24px 22px;position:relative;text-align:center}
+.cert-in::before{content:"";position:absolute;inset:4px;border:1px solid rgba(138,110,58,.4);border-radius:10px;pointer-events:none}
+.seal{width:74px;height:74px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#E0C588,#C2A15C 55%,#8A6E3A);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px -6px rgba(138,110,58,.7),inset 0 1px 0 rgba(255,255,255,.5);position:relative;margin:0 auto}
+.seal::before{content:"";position:absolute;inset:6px;border-radius:50%;border:1.5px dashed rgba(42,33,16,.4)}
+.seal span{font-family:var(--mono);font-size:8px;letter-spacing:.18em;color:#2A2110;font-weight:600;line-height:1.5}
+.gaugewrap{position:relative;width:150px;height:150px;margin:0 auto}
+.gaugewrap .cnum{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring{transform:rotate(-90deg)}
+#ringArc{stroke-dasharray:402;stroke-dashoffset:402;transition:stroke-dashoffset .9s cubic-bezier(.2,.7,.3,1) .25s}
+.copybtn{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--gold-deep);border:1px solid rgba(138,110,58,.45);border-radius:6px;padding:4px 8px;background:none;cursor:pointer}
+.copybtn:active{background:rgba(138,110,58,.15)}
+.banner{background:rgba(20,17,13,.94);border:.5px solid rgba(255,255,255,.14);border-radius:20px;padding:12px 14px;display:flex;gap:11px;align-items:flex-start;backdrop-filter:blur(10px);box-shadow:0 10px 30px -10px rgba(0,0,0,.6)}
+.banner .ai{width:38px;height:38px;border-radius:9px;background:linear-gradient(180deg,#2C2519,#191510);display:flex;align-items:center;justify-content:center;color:var(--gold);flex:0 0 auto;border:.5px solid rgba(194,161,92,.4)}
+.banner b{font:600 13px -apple-system;color:#fff;display:block}
+.banner p{font:400 12.5px/1.35 -apple-system;color:rgba(255,255,255,.75);margin:2px 0 0}
+.banner .tm{font:400 11px -apple-system;color:rgba(255,255,255,.4);margin-left:auto}
+/* overlays */
+.ovl{position:absolute;inset:0;z-index:20;display:none}
+.ovl.on{display:block}
+.dim{position:absolute;inset:0;background:rgba(10,8,6,.72);backdrop-filter:blur(3px);opacity:0;transition:opacity .28s}
+.ovl.on .dim{opacity:1}
+.sheet{position:absolute;left:14px;right:14px;bottom:20px;transform:translateY(112%);transition:transform .42s cubic-bezier(.2,.8,.25,1)}
+.ovl.on .sheet{transform:none}
+.pay{position:absolute;inset:0;background:radial-gradient(120% 80% at 50% 0%,#1c1710,#0E0C09);transform:translateY(100%);transition:transform .42s cubic-bezier(.2,.8,.25,1);overflow:auto;padding:18px 22px 30px}
+.ovl.on .pay{transform:none}
+.xbtn{position:absolute;top:16px;right:18px;width:32px;height:32px;border-radius:50%;background:rgba(231,220,196,.08);color:var(--txt-2);border:0;font:400 15px -apple-system;cursor:pointer;z-index:5}
+@keyframes stampin{0%{transform:scale(2.4) rotate(-16deg);opacity:0}55%{transform:scale(.92) rotate(-3deg);opacity:1}75%{transform:scale(1.05) rotate(-3deg)}100%{transform:scale(1) rotate(-3deg)}}
+.stamped{position:absolute;left:50%;top:42%;translate:-50% -50%;font-family:var(--mono);font-weight:600;letter-spacing:.2em;font-size:19px;color:var(--sage-deep);border:2.5px solid currentColor;border-radius:8px;padding:12px 20px;background:rgba(246,238,221,.88);display:none;z-index:6}
+.stamped.go{display:block;animation:stampin .5s cubic-bezier(.2,.9,.3,1.3) both}
+@keyframes strikein{0%{transform:rotateY(90deg) scale(.96);opacity:0}100%{transform:none;opacity:1}}
+.strike{animation:strikein .55s cubic-bezier(.2,.7,.3,1) both;perspective:800px}
+@keyframes bandpulse{0%,100%{box-shadow:0 0 0 rgba(194,161,92,0)}50%{box-shadow:0 0 30px rgba(194,161,92,.45)}}
+@keyframes dropin{0%{transform:translateY(-16px);opacity:0}100%{transform:none;opacity:1}}
+.dropin{animation:dropin .4s .35s cubic-bezier(.2,.8,.3,1) both}
+.iosalert{position:absolute;left:50%;top:44%;translate:-50% -50%;width:272px;background:rgba(38,36,33,.96);backdrop-filter:blur(20px);border-radius:15px;color:#fff;text-align:center;font-family:-apple-system,system-ui;z-index:30;overflow:hidden;display:none;box-shadow:0 30px 70px -20px rgba(0,0,0,.8)}
+.iosalert.on{display:block;animation:pt-fadein .2s ease both}
+.iosalert h5{font:600 16px/1.3 -apple-system;margin:18px 16px 4px}
+.iosalert p{font:400 12.5px/1.4 -apple-system;color:rgba(255,255,255,.75);margin:0 16px 16px}
+.iosalert .arow{display:flex;border-top:.5px solid rgba(255,255,255,.18)}
+.iosalert .arow button{flex:1;padding:12px;background:none;border:0;color:#409CFF;font:400 16px -apple-system;cursor:pointer}
+.iosalert .arow button+button{border-left:.5px solid rgba(255,255,255,.18);font-weight:600}
+.plans{display:flex;gap:8px;margin:14px auto 0;max-width:280px}
+.plan{flex:1;border:1.5px solid rgba(138,110,58,.35);border-radius:11px;padding:10px 8px;background:none;cursor:pointer;text-align:center;color:var(--on-paper)}
+.plan.on{border-color:#8A6E3A;background:rgba(194,161,92,.16);box-shadow:inset 0 0 0 1px #8A6E3A}
+.plan .pk{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;color:var(--on-paper-3);font-weight:600}
+.plan b{display:block;font-family:var(--serif);font-size:17px;font-weight:600;margin-top:3px}
+.plan .ps{display:block;font:400 10px -apple-system;color:var(--on-paper-3);margin-top:2px}
+.paper-btn{display:block;width:100%;border:0;cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-weight:500;border-radius:11px;padding:15px 18px;background:#211C12;color:#F3EBD9}
+.ghost-btn{display:block;width:100%;background:none;border:0;color:var(--on-paper-3);font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;padding:12px;cursor:pointer}
+.card-lib{margin-top:14px;padding:14px 16px}
+.progress4{display:block;height:4px;border-radius:2px;margin-top:6px}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-lib" viewBox="0 0 24 24"><path d="M4 4h3v16H4zM10 4h3v16h-3zM16 5l4 1-3.5 15-4-1z"/></symbol>
+<symbol id="i-seal" viewBox="0 0 24 24"><path d="M12 3l2.2 1.8 2.8-.3 1 2.6 2.5 1.4-.7 2.7 1.2 2.5-2 1.9.1 2.8-2.7.8-1.5 2.4-2.9-.6-2.9.6-1.5-2.4-2.7-.8.1-2.8-2-1.9L4.2 11l-.7-2.7L6 6.9l1-2.6 2.8.3z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
+<symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M17.5 14.6c2.3.4 4 2 4 4.4"/></symbol>
+<symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></symbol>
+<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5A2.5 2.5 0 0 1 14 11c0 1.5-2 2-2 3.5M12 17.5v.2"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></symbol>
+</defs></svg>
+
+<div class="phone"><div class="pt">
+
+<!-- LIBRARY -->
+<div class="scr on" id="scr-lib">
+<div class="sbar"><span>14:09</span><span class="r">5G ▮▮▮</span></div>
+<div class="body">
+<span class="wordmark" style="display:block;margin-top:8px">Papertrail</span>
+<h1 class="h1" style="margin-top:4px">The Library</h1>
+<div class="search" style="margin-top:16px">⌕&nbsp; Search your library</div>
+<div class="paper dogear card-lib"><span class="fold"></span>
+<div class="serif" style="font-size:19px;font-weight:600">RHEEM STORAGE HEATER 20L</div>
+<div class="row between" style="margin-top:6px"><span class="mono" style="font-size:10.5px;color:var(--on-paper-2)">KITCHEN · MAR 2025 · $318</span><span class="pill covered" style="font-size:8.5px"><span class="dot"></span>Covered</span></div>
+</div>
+<div class="paper dogear card-lib"><span class="fold"></span>
+<div class="serif" style="font-size:19px;font-weight:600">LG 2 DOOR FRIDGE</div>
+<div class="row between" style="margin-top:6px"><span class="mono" style="font-size:10.5px;color:var(--on-paper-2)">KITCHEN · MAR 2025 · $1,269</span><span class="pill covered" style="font-size:8.5px"><span class="dot"></span>13 mo</span></div>
+</div>
+<div class="paper dogear card-lib" onclick="go('warr')" style="cursor:pointer"><span class="fold"></span>
+<div class="serif" style="font-size:19px;font-weight:600">SAMSUNG TV</div>
+<div class="row between" style="margin-top:6px"><span class="mono" style="font-size:10.5px;color:var(--on-paper-2)">JAN 2026 · $1,899</span><span class="pill covered" style="font-size:8.5px"><span class="dot"></span>10 mo</span></div>
+</div>
+<div class="paper dogear card-lib"><span class="fold"></span>
+<div class="serif" style="font-size:19px;font-weight:600">LG WASHER/DRYER 10/6KG</div>
+<div class="row between" style="margin-top:6px"><span class="mono" style="font-size:10.5px;color:var(--on-paper-2)">KITCHEN · MAR 2025 · $1,479</span><span class="pill covered" style="font-size:8.5px"><span class="dot"></span>14 mo</span></div>
+</div>
+<div style="height:120px"></div>
+</div>
+</div>
+
+<!-- WARRANTY / PASSPORT (W2) -->
+<div class="scr" id="scr-warr">
+<div class="sbar"><span>14:09</span><span class="r">5G ▮▮▮</span></div>
+<div class="body">
+<div class="row between" style="margin-top:6px"><button class="chip" style="cursor:pointer;background:none" onclick="go('lib')">‹ Back</button><span class="kicker">Samsung TV</span><span style="width:58px"></span></div>
+<div class="paper dogear" style="margin-top:16px;padding:22px 20px 18px"><span class="fold"></span>
+<div class="row between"><span class="kicker" style="color:var(--gold-deep)">Coverage passport</span><span class="stamp covered" style="font-size:9px;padding:5px 9px">Covered</span></div>
+<div class="gaugewrap" style="margin-top:14px">
+<svg class="ring" width="150" height="150"><circle cx="75" cy="75" r="64" fill="none" stroke="rgba(33,28,18,.12)" stroke-width="9"/><circle id="ringArc" cx="75" cy="75" r="64" fill="none" stroke="#93A86F" stroke-width="9" stroke-linecap="round"/></svg>
+<div class="cnum"><span class="serif" id="moNum" style="font-size:38px;font-weight:600;line-height:1">0 mo</span><span class="label-mono" style="color:var(--on-paper-3)">remaining</span></div>
+</div>
+<div class="row between mono" style="font-size:10.5px;color:var(--on-paper-2);margin-top:8px"><span>BOUGHT 8 JAN 2026</span><span>EXPIRES 3 JUN 2027</span></div>
+<hr style="border:0;border-top:1px solid rgba(33,28,18,.14);margin:14px 0 10px">
+<div class="row between" style="padding:5px 0"><span class="sf" style="font-size:13px;color:var(--on-paper-2)">Serial</span><span class="row gap8"><span class="mono" style="font-size:12px;font-weight:600">SN-4X2K-88103</span><button class="copybtn" onclick="toast('Serial copied — ready to paste')">COPY</button></span></div>
+<div class="row between" style="padding:5px 0"><span class="sf" style="font-size:13px;color:var(--on-paper-2)">Model</span><span class="mono" style="font-size:12px">QA55S90DAKXXS</span></div>
+</div>
+<div class="grp" style="margin-top:16px">
+<div class="srow" style="padding:12px 16px"><div class="st"><b style="font-size:14px">Parts &amp; labour</b></div><span class="sval" style="color:#cfe0b0">✓ Covered</span></div>
+<div class="srow" style="padding:12px 16px"><div class="st"><b style="font-size:14px">Panel defects</b></div><span class="sval" style="color:#cfe0b0">✓ Covered</span></div>
+<div class="srow" style="padding:12px 16px"><div class="st"><b style="font-size:14px">Accidental damage</b></div><span class="sval" style="color:#eab69c">✗ Not covered</span></div>
+</div>
+<div class="grp" style="margin-top:12px">
+<div class="srow" onclick="toast('Calling Samsung SG…')"><div class="sic"><svg class="ic"><use href="#i-help"/></svg></div><div class="st"><b>Samsung support · Singapore</b><span>1800-726-7864 · 9am–6pm</span></div><span class="chv">›</span></div>
+</div>
+<button class="btn btn-gold" style="margin-top:16px" onclick="toast('Claim packet assembled ✓')">Build claim packet</button>
+<div style="height:120px"></div>
+</div>
+</div>
+
+<!-- SETTINGS (S1 → P3 after purchase) -->
+<div class="scr" id="scr-set">
+<div class="sbar"><span>14:09</span><span class="r">5G ▮▮▮</span></div>
+<div class="body">
+<h1 class="h1" style="margin-top:8px">Settings</h1>
+<!-- free card -->
+<div id="freeCard" class="paper dogear" style="margin-top:18px;padding:18px 20px 18px"><span class="fold"></span>
+<div class="row between"><span class="kicker" style="color:var(--gold-deep)">Papertrail · Library card</span><span class="kicker" style="color:var(--on-paper-3)">Est. 2026</span></div>
+<div class="row gap14" style="margin-top:14px"><div style="width:52px;height:52px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#E0C588,#8A6E3A)"></div>
+<div><div class="serif" style="font-size:24px;font-weight:600">Your library</div><div class="sf" style="font-size:13px;color:var(--on-paper-2)">Backed up 13 seconds ago</div></div></div>
+<hr class="gold-rule" style="margin:14px 0 12px">
+<div class="row between mono" style="font-size:11px;letter-spacing:.1em;color:var(--on-paper-2)"><span style="color:var(--sage-deep)">● SYNCED</span><span>5 ITEMS · $3,116</span></div>
+<div class="plusband" onclick="openPay()"><span class="sheen"></span><svg class="ic"><use href="#i-spark"/></svg><div style="flex:1"><b class="sf" style="font-size:13.5px;font-weight:600">PaperTrail Plus</b><span class="sf" style="display:block;font-size:11px;opacity:.75">Annual membership · first 2 weeks free</span></div><span class="mono" style="font-size:11px;letter-spacing:.1em;font-weight:600">S$29.98/YR ›</span></div>
+</div>
+<!-- gold member card (hidden until purchase) -->
+<div id="goldCard" class="goldcard strike" style="margin-top:18px;display:none">
+<div class="row between"><span class="mono" style="font-size:9.5px;letter-spacing:.26em;font-weight:600">PAPERTRAIL · PLUS MEMBER</span><svg class="ic" style="stroke:#241C0E"><use href="#i-spark"/></svg></div>
+<div class="serif" style="font-size:27px;font-weight:600;margin-top:20px">Your library</div>
+<div class="mono" style="font-size:11px;letter-spacing:.2em;margin-top:4px;opacity:.75">MEMBER Nº 000482 · ANNUAL</div>
+<div class="row between" style="margin-top:18px"><span class="mono" style="font-size:9.5px;letter-spacing:.16em;opacity:.7">5 ITEMS · $3,116 · SYNCED</span><span class="mono" style="font-size:9.5px;letter-spacing:.16em;opacity:.7">RENEWS 16 JUL 2027</span></div>
+<div class="row between" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(36,28,14,.25)"><span class="sf" style="font-size:11px;opacity:.75">We'll knock 2 weeks before renewal.</span><span class="mono" style="font-size:9px;letter-spacing:.14em;font-weight:600;cursor:pointer" onclick="event.stopPropagation();toast('Opens App Store subscription settings')">MANAGE ›</span></div>
+</div>
+<div class="grp" style="margin-top:22px">
+<div class="srow" onclick="toast('Reminders — drill-in (not in this demo)')"><div class="sic"><svg class="ic"><use href="#i-bell"/></svg></div><div class="st"><b>Reminders</b><span>Warranty · returns · monthly digest</span></div><span class="sval">On</span><span class="chv">›</span></div>
+<div class="srow" onclick="toast('Household — drill-in')"><div class="sic"><svg class="ic"><use href="#i-people"/></svg></div><div class="st"><b>Household</b><span>Share proof with people you live with</span></div><span class="sval">2</span><span class="chv">›</span></div>
+<div class="srow" onclick="toast('Your data — export · import · privacy')"><div class="sic"><svg class="ic"><use href="#i-export"/></svg></div><div class="st"><b>Your data</b><span>Export, import, privacy — no lock-in</span></div><span class="chv">›</span></div>
+<div class="srow" onclick="toast('Help & about — incl. diagnostics')"><div class="sic"><svg class="ic"><use href="#i-help"/></svg></div><div class="st"><b>Help &amp; about</b><span>Guides, policy, diagnostics</span></div><span class="chv">›</span></div>
+</div>
+<p class="sf" style="font-size:12px;color:var(--txt-3);text-align:center;margin-top:24px;line-height:1.5">Records stay in your private iCloud.<br>Nobody else — including us — can read them.</p>
+<p class="sf" id="resetLine" style="font-size:11px;color:var(--txt-3);text-align:center;margin-top:6px;display:none"><a style="cursor:pointer" onclick="resetPlus()">Demo: reset purchase</a></p>
+<div style="height:120px"></div>
+</div>
+</div>
+
+<!-- TAB BAR -->
+<div class="tabbar2">
+<button class="t2 on" id="tab-lib" onclick="go('lib')"><svg class="ic ic20"><use href="#i-lib"/></svg>Library</button>
+<button class="t2" id="tab-warr" onclick="go('warr')"><svg class="ic ic20"><use href="#i-seal"/></svg>Warranty</button>
+<button class="fab" onclick="softAsk()">+</button>
+<button class="t2" onclick="toast('Search — not in this demo')"><svg class="ic ic20"><use href="#i-search"/></svg>Search</button>
+<button class="t2" id="tab-set" onclick="go('set')"><svg class="ic ic20"><use href="#i-gear"/></svg>Settings</button>
+</div>
+
+<!-- PAYWALL P1 -->
+<div class="ovl" id="ovl-pay">
+<div class="pay">
+<button class="xbtn" onclick="closePay()">✕</button>
+<div class="cert" style="margin-top:28px"><div class="cert-in">
+<div class="stamped" id="paidStamp">MEMBER ✓</div>
+<span class="kicker" style="color:var(--gold-deep)">Certificate of membership</span>
+<div class="serif" style="font-size:34px;font-weight:600;margin-top:8px;line-height:1.05">PaperTrail Plus</div>
+<div class="serif ital" style="font-size:15px;color:var(--on-paper-2);margin-top:6px">Renewed yearly, like a library card.</div>
+<div style="margin:16px 0 12px"><div class="seal"><span>PLUS ·<br>MEMBER<br>· EST 2026</span></div></div>
+<div class="col" style="gap:8px;text-align:left;max-width:262px;margin:0 auto">
+<div class="row gap10"><span style="color:var(--sage-deep)">✓</span><span class="sf" style="font-size:13px">Household sharing, unlimited members</span></div>
+<div class="row gap10"><span style="color:var(--sage-deep)">✓</span><span class="sf" style="font-size:13px">Whole-home insurance report</span></div>
+<div class="row gap10"><span style="color:var(--sage-deep)">✓</span><span class="sf" style="font-size:13px">Warranty Digest Pro</span></div>
+<div class="row gap10"><span style="color:var(--sage-deep)">✓</span><span class="sf" style="font-size:13px">Every future Plus feature — included</span></div>
+</div>
+<hr class="gold-rule" style="margin:16px auto 0;max-width:180px">
+<div class="plans">
+<button class="plan on" id="pl-yr" onclick="pickPlan('yr')"><span class="pk">ANNUAL</span><b>S$29.98</b><span class="ps">≈ S$2.50 / month</span></button>
+<button class="plan" id="pl-mo" onclick="pickPlan('mo')"><span class="pk">MONTHLY</span><b>S$3.98</b><span class="ps">renews monthly</span></button>
+</div>
+<div class="sf" id="payFine" style="font-size:11.5px;color:var(--on-paper-3);margin-top:12px">First 2 weeks free · then S$29.98/yr<br>We'll remind you before every renewal. Cancel keeps everything.</div>
+</div></div>
+<button class="btn btn-gold" id="buyBtn" style="margin-top:16px" onclick="buy()">Start 2 weeks free</button>
+<div class="row" style="justify-content:center;gap:22px;margin-top:14px">
+<span class="mono" style="font-size:10px;letter-spacing:.12em;color:var(--txt-3)">RESTORE</span><span class="mono" style="font-size:10px;letter-spacing:.12em;color:var(--txt-3)">PRIVACY</span><span class="mono" style="font-size:10px;letter-spacing:.12em;color:var(--txt-3)">TERMS</span>
+</div>
+</div>
+</div>
+
+<!-- SOFT ASK N1 -->
+<div class="ovl" id="ovl-ask">
+<div class="dim" onclick="closeAsk()"></div>
+<div class="sheet">
+<div class="paper dogear" style="padding:24px 22px"><span class="fold"></span>
+<span class="kicker" style="color:var(--gold-deep)">Before you put this away</span>
+<div class="serif" style="font-size:27px;font-weight:600;margin-top:8px;line-height:1.1">May we leave a note?</div>
+<p class="sf" style="font-size:14px;line-height:1.5;color:var(--on-paper-2);margin:10px 0 0">One quiet heads-up before a warranty or return window closes. That's the only reason we'll ever knock. No marketing, ever.</p>
+<div class="banner dropin" style="margin-top:16px">
+<div class="ai"><svg class="ic"><use href="#i-seal"/></svg></div>
+<div style="flex:1"><b>Samsung TV — 2 weeks left</b><p>Warranty ends 3 Jun. Your proof is ready if you need it.</p></div>
+<span class="tm">now</span>
+</div>
+<button class="paper-btn" style="margin-top:18px" onclick="iosPrompt()">Yes, notify me</button>
+<button class="ghost-btn" onclick="closeAsk()">NOT NOW</button>
+<p class="sf" style="font-size:10.5px;color:var(--on-paper-3);text-align:center;margin:4px 0 0">iOS will ask to confirm next.</p>
+</div>
+</div>
+<div class="iosalert" id="iosAlert">
+<h5>"PaperTrail" Would Like to Send You Notifications</h5>
+<p>Notifications may include alerts, sounds, and icon badges.</p>
+<div class="arow"><button onclick="allowIos(false)">Don't Allow</button><button onclick="allowIos(true)">Allow</button></div>
+</div>
+</div>
+
+<div id="toastHost"></div>
+</div></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let scr='lib';
+function go(s){
+  if(s===scr)return;
+  $('scr-'+scr).classList.remove('on');
+  const el=$('scr-'+s);el.classList.add('on');el.classList.remove('anim-slide');void el.offsetWidth;el.classList.add('anim-slide');
+  ['lib','warr','set'].forEach(t=>{const b=$('tab-'+t);if(b)b.classList.toggle('on',t===s||(s==='warr'&&t==='warr'))});
+  $('tab-lib').classList.toggle('on',s==='lib');
+  scr=s;
+  if(s==='warr')animRing();
+  try{localStorage.setItem('pt2.scr',s)}catch(e){}
+}
+function animRing(){
+  const arc=$('ringArc');arc.style.transition='none';arc.style.strokeDashoffset=402;void arc.getBoundingClientRect();
+  arc.style.transition='';requestAnimationFrame(()=>arc.style.strokeDashoffset=402-238);
+  let n=0;const t=setInterval(()=>{n++; $('moNum').textContent=n+' mo'; if(n>=10)clearInterval(t)},70);
+}
+function toast(msg){
+  document.querySelectorAll('.toast').forEach(t=>t.remove());
+  const d=document.createElement('div');d.className='toast';d.textContent=msg;
+  document.querySelector('.pt').appendChild(d);setTimeout(()=>d.remove(),2200);
+}
+function openPay(){$('ovl-pay').classList.add('on')}
+let plan='yr';
+function pickPlan(p){plan=p;$('pl-yr').classList.toggle('on',p==='yr');$('pl-mo').classList.toggle('on',p==='mo');
+$('payFine').innerHTML=p==='yr'?'First 2 weeks free · then S$29.98/yr<br>We\u2019ll remind you before every renewal. Cancel keeps everything.':'First 2 weeks free · then S$3.98/mo<br>Cancel anytime. Your records are yours either way.'}
+function closePay(){$('ovl-pay').classList.remove('on');$('paidStamp').classList.remove('go');$('buyBtn').textContent='Start 2 weeks free'}
+function buy(){
+  const b=$('buyBtn');b.textContent='Confirming with the App Store…';b.style.opacity=.7;
+  setTimeout(()=>{ $('paidStamp').classList.add('go'); b.textContent='Welcome, member Nº 000482'; b.style.opacity=1;
+    setTimeout(()=>{ closePay(); setPlus(true); go('set'); toast('Your card has been struck in gold.'); },1200);
+  },900);
+}
+function setPlus(on){
+  $('freeCard').style.display=on?'none':'';
+  const g=$('goldCard');g.style.display=on?'':'none';
+  if(on){g.classList.remove('strike');void g.offsetWidth;g.classList.add('strike')}
+  $('resetLine').style.display=on?'':'none';
+  try{localStorage.setItem('pt2.plus',on?'1':'0')}catch(e){}
+}
+function resetPlus(){setPlus(false);toast('Demo reset — back to Free')}
+function softAsk(){$('ovl-ask').classList.add('on')}
+function closeAsk(){$('ovl-ask').classList.remove('on');$('iosAlert').classList.remove('on')}
+function iosPrompt(){$('iosAlert').classList.add('on')}
+function allowIos(yes){
+  closeAsk();
+  toast(yes?'We\u2019ll knock twice a month, at most.':'No notes, then. You can change this later.');
+}
+try{
+  if(localStorage.getItem('pt2.plus')==='1')setPlus(true);
+  const s=localStorage.getItem('pt2.scr');if(s&&s!=='lib')go(s);
+}catch(e){}
+</script>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#0E0C09"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#F3EBD9"/><rect x="30" y="62" width="40" height="8" rx="3" fill="#C2A15C"/></svg></template>
+</body></html>
