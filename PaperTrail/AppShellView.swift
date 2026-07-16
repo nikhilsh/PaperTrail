@@ -59,6 +59,10 @@ final class AppRouter {
 
     var selectedTab: AppTab = .library
     var showCapture = false
+    /// The v3 "five ways to shelve" paper sheet (`addSheetV2`, §3 of
+    /// `docs/design-v3/V3_BRIEF.md`). Flag-gated at the FAB tap site; when the
+    /// flag is off the FAB goes straight to `showCapture` exactly as in v2.
+    var showAddSheet = false
 
     /// A record to push onto the Library tab's stack, consumed by
     /// `navigationDestination(item:)` in `AppShellView`.
@@ -79,11 +83,22 @@ final class AppRouter {
     /// concludes (success or failure).
     var isImporting = false
 
-    /// True while a full-screen cover (scan, import review) is presented or
-    /// about to be. `SoftAskCoordinator` checks this before ever presenting
-    /// the notification soft-ask — nothing may interrupt an in-progress scan
-    /// or import (V2_BRIEF §4 acceptance criteria).
-    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting }
+    /// Lightweight, conservative signal any sheet/alert-presenting view can
+    /// set around its own presentation — not every presenter funnels through
+    /// `showCapture`/`pendingImportPayload`/`isImporting`, and `hasActiveCover`
+    /// needs to cover those too so the soft-ask never rises over them.
+    /// Deliberately dumb (a single flat bool, not a stack/count): when in
+    /// doubt about ordering between two overlapping presenters, this defers
+    /// the soft-ask to the next foreground rather than risk it slipping
+    /// through a gap.
+    var isPresentingAnySheet = false
+
+    /// True while a full-screen cover (scan, import review) or any other
+    /// tracked sheet/alert is presented or about to be. `SoftAskCoordinator`
+    /// checks this before ever presenting the notification soft-ask —
+    /// nothing may interrupt an in-progress scan, import, or other modal
+    /// (V2_BRIEF §4 acceptance criteria).
+    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting || isPresentingAnySheet || showAddSheet }
 
     func navigate(to route: Route) {
         switch route {
@@ -144,6 +159,7 @@ struct AppShellView: View {
     @State private var router = AppRouter.shared
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("community.consentPrompted") private var communityConsentPrompted = false
     @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
     @State private var showLearningConsent = false
@@ -174,7 +190,15 @@ struct AppShellView: View {
 
             PTTabBar(
                 selection: $router.selectedTab,
-                onCapture: { router.showCapture = true }
+                onCapture: {
+                    // v3 §3 "five ways to shelve": flag on → the paper add
+                    // sheet; flag off → straight to capture, exactly as v2.
+                    if FeatureFlags.isOn(.addSheetV2) {
+                        router.showAddSheet = true
+                    } else {
+                        router.showCapture = true
+                    }
+                }
             )
         }
         .background(PT.inkCanvas.ignoresSafeArea())
@@ -182,6 +206,34 @@ struct AppShellView: View {
         .preferredColorScheme(.dark)
         .tint(PT.gold)
         .softAskPresentation()
+        .overlay {
+            // v3 §3 "five ways to shelve" paper sheet — same dim/rise
+            // choreography as `SoftAskSheet`, but driven directly off
+            // `router` (already a local property here) rather than a
+            // separate `@Environment`-reading presentation modifier.
+            if router.showAddSheet {
+                ZStack {
+                    Color.black.opacity(0.66)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .onTapGesture { router.showAddSheet = false }
+
+                    AddSheetView(
+                        onScanReceipt: { presentCaptureFromAddSheet() },
+                        onDraftReady: { payload in presentDraftFromAddSheet(payload) },
+                        onCancel: { router.showAddSheet = false }
+                    )
+                    .padding(14)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+                }
+                .accessibilityAddTraits(.isModal)
+                .zIndex(90)
+            }
+        }
+        .animation(PTMotion.reduced(PTMotion.sheetEase(0.42), reduceMotion: reduceMotion), value: router.showAddSheet)
         .fullScreenCover(isPresented: $router.showCapture) {
             NavigationStack {
                 CaptureView()
@@ -191,7 +243,7 @@ struct AppShellView: View {
         }
         .fullScreenCover(item: $router.pendingImportPayload) { payload in
             NavigationStack {
-                DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr)
+                DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr, seedsProductImage: payload.seedsProductImage)
             }
             .tint(PT.gold)
             .preferredColorScheme(.dark)
@@ -240,6 +292,12 @@ struct AppShellView: View {
         .onChange(of: router.pendingImportPayload) { wasPresented, isPresented in
             if wasPresented != nil, isPresented == nil { retrySoftAskIfNeeded() }
         }
+        .onChange(of: showLearningConsent) { _, isShowing in
+            // This app-root alert is a presenter `hasActiveCover`'s named
+            // cases don't cover — feed it into the generic signal so the
+            // soft-ask can't rise underneath/behind it either.
+            router.isPresentingAnySheet = isShowing
+        }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
             Button("Share anonymously") {
                 communityLearningEnabled = true
@@ -263,6 +321,28 @@ struct AppShellView: View {
     private func retrySoftAskIfNeeded() {
         guard let records = try? modelContext.fetch(FetchDescriptor<PurchaseRecord>()) else { return }
         Task { await SoftAskCoordinator.shared.retrySoftAsk(records: records) }
+    }
+
+    // MARK: Add sheet (v3 §3)
+
+    /// Dismisses the add sheet, then — after its own dismiss transition has
+    /// had time to settle — presents the real full-screen capture cover.
+    /// Mirrors `importIncomingFile`'s "let the first cover's dismissal
+    /// animation settle" delay so the two presentations don't fight.
+    private func presentCaptureFromAddSheet() {
+        router.showAddSheet = false
+        Task {
+            try? await Task.sleep(for: .milliseconds(420))
+            router.showCapture = true
+        }
+    }
+
+    private func presentDraftFromAddSheet(_ payload: DraftPayload) {
+        router.showAddSheet = false
+        Task {
+            try? await Task.sleep(for: .milliseconds(420))
+            router.pendingImportPayload = payload
+        }
     }
 
     // MARK: Deep links

@@ -11,6 +11,12 @@ struct DraftRecordView: View {
     let seedType: AttachmentType
     let seededAttachments: [Attachment]
     let seededOCR: OCRExtractionResult?
+    /// True when `seededAttachments` is a single product photo from the add
+    /// sheet's "Photograph the thing" (v3 §3), not proof of purchase — on
+    /// save, that attachment is filed as `productImageAttachmentID` rather
+    /// than a regular document attachment. Defaults false for every other
+    /// entry point (scan, barcode, voice, Mail/Files import).
+    let seedsProductImage: Bool
 
     /// The structured extraction result preserved for confidence badges and correction logging.
     private let structuredResult: StructuredExtractionResult?
@@ -55,10 +61,11 @@ struct DraftRecordView: View {
     @State private var itemNameEdits: [UUID: String] = [:]
     @State private var itemPriceEdits: [UUID: String] = [:]
 
-    init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil) {
+    init(seedType: AttachmentType, seededAttachments: [Attachment] = [], seededOCR: OCRExtractionResult? = nil, seedsProductImage: Bool = false) {
         self.seedType = seedType
         self.seededAttachments = seededAttachments
         self.seededOCR = seededOCR
+        self.seedsProductImage = seedsProductImage
         self.structuredResult = seededOCR?.structuredResult
         self.lineItems = seededOCR?.lineItems ?? []
 
@@ -276,8 +283,8 @@ struct DraftRecordView: View {
                     .buttonStyle(.plain)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    let merchant = merchantName.isEmpty ? (seededOCR?.suggestedMerchantName ?? "receipt") : merchantName
-                    Chip(symbol: "checkmark.circle", text: "Scanned · \(merchant)", tone: PT.sage)
+                    let merchant = merchantName.isEmpty ? (seededOCR?.suggestedMerchantName ?? (seedsProductImage ? "product photo" : "receipt")) : merchantName
+                    Chip(symbol: "checkmark.circle", text: seedsProductImage ? "Photographed · \(merchant)" : "Scanned · \(merchant)", tone: PT.sage)
                     Text("\(detectedFieldCount) fields detected")
                         .font(PTFont.mono(10))
                         .foregroundStyle(PT.txt3)
@@ -861,6 +868,13 @@ struct DraftRecordView: View {
                 modelContext.insert(attachment)
             }
             attachmentsByRecord[primary.id] = allAttachments
+            // "Photograph the thing" (v3 §3): the single seeded attachment is
+            // a product photo, not proof of purchase — file it as the
+            // product image so LibraryView's "ADD PROOF" pill (no document
+            // attachments yet) can key off it.
+            if seedsProductImage, let productPhoto = seededAttachments.first {
+                primary.productImageAttachmentID = productPhoto.id
+            }
             for record in records.dropFirst() {
                 var dups: [Attachment] = []
                 for attachment in allAttachments {
@@ -878,18 +892,23 @@ struct DraftRecordView: View {
             SpotlightIndexer.index(record, attachments: attachmentsByRecord[record.id] ?? [])
         }
 
-        // Schedule reminders per the user's preferences (§1-B, §6).
+        // Schedule reminders per the user's preferences (§1-B, §6). Use the
+        // scheduler's own return value (0 or 1 requests submitted) to decide
+        // whether to stamp "scheduled" — stamping unconditionally lies about
+        // records with no expiry/deadline to anchor to, or where the lead
+        // time would already fire in the past. `rescheduleAll` re-arms
+        // anything left unstamped once the user later grants permission.
         let reminderPrefs = ReminderSettings.shared
         if includeWarranty, reminderPrefs.warrantyRemindersEnabled {
             for record in records {
-                record.warrantyNotificationScheduled = true
-                NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                let count = NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                record.warrantyNotificationScheduled = count > 0
             }
         }
         if returnWindowDays != nil, reminderPrefs.returnWindowRemindersEnabled {
             for record in records {
-                record.returnWindowNotificationScheduled = true
-                NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+                let count = NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+                record.returnWindowNotificationScheduled = count > 0
             }
         }
 

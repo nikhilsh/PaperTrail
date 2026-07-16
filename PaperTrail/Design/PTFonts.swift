@@ -41,7 +41,11 @@ enum PTFont {
     // MARK: Serif (Newsreader)
 
     /// Newsreader at an exact variable weight (default 500). `opsz` tracks the
-    /// point size for correct optical sizing.
+    /// point size for correct optical sizing. Scaled for Dynamic Type via
+    /// `UIFontMetrics(forTextStyle: .body)` — `.body` is the closest match
+    /// for how this is used across the app (headline-adjacent reading text
+    /// at a range of fixed point sizes, not a single named text style), so
+    /// every call site scales the same way without changing its signature.
     static func serif(_ size: CGFloat, weight: CGFloat = 500, italic: Bool = false) -> Font {
         let opsz = min(max(Double(size), 6), 72)
         let variations: [Int: CGFloat] = [wghtAxis: weight, opszAxis: CGFloat(opsz)]
@@ -50,13 +54,16 @@ enum PTFont {
             UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): variations
         ])
         let uiFont = UIFont(descriptor: descriptor, size: size)
-        return Font(uiFont)
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledFont(for: uiFont)
+        return Font(scaled)
     }
 
     // MARK: Mono (IBM Plex Mono)
 
+    /// `Font.custom(_:size:relativeTo:)` scales with Dynamic Type natively —
+    /// `relativeTo: .body` for the same reason as `serif` above.
     static func mono(_ size: CGFloat, medium: Bool = false) -> Font {
-        Font.custom(medium ? monoMediumPS : monoRegularPS, size: size)
+        Font.custom(medium ? monoMediumPS : monoRegularPS, size: size, relativeTo: .body)
     }
 }
 

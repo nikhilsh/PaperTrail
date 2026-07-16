@@ -13,15 +13,18 @@ struct SoftAskCoordinatorTests {
 
     // MARK: - SoftAskEligibility.shouldShowInitial — full matrix
 
-    @Test func showsOnlyOnTheFirstEverSave() {
-        #expect(SoftAskEligibility.shouldShowInitial(
-            recordsSavedLifetime: 1, authorizationStatus: .notDetermined, hasShownInitial: false
-        ))
+    /// `>= 1`, not `== 1`: a first-ever save can save more than one record at
+    /// once (a multi-item receipt scan saves each line item as its own
+    /// record in the same call), which must still count as "the first save"
+    /// rather than skip past the threshold and never trigger the ask.
+    @Test func showsOnceThereIsAtLeastOneRecordSavedEver() {
+        for lifetime in [1, 2, 5, 100] {
+            #expect(SoftAskEligibility.shouldShowInitial(
+                recordsSavedLifetime: lifetime, authorizationStatus: .notDetermined, hasShownInitial: false
+            ))
+        }
         #expect(!SoftAskEligibility.shouldShowInitial(
             recordsSavedLifetime: 0, authorizationStatus: .notDetermined, hasShownInitial: false
-        ))
-        #expect(!SoftAskEligibility.shouldShowInitial(
-            recordsSavedLifetime: 2, authorizationStatus: .notDetermined, hasShownInitial: false
         ))
     }
 
@@ -36,6 +39,11 @@ struct SoftAskCoordinatorTests {
     @Test func neverShowsInitialTwice() {
         #expect(!SoftAskEligibility.shouldShowInitial(
             recordsSavedLifetime: 1, authorizationStatus: .notDetermined, hasShownInitial: true
+        ))
+        // Not once it's already been shown, no matter how many more records
+        // pile up afterward.
+        #expect(!SoftAskEligibility.shouldShowInitial(
+            recordsSavedLifetime: 12, authorizationStatus: .notDetermined, hasShownInitial: true
         ))
     }
 
@@ -145,7 +153,7 @@ struct SoftAskCoordinatorTests {
         defaults.set(1, forKey: "softAsk.recordsSavedLifetime")
     }
 
-    @Test @MainActor func firstSaveWithUndeterminedPermissionPresentsTheAsk() async {
+    @Test @MainActor func firstSaveWithUndeterminedPermissionPresentsTheAsk() async throws {
         let defaults = makeDefaults()
         seedFirstSave(defaults)
         let coordinator = makeCoordinator(defaults: defaults, authorizationStatus: .notDetermined)
@@ -153,14 +161,20 @@ struct SoftAskCoordinatorTests {
 
         #expect(shown)
         #expect(coordinator.pendingAsk?.itemName == "Samsung TV")
+        // hasShownInitial burns when the sheet actually renders (`markShown`,
+        // driven by the presented sheet's `onAppear`), not merely when it's
+        // scheduled to present.
+        #expect(!coordinator.hasShownInitial)
+        coordinator.markShown(try #require(coordinator.pendingAsk))
         #expect(coordinator.hasShownInitial)
     }
 
-    @Test @MainActor func secondSaveNeverPresentsTheAsk() async {
+    @Test @MainActor func secondSaveNeverPresentsTheAsk() async throws {
         let defaults = makeDefaults()
         seedFirstSave(defaults)
         let coordinator = makeCoordinator(defaults: defaults, authorizationStatus: .notDetermined)
         _ = await coordinator.evaluateInitial(itemName: "First item", warrantyExpiryDate: nil, settleGracePeriod: false)
+        coordinator.markShown(try #require(coordinator.pendingAsk))
         coordinator.respondNotNow()
 
         let secondCoordinator = makeCoordinator(defaults: defaults, authorizationStatus: .notDetermined)
@@ -189,11 +203,12 @@ struct SoftAskCoordinatorTests {
         #expect(coordinator.pendingAsk == nil)
     }
 
-    @Test @MainActor func reAskFiresOnceAfterDeclineWhenAWarrantyIsClosingIn() async {
+    @Test @MainActor func reAskFiresOnceAfterDeclineWhenAWarrantyIsClosingIn() async throws {
         let defaults = makeDefaults()
         seedFirstSave(defaults)
         let initial = makeCoordinator(defaults: defaults, authorizationStatus: .notDetermined)
         _ = await initial.evaluateInitial(itemName: "First item", warrantyExpiryDate: nil, settleGracePeriod: false)
+        initial.markShown(try #require(initial.pendingAsk))
         initial.respondNotNow()
         #expect(initial.hasShownInitial)
         #expect(initial.reAskCount == 0)
@@ -204,6 +219,9 @@ struct SoftAskCoordinatorTests {
         let fired = await reAskCoordinator.checkReAsk(records: [closingIn])
         #expect(fired)
         #expect(reAskCoordinator.pendingAsk?.itemName == "Closing soon")
+        // Not burned yet — only `markShown` (the sheet's own `onAppear`) spends it.
+        #expect(reAskCoordinator.reAskCount == 0)
+        reAskCoordinator.markShown(try #require(reAskCoordinator.pendingAsk))
         #expect(reAskCoordinator.reAskCount == 1)
 
         // A second closing-in record must not trigger a second re-ask, ever.
@@ -211,6 +229,43 @@ struct SoftAskCoordinatorTests {
         let anotherClosingIn = PurchaseRecord(productName: "Also closing", warrantyExpiryDate: Calendar.current.date(byAdding: .day, value: 2, to: now))
         let firedAgain = await reAskCoordinator.checkReAsk(records: [anotherClosingIn])
         #expect(!firedAgain)
+    }
+
+    /// Item 3: concurrent `checkReAsk` calls must not double-increment
+    /// `reAskCount` — the single-flight guard plus the post-await re-check of
+    /// `pendingAsk == nil` together make sure only the first of two racing
+    /// callers actually presents.
+    @Test @MainActor func concurrentCheckReAskCallsOnlyFireOnce() async throws {
+        let defaults = makeDefaults()
+        seedFirstSave(defaults)
+        let initial = makeCoordinator(defaults: defaults, authorizationStatus: .notDetermined)
+        _ = await initial.evaluateInitial(itemName: "First item", warrantyExpiryDate: nil, settleGracePeriod: false)
+        initial.markShown(try #require(initial.pendingAsk))
+        initial.respondNotNow()
+
+        let now = Date()
+        let closingIn = PurchaseRecord(productName: "Closing soon", warrantyExpiryDate: Calendar.current.date(byAdding: .day, value: 5, to: now))
+
+        // A status provider with an artificial delay widens the race window
+        // between the two concurrent `checkReAsk` calls below.
+        let reAskCoordinator = SoftAskCoordinator(
+            defaults: defaults,
+            authorizationStatusProvider: {
+                try? await Task.sleep(for: .milliseconds(20))
+                return .notDetermined
+            },
+            hasActiveCoverProvider: { false }
+        )
+
+        async let first = reAskCoordinator.checkReAsk(records: [closingIn])
+        async let second = reAskCoordinator.checkReAsk(records: [closingIn])
+        let results = await [first, second]
+
+        #expect(results.filter { $0 }.count == 1)
+        if let ask = reAskCoordinator.pendingAsk {
+            reAskCoordinator.markShown(ask)
+        }
+        #expect(reAskCoordinator.reAskCount == 1)
     }
 
     @Test @MainActor func reAskNeverFiresBeforeTheInitialAskEverShowed() async {

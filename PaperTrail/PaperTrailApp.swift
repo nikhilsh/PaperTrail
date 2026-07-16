@@ -292,7 +292,13 @@ struct PaperTrailApp: App {
         await manager.syncMissingImages(attachments: syncInfos)
 
         // Record the time of the last successful sync so Settings can show an
-        // honest "Backed up · {relativeTime}" instead of a permanent green (§7).
+        // honest "Backed up · {relativeTime}" instead of a permanent green
+        // (§7) — but ONLY when this round actually succeeded. Both calls
+        // above run their transfers to completion before returning, so by
+        // now `transferErrors` reflects this round's outcome; a non-empty
+        // dict means something failed, and stamping "now" anyway would
+        // fabricate a "just now" backup that didn't happen (§6).
+        guard manager.transferErrors.isEmpty else { return }
         UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "lastCloudSyncDate")
     }
 }

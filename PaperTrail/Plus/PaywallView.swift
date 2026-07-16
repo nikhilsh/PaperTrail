@@ -49,6 +49,14 @@ struct PaywallView: View {
     @State private var loadState: LoadState = .loading
     @State private var yearlyProduct: Product?
     @State private var monthlyProduct: Product?
+    /// Per-plan intro-offer eligibility, resolved once at `loadProducts` —
+    /// true only when the product both defines an intro offer AND this
+    /// account is actually eligible for it (`isEligibleForIntroOffer`).
+    /// Monthly never has an intro offer in ASC, so this is always false for
+    /// it regardless of eligibility — the trial copy must never promise a
+    /// trial monthly doesn't have (§2).
+    @State private var yearlyOffersTrial = false
+    @State private var monthlyOffersTrial = false
     @State private var selectedIsYearly = true
     @State private var isPurchasing = false
     @State private var isRestoring = false
@@ -82,6 +90,8 @@ struct PaywallView: View {
                     ctaButton
                 }
 
+                freeForeverSection
+
                 restoreButton
 
                 legalLinks
@@ -108,7 +118,7 @@ struct PaywallView: View {
                 Alert(title: Text("Couldn't complete purchase"), message: Text(message))
             case .pending:
                 Alert(title: Text("Purchase pending"),
-                      message: Text("Your purchase needs approval before it's complete — Plus unlocks as soon as it's confirmed."))
+                      message: Text("Your purchase needs approval before it's complete — Plus starts as soon as it's confirmed."))
             }
         }
     }
@@ -147,6 +157,36 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Free forever (docs/MONETIZATION.md "the trust move")
+
+    /// The free-forever list, shown *on the paywall itself* — the trust
+    /// move of showing what you're NOT paying for (docs/MONETIZATION.md
+    /// §4). A compact checked list under a mono kicker, placed below the
+    /// certificate/CTA and above Restore.
+    private var freeForeverSection: some View {
+        VStack(spacing: 10) {
+            Text("FREE FOREVER, ALWAYS")
+                .ptMonoLabel(10, tracking: 2.4)
+                .foregroundStyle(PT.goldDeep)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(PlusConfig.freeForever, id: \.self) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(PT.sageDeep)
+                            .padding(.top, 1.5)
+                        Text(item)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(PT.txt2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 280)
+        .padding(.top, 4)
+    }
+
     private var unavailableBlock: some View {
         VStack(spacing: 6) {
             Text("Plus isn't available right now")
@@ -161,11 +201,24 @@ struct PaywallView: View {
         .frame(maxWidth: 240)
     }
 
-    private var finePrintText: String {
-        let priceText: String? = selectedIsYearly
+    /// Live per-plan price text, e.g. "S$39.98/yr" / "S$5.98/mo" — `nil`
+    /// until that plan's product has loaded.
+    private var selectedPriceText: String? {
+        selectedIsYearly
             ? yearlyProduct.map { "\($0.displayPrice)/yr" }
             : monthlyProduct.map { "\($0.displayPrice)/mo" }
-        return "First 2 weeks free · then \(priceText ?? "—"). We'll remind you before every renewal. Cancel keeps everything."
+    }
+
+    /// Whether the SELECTED plan actually offers a trial to this account —
+    /// monthly is always false (no intro offer exists on it in ASC); yearly
+    /// is only true when both the product defines one AND this account is
+    /// eligible (§2: never promise a trial that won't apply).
+    private var selectedOffersTrial: Bool {
+        selectedIsYearly ? yearlyOffersTrial : monthlyOffersTrial
+    }
+
+    private var finePrintText: String {
+        PaywallCopy.finePrint(offersTrial: selectedOffersTrial, isYearly: selectedIsYearly, priceText: selectedPriceText)
     }
 
     private func monthlyEquivalent(of product: Product) -> String {
@@ -178,11 +231,15 @@ struct PaywallView: View {
         Button {
             Task { await purchase() }
         } label: {
-            Text(isPurchasing ? "Confirming with the App Store…" : "Start 2 weeks free")
+            Text(isPurchasing ? "Confirming with the App Store…" : ctaTitle)
         }
         .buttonStyle(PTGoldButtonStyle())
         .opacity(isPurchasing ? 0.7 : 1)
         .disabled(isPurchasing || selectedProduct == nil)
+    }
+
+    private var ctaTitle: String {
+        PaywallCopy.ctaTitle(offersTrial: selectedOffersTrial, priceText: selectedPriceText)
     }
 
     private var restoreButton: some View {
@@ -229,12 +286,23 @@ struct PaywallView: View {
                 loadState = .unavailable
                 return
             }
+            yearlyOffersTrial = await offersTrial(yearlyProduct)
+            monthlyOffersTrial = await offersTrial(monthlyProduct)
             selectedIsYearly = yearlyProduct != nil
             loadState = .loaded
         } catch {
             AppLogger.error("Failed to load Plus products: \(error.localizedDescription)", category: "plus")
             loadState = .unavailable
         }
+    }
+
+    /// True only when `product` both defines an intro offer AND this
+    /// account is actually eligible for it — checking eligibility alone
+    /// isn't enough (a product with no intro offer, like monthly, would
+    /// still report an eligibility value that means nothing here).
+    private func offersTrial(_ product: Product?) async -> Bool {
+        guard let subscription = product?.subscription, subscription.introductoryOffer != nil else { return false }
+        return await subscription.isEligibleForIntroOffer
     }
 
     private func purchase() async {
@@ -295,9 +363,22 @@ private struct MemberStampOverlay: View {
     // (DESIGN_LANGUAGE.md §4's stamp motif), so this wrapper's own rotation
     // only needs to cover the REMAINING swing: -13°→0° composes with that
     // baked-in -3° to the spec's total -16°→-3°.
-    @State private var scale: CGFloat = 2.4
-    @State private var rotation: Double = -13
+    //
+    // Reduce Motion (ANIMATION_SPEC "Don'ts": "skip sheen and stamp
+    // overshoot"): `scale`/`rotation` start already at their end values —
+    // set in `init`, from the caller-supplied `reduceMotion` (a plain
+    // property here, unlike `@Environment`, so it's readable before the
+    // view even appears) — so nothing about them ever animates; only
+    // `opacity` (below) actually crossfades in.
+    @State private var scale: CGFloat
+    @State private var rotation: Double
     @State private var opacity: Double = 0
+
+    init(reduceMotion: Bool) {
+        self.reduceMotion = reduceMotion
+        _scale = State(initialValue: reduceMotion ? 1 : 2.4)
+        _rotation = State(initialValue: reduceMotion ? 0 : -13)
+    }
 
     var body: some View {
         PTStamp(text: "Member ✓", state: .paper)
@@ -315,6 +396,42 @@ private struct MemberStampOverlay: View {
             rotation = 0
             opacity = 1
         }
+    }
+}
+
+// MARK: - Paywall copy (§2/§3 trial-copy + renewal-promise honesty)
+
+/// Pure paywall CTA/fine-print copy logic — extracted for testability
+/// (`PaywallCopyTests`): given only the selected plan's resolved trial
+/// eligibility and price, decides what to say. No StoreKit `Product`
+/// involved, so no live App Store Connect state is needed to test the
+/// eligible×hasIntro matrix (§2).
+enum PaywallCopy {
+    /// "Start 2 weeks free" only when the selected plan actually offers a
+    /// trial to this account; otherwise "Subscribe — <price>" (or the bare
+    /// "Subscribe" while price hasn't loaded yet) — monthly (no intro offer
+    /// in ASC) always falls here, never promising a trial it doesn't have.
+    static func ctaTitle(offersTrial: Bool, priceText: String?) -> String {
+        if offersTrial { return "Start 2 weeks free" }
+        guard let priceText else { return "Subscribe" }
+        return "Subscribe — \(priceText)"
+    }
+
+    /// Fine print for the selected plan: trial copy only when
+    /// `offersTrial`; a paid annual keeps the renewal-reminder promise
+    /// (it's real — `RenewalReminder` schedules it); a paid monthly drops
+    /// it (no renewal reminder is ever scheduled for monthly — see
+    /// `PlusEntitlements.updateRenewalReminder`), so the copy shouldn't
+    /// promise one either.
+    static func finePrint(offersTrial: Bool, isYearly: Bool, priceText: String?) -> String {
+        let priceText = priceText ?? "—"
+        if offersTrial {
+            return "First 2 weeks free · then \(priceText). We'll remind you before every renewal. Cancel keeps everything."
+        }
+        if isYearly {
+            return "\(priceText). We'll remind you before every renewal. Cancel keeps everything."
+        }
+        return "\(priceText). Cancel keeps everything."
     }
 }
 

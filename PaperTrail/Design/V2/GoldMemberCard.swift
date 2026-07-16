@@ -27,7 +27,12 @@ import SwiftUI
 /// MainActor isolation. `Equatable` for tests (`MembershipCardStateTests`).
 nonisolated enum PTMembershipTerm: Equatable {
     case annual(renewsOn: String)
-    case monthly(renewsOn: String)
+    /// `dayText` is a caller-formatted, ready-to-display day-of-month for
+    /// the footer's honest "no knock promised" copy (e.g. "the 1st") — kept
+    /// separate from `renewsOn` (the full date, used by `statusText`)
+    /// because the footer never promises a renewal-reminder knock for a
+    /// monthly plan (§3b), only states when it bills.
+    case monthly(renewsOn: String, dayText: String)
     /// Free-trial period: bills (rather than renews) on the given date.
     case trial(billsOn: String)
     /// Legacy one-time purchase (Wave D: no longer sold, but a past buyer
@@ -48,7 +53,8 @@ nonisolated enum PTMembershipTerm: Equatable {
     /// / "NEVER EXPIRES" (DESIGN_LANGUAGE.md §5, lifetime's fixed caption).
     var statusText: String {
         switch self {
-        case .annual(let date), .monthly(let date): "RENEWS \(date.uppercased())"
+        case .annual(let date): "RENEWS \(date.uppercased())"
+        case .monthly(let date, _): "RENEWS \(date.uppercased())"
         case .trial(let date): "TRIAL · BILLS \(date.uppercased())"
         case .lifetime: "NEVER EXPIRES"
         }
@@ -59,24 +65,55 @@ nonisolated enum PTMembershipTerm: Equatable {
     /// the relevant product IDs rather than a live `StoreKit.Transaction`,
     /// so this is testable without StoreKit (`MembershipCardStateTests`).
     /// Lifetime wins regardless of the other fields — a legacy purchase
-    /// never reads as a trial or a term.
+    /// never reads as a trial or a term. `monthlyDayText` only matters when
+    /// the result is `.monthly` — pass "" when the caller hasn't computed it
+    /// (e.g. for a plan it already knows isn't monthly).
     nonisolated static func from(
         productID: String,
         isIntroductoryOffer: Bool,
         renewalDateText: String,
         lifetimeProductID: String,
-        monthlyProductID: String
+        monthlyProductID: String,
+        monthlyDayText: String = ""
     ) -> PTMembershipTerm {
         if productID == lifetimeProductID {
             .lifetime
         } else if isIntroductoryOffer {
             .trial(billsOn: renewalDateText)
         } else if productID == monthlyProductID {
-            .monthly(renewsOn: renewalDateText)
+            .monthly(renewsOn: renewalDateText, dayText: monthlyDayText)
         } else {
             .annual(renewsOn: renewalDateText)
         }
     }
+
+    /// "the 1st"/"the 2nd"/"the 3rd"/"the 4th"... for a day-of-month — the
+    /// `monthlyDayText` `from(...)` expects for a monthly term's honest
+    /// "no knock promised" footer (§3b: "Renews monthly on the 1st.").
+    /// `nonisolated`, pure Foundation date math — testable without
+    /// StoreKit or a device (`MembershipCardStateTests`).
+    nonisolated static func ordinalDayText(for date: Date, calendar: Calendar = .current) -> String {
+        let day = calendar.component(.day, from: date)
+        let suffix: String
+        switch (day % 10, day % 100) {
+        case (1, let hundreds) where hundreds != 11: suffix = "st"
+        case (2, let hundreds) where hundreds != 12: suffix = "nd"
+        case (3, let hundreds) where hundreds != 13: suffix = "rd"
+        default: suffix = "th"
+        }
+        return "the \(day)\(suffix)"
+    }
+}
+
+/// Tri-state sync signal for the stats row's trailing suffix (honest-states
+/// rule §6: never a fabricated "SYNCED" while a transfer is still in
+/// flight). Mirrors `BackupState`'s three real states without carrying its
+/// relative-time/error payload — the card only needs to know which of the
+/// three to show.
+enum PTSyncChipState {
+    case synced
+    case syncing
+    case paused
 }
 
 struct GoldMemberCard: View {
@@ -88,7 +125,11 @@ struct GoldMemberCard: View {
     let itemCount: Int
     /// Pre-formatted currency string, e.g. "$3,116".
     let totalValue: String
-    var synced: Bool = true
+    var syncState: PTSyncChipState = .synced
+    /// Denied/undetermined system notification permission — appends an
+    /// honest disclosure to the footer when it promises a renewal "knock"
+    /// that won't actually fire without it (§3c).
+    var notificationsAuthorized: Bool = true
     /// Wires the MANAGE › affordance (App Store manage-subscriptions deep
     /// link, Wave D). Omit to hide the affordance.
     var onManage: (() -> Void)? = nil
@@ -135,23 +176,54 @@ struct GoldMemberCard: View {
         .overlay(sheenOverlay)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: PT.gold.opacity(0.5), radius: 25, x: 0, y: 24)
-        .rotation3DEffect(.degrees(appeared ? 0 : 90), axis: (x: 0, y: 1, z: 0))
-        .scaleEffect(appeared ? 1 : 0.96)
+        .rotation3DEffect(.degrees(rotationDegrees), axis: (x: 0, y: 1, z: 0))
+        .scaleEffect(cardScale)
         .opacity(appeared ? 1 : 0)
         .onAppear(perform: strikeIn)
     }
 
-    private var statsText: String {
-        "\(itemCount) ITEM\(itemCount == 1 ? "" : "S") · \(totalValue)" + (synced ? " · SYNCED" : "")
+    /// Reduce Motion (ANIMATION_SPEC "Don'ts": "replace all translations
+    /// with 200ms crossfades"): no rotation — the card is already turned
+    /// face-up; only `opacity` (below) actually animates.
+    private var rotationDegrees: Double {
+        reduceMotion ? 0 : (appeared ? 0 : 90)
     }
 
-    /// Lifetime has nothing to "renew" — the honest-states rule means the
-    /// footer shouldn't promise a knock that will never come.
+    /// Reduce Motion: no scale — the card is already full-size.
+    private var cardScale: CGFloat {
+        reduceMotion ? 1 : (appeared ? 1 : 0.96)
+    }
+
+    private var statsText: String {
+        let suffix: String
+        switch syncState {
+        case .synced: suffix = " · SYNCED"
+        case .syncing: suffix = " · SYNCING"
+        case .paused: suffix = ""
+        }
+        return "\(itemCount) ITEM\(itemCount == 1 ? "" : "S") · \(totalValue)" + suffix
+    }
+
+    /// Lifetime has nothing to "renew" and monthly makes no renewal-knock
+    /// promise (§3b: only annual/trial do) — the honest-states rule means
+    /// the footer never claims a reminder that won't come. When it does
+    /// promise one, `appendNotificationHint` adds an honest disclosure if
+    /// system notification permission isn't actually granted (§3c).
     private var footerLine: String {
         switch term {
-        case .lifetime: "Purchased once. Yours forever."
-        default: "We'll knock 2 weeks before renewal."
+        case .lifetime:
+            return "Purchased once. Yours forever."
+        case .monthly(_, let dayText):
+            return "Renews monthly on \(dayText)."
+        case .annual:
+            return appendNotificationHint(to: "We'll knock 2 weeks before renewal.")
+        case .trial:
+            return appendNotificationHint(to: "We'll knock before your first bill.")
         }
+    }
+
+    private func appendNotificationHint(to base: String) -> String {
+        notificationsAuthorized ? base : base + " · Turn on notifications to get the knock"
     }
 
     /// Renewal promise + MANAGE › — honest-states rule: the card itself says
@@ -269,6 +341,37 @@ struct LapsedRenewBand: View {
         itemCount: 5,
         totalValue: "$3,116",
         onManage: nil
+    )
+    .padding(24)
+    .ptScreen()
+}
+
+#Preview("GoldMemberCard — monthly") {
+    // Monthly's footer never promises a renewal knock (§3b), so
+    // `notificationsAuthorized` has no visible effect here — that hint only
+    // applies to annual/trial, see the next preview.
+    GoldMemberCard(
+        name: "Your library",
+        memberNumber: memberNumber(fromTransactionID: "2000000555555555"),
+        term: .monthly(renewsOn: "16 Aug 2026", dayText: "the 16th"),
+        itemCount: 5,
+        totalValue: "$3,116",
+        onManage: {}
+    )
+    .padding(24)
+    .ptScreen()
+}
+
+#Preview("GoldMemberCard — annual, notifications off") {
+    // §3c: the honest "Turn on notifications to get the knock" disclosure.
+    GoldMemberCard(
+        name: "Your library",
+        memberNumber: memberNumber(fromTransactionID: "2000000123456789"),
+        term: .annual(renewsOn: "12 Aug 2027"),
+        itemCount: 5,
+        totalValue: "$3,116",
+        notificationsAuthorized: false,
+        onManage: {}
     )
     .padding(24)
     .ptScreen()
