@@ -41,12 +41,22 @@ enum PlusConfig {
         static let yearly = "plus.yearly"
         static let lifetime = "plus.lifetime"
 
+        /// Every product ID recognized for *entitlement* purposes — a past
+        /// lifetime purchase still grants Plus (legacy support), and the
+        /// debug console still needs to buy/inspect it. NOT the paywall's
+        /// plan list — see `subscriptionPlans`.
         static let all = [monthly, yearly, lifetime]
+
+        /// The two plans the paywall actually sells (v2.1,
+        /// docs/design-v2/DESIGN_LANGUAGE.md §7: "Two plans max... No
+        /// lifetime tier"). Annual first — it's the default-selected plan.
+        static let subscriptionPlans = [yearly, monthly]
     }
 
-    /// The free-forever promise (docs/MONETIZATION.md "The principle") — shown
-    /// on the paywall itself, deliberately first, as a trust move: show what
-    /// you're NOT paying for before asking for money.
+    /// The free-forever promise (docs/MONETIZATION.md "The principle") — the
+    /// trust move behind "Cancel keeps everything" on the v2.1 certificate
+    /// paywall (`PaywallView`), which doesn't spell out this list directly
+    /// but is built on the same premise: nothing here is ever held hostage.
     static let freeForever: [String] = [
         "Unlimited scanning, OCR, and AI extraction",
         "Unlimited records and private iCloud storage",
@@ -62,7 +72,10 @@ enum PlusConfig {
         let subtitle: String
     }
 
-    /// The three payoff moments Plus unlocks (docs/MONETIZATION.md "Paid").
+    /// The payoff moments Plus unlocks (docs/MONETIZATION.md "Paid" +
+    /// docs/design-v2/V2_BRIEF.md §3: the certificate shows exactly four
+    /// benefit checks). `title` doubles as the certificate's checkmark copy
+    /// (`CertificateView(benefits: PlusConfig.benefits.map(\.title))`).
     static let benefits: [Benefit] = [
         Benefit(icon: "person.2.fill",
                 title: "Unlimited household sharing",
@@ -72,6 +85,9 @@ enum PlusConfig {
                 subtitle: "Every room, not just one — the artifact you hand an insurer"),
         Benefit(icon: "calendar.badge.clock",
                 title: "Priority digest features",
-                subtitle: "Warranty Digest Pro — money-saved summaries & defect nudges")
+                subtitle: "Warranty Digest Pro — money-saved summaries & defect nudges"),
+        Benefit(icon: "sparkles",
+                title: "Every future Plus feature",
+                subtitle: "Included automatically — nothing more to buy")
     ]
 }

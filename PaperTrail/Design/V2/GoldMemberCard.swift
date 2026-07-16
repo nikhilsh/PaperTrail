@@ -24,12 +24,15 @@ import SwiftUI
 ///
 /// `nonisolated`: pure value logic with no UI state — keeps it callable from
 /// the test target, which (unlike the app target) doesn't default to
-/// MainActor isolation.
-nonisolated enum PTMembershipTerm {
+/// MainActor isolation. `Equatable` for tests (`MembershipCardStateTests`).
+nonisolated enum PTMembershipTerm: Equatable {
     case annual(renewsOn: String)
     case monthly(renewsOn: String)
     /// Free-trial period: bills (rather than renews) on the given date.
     case trial(billsOn: String)
+    /// Legacy one-time purchase (Wave D: no longer sold, but a past buyer
+    /// must keep working forever — docs/design-v2/V2_BRIEF.md hard rules).
+    case lifetime
 
     /// The `MEMBER Nº NNNNNN · <term>` suffix.
     var memberLineSuffix: String {
@@ -37,14 +40,41 @@ nonisolated enum PTMembershipTerm {
         case .annual: "ANNUAL"
         case .monthly: "MONTHLY"
         case .trial: "TRIAL"
+        case .lifetime: "LIFETIME"
         }
     }
 
-    /// The trailing stats-row chip: "RENEWS <date>" or "TRIAL · BILLS <date>".
+    /// The trailing stats-row chip: "RENEWS <date>" / "TRIAL · BILLS <date>"
+    /// / "NEVER EXPIRES" (DESIGN_LANGUAGE.md §5, lifetime's fixed caption).
     var statusText: String {
         switch self {
         case .annual(let date), .monthly(let date): "RENEWS \(date.uppercased())"
         case .trial(let date): "TRIAL · BILLS \(date.uppercased())"
+        case .lifetime: "NEVER EXPIRES"
+        }
+    }
+
+    /// Maps a live entitlement transaction's fields to the term the gold
+    /// card shows. Pure — callers pass pre-formatted `renewalDateText` and
+    /// the relevant product IDs rather than a live `StoreKit.Transaction`,
+    /// so this is testable without StoreKit (`MembershipCardStateTests`).
+    /// Lifetime wins regardless of the other fields — a legacy purchase
+    /// never reads as a trial or a term.
+    nonisolated static func from(
+        productID: String,
+        isIntroductoryOffer: Bool,
+        renewalDateText: String,
+        lifetimeProductID: String,
+        monthlyProductID: String
+    ) -> PTMembershipTerm {
+        if productID == lifetimeProductID {
+            .lifetime
+        } else if isIntroductoryOffer {
+            .trial(billsOn: renewalDateText)
+        } else if productID == monthlyProductID {
+            .monthly(renewsOn: renewalDateText)
+        } else {
+            .annual(renewsOn: renewalDateText)
         }
     }
 }
@@ -115,6 +145,15 @@ struct GoldMemberCard: View {
         "\(itemCount) ITEM\(itemCount == 1 ? "" : "S") · \(totalValue)" + (synced ? " · SYNCED" : "")
     }
 
+    /// Lifetime has nothing to "renew" — the honest-states rule means the
+    /// footer shouldn't promise a knock that will never come.
+    private var footerLine: String {
+        switch term {
+        case .lifetime: "Purchased once. Yours forever."
+        default: "We'll knock 2 weeks before renewal."
+        }
+    }
+
     /// Renewal promise + MANAGE › — honest-states rule: the card itself says
     /// when and how it bills, and hands the user the exit.
     private var footer: some View {
@@ -123,7 +162,7 @@ struct GoldMemberCard: View {
                 .fill(Color(hex: 0x241C0E, alpha: 0.25))
                 .frame(height: 1)
             HStack {
-                Text("We'll knock 2 weeks before renewal.")
+                Text(footerLine)
                     .font(.system(size: 11))
                     .opacity(0.75)
                 Spacer(minLength: 8)
@@ -217,6 +256,19 @@ struct LapsedRenewBand: View {
         itemCount: 5,
         totalValue: "$3,116",
         onManage: {}
+    )
+    .padding(24)
+    .ptScreen()
+}
+
+#Preview("GoldMemberCard — lifetime (legacy)") {
+    GoldMemberCard(
+        name: "Your library",
+        memberNumber: memberNumber(fromTransactionID: "2000000112233445"),
+        term: .lifetime,
+        itemCount: 5,
+        totalValue: "$3,116",
+        onManage: nil
     )
     .padding(24)
     .ptScreen()
