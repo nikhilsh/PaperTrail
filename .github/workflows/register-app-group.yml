@@ -1,0 +1,53 @@
+name: Register App Group (cloud signing)
+
+# Dispatch-only, one-shot utility. Runs an AUTOMATIC-signing device build with
+# the App Store Connect API key so Xcode's cloud signing registers the
+# `group.nikhilsh.PaperTrail` App Group declared in the entitlements and
+# attaches it to the app + extension App IDs. Apple exposes no public API for
+# App Group registration — this is the documented headless path
+# (xcodebuild -allowProvisioningUpdates + ASC key). Normal release lanes stay
+# on manual signing; regenerate the three Ad Hoc profiles after this succeeds.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  register:
+    runs-on: macos-26
+    env:
+      PROJECT_PATH: PaperTrail.xcodeproj
+      SCHEME: PaperTrail
+      TEAM_ID: EHW7L3679R
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.5
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Write ASC API key
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: echo "$ASC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc_key.p8"
+
+      - name: Build with automatic cloud signing (registers app group)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Development" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            build
