@@ -57,6 +57,41 @@ enum WarrantySpeech {
         return formatter.string(from: date)
     }
 
+    /// The plain-language answer shown on the Siri snippet card (V3_BRIEF.md
+    /// §8, mock V3-4), e.g.:
+    /// "Yes — 14 months left. Expires 12 Sep 2027."
+    /// "No — expired on 12 Mar 2024."
+    /// "No warranty info on file."
+    /// Deliberately terser than `statusSentence` (no product name — the
+    /// snippet card already shows it as the headline) since this doubles as
+    /// on-card copy, not just spoken dialog.
+    static func snippetAnswer(expiryDate: Date?, now: Date = .now) -> String {
+        guard let expiryDate else {
+            return "No warranty info on file."
+        }
+        if expiryDate < now {
+            return "No — expired on \(PTDate.dayMonthYear.string(from: expiryDate))."
+        }
+        let remaining = remainingPhrase(from: now, to: expiryDate)
+        return "Yes — \(remaining) left. Expires \(PTDate.dayMonthYear.string(from: expiryDate))."
+    }
+
+    /// Fraction of the warranty window elapsed (0...1) — what the snippet
+    /// card's sage progress bar fills by, mirroring `PTWarranty.progressElapsed`
+    /// (Design/PTPresentation.swift) but as a pure function over raw dates so
+    /// it's testable without a `PurchaseRecord`/SwiftData round-trip. Returns
+    /// 1 once expired, 0.5 when there's an expiry but no purchase date to
+    /// anchor the window (unknown pace), 0 when there's no warranty info at all.
+    static func progressElapsed(purchaseDate: Date?, expiryDate: Date?, now: Date = .now) -> Double {
+        guard let expiryDate else { return 0 }
+        guard let purchaseDate, expiryDate > purchaseDate else {
+            return expiryDate < now ? 1 : 0.5
+        }
+        let total = expiryDate.timeIntervalSince(purchaseDate)
+        let elapsed = now.timeIntervalSince(purchaseDate)
+        return max(0, min(1, elapsed / total))
+    }
+
     /// ExpiringSoonIntent's summary line, e.g.:
     /// "2 warranties expire soon: AirPods Pro on 20 Jul, LG Washer on 3 Aug."
     /// "1 warranty expires soon: AirPods Pro on 20 Jul."

@@ -29,6 +29,29 @@ struct PaperTrailShortcuts: AppShortcutsProvider {
             shortTitle: "Expiring Soon",
             systemImageName: "clock.badge.exclamationmark"
         )
+        // v3 §8 (siriIntents): `@AppShortcutsBuilder` is a result builder, same
+        // as `@ViewBuilder`, so it does support a runtime `if` here — this
+        // isn't a compile-time `#if`. What's genuinely uncertain (undocumented,
+        // and this repo has no Mac to check locally — CI-compile-only) is
+        // whether Xcode's App Intents metadata-extraction build step, which
+        // statically walks this property to precompute the Shortcuts/Siri
+        // phrase list, resolves a runtime condition the same way at build
+        // time as `appShortcuts` resolves it when the OS actually calls this
+        // getter. If that extraction step ever silently drops or duplicates
+        // the phrase instead of tracking the flag, the fallback per the v3
+        // brief is to register it unconditionally — AddItemIntent's `perform`
+        // is harmless to reach with the flag off, it only opens capture.
+        if FeatureFlags.isOn(.siriIntents) {
+            AppShortcut(
+                intent: AddItemIntent(),
+                phrases: [
+                    "Add to \(.applicationName)",
+                    "Add an item in \(.applicationName)"
+                ],
+                shortTitle: "Add Item",
+                systemImageName: "plus.rectangle.on.folder"
+            )
+        }
     }
 }
 

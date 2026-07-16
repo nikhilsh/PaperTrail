@@ -9,6 +9,7 @@
 import AppIntents
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct RecordNoLongerAvailableError: LocalizedError {
     var errorDescription: String? { "That item is no longer in PaperTrail." }
@@ -29,6 +30,17 @@ struct CheckWarrantyIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+        // Device locked / protected data unavailable (this intent can run
+        // while the app is backgrounded to service Siri, before the user has
+        // unlocked): never surface record content on the snippet — V3_BRIEF.md
+        // §8. Applies regardless of the `siriIntents` flag.
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            return .result(
+                dialog: IntentDialog(stringLiteral: "Unlock PaperTrail to see this."),
+                view: AnyView(LockedSnippetCardView())
+            )
+        }
+
         let context = ModelContext(PaperTrailModelContainer.shared)
         let recordID = record.id
         let descriptor = FetchDescriptor<PurchaseRecord>()
@@ -41,10 +53,35 @@ struct CheckWarrantyIntent: AppIntent {
             expiryDate: match.warrantyExpiryDate
         )
 
-        return .result(
-            dialog: IntentDialog(stringLiteral: sentence),
-            view: WarrantySnippetView(record: match)
+        // Flag OFF: unchanged pre-v3 behavior — the plain badge card below.
+        guard FeatureFlags.isOn(.siriIntents) else {
+            return .result(
+                dialog: IntentDialog(stringLiteral: sentence),
+                view: AnyView(WarrantySnippetView(record: match))
+            )
+        }
+
+        // Flag ON: the v3 paper snippet card (mock V3-4) — plain-language
+        // answer, progress bar, OPEN PASSPORT / BUILD CLAIM actions.
+        let answer = WarrantySpeech.snippetAnswer(expiryDate: match.warrantyExpiryDate)
+        let progress = WarrantySpeech.progressElapsed(
+            purchaseDate: match.purchaseDate,
+            expiryDate: match.warrantyExpiryDate
         )
+        let attachmentDescriptor = FetchDescriptor<Attachment>(
+            predicate: #Predicate { $0.recordID == recordID }
+        )
+        let attachmentCount = (try? context.fetchCount(attachmentDescriptor)) ?? 0
+
+        let card = SiriSnippetCardView(
+            entity: RecordEntity(record: match),
+            warrantyStatus: match.warrantyStatus,
+            answer: answer,
+            progressElapsed: progress,
+            hasClaimablePacket: ClaimPacketAvailability.isOffered(attachmentCount: attachmentCount)
+        )
+
+        return .result(dialog: IntentDialog(stringLiteral: sentence), view: AnyView(card))
     }
 }
 
