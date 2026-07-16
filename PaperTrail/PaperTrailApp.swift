@@ -77,6 +77,31 @@ private func accountStatusDescription(_ status: CKAccountStatus) -> String {
     }
 }
 
+/// Thrown by `withPreflightTimeout` when a CloudKit call doesn't return in
+/// time — the CloudKit account-status/user-record calls have no built-in
+/// timeout and, observed in CI's un-entitled simulator sandbox (no
+/// `com.apple.developer.icloud-services` entitlement on that build), can hang
+/// indefinitely rather than erroring. Bounding them here means a stuck check
+/// — there or on a real device with a wedged network path — can't silently
+/// freeze the rest of the app's launch `.task` forever; it just becomes
+/// another failure on the same try/catch paths below.
+private struct PreflightTimeout: Error {}
+
+private func withPreflightTimeout<T: Sendable>(
+    seconds: Double = 8,
+    _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(for: .seconds(seconds))
+            throw PreflightTimeout()
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
+    }
+}
+
 @MainActor
 private func runCloudKitPreflight() async {
     let defaults = UserDefaults.standard
@@ -86,14 +111,14 @@ private func runCloudKitPreflight() async {
     let container = CKContainer(identifier: containerID)
 
     do {
-        let status = try await container.accountStatus()
+        let status = try await withPreflightTimeout { try await container.accountStatus() }
         let statusText = accountStatusDescription(status)
         defaults.set(statusText, forKey: AppDiagnostics.cloudKitAccountStatusKey)
         addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "Account status: \(statusText)")
         SentrySDK.configureScope { scope in scope.setTag(value: statusText, key: "cloudkit_account_status") }
 
         do {
-            _ = try await container.userRecordID()
+            _ = try await withPreflightTimeout { try await container.userRecordID() }
             defaults.set("User record lookup succeeded", forKey: AppDiagnostics.cloudKitContainerStatusKey)
             addStartupBreadcrumb(level: .info, category: "cloudkit.preflight", message: "User record lookup succeeded for \(containerID)")
         } catch {
