@@ -28,8 +28,24 @@ struct NotificationManager {
 
     // MARK: - Identifier formats (pure, testable)
 
+    /// Every warranty lead-time offset a reminder has *ever* been scheduled
+    /// under, across every app version — used only to build the identifier
+    /// superset `removeWarrantyReminders`/rescheduling clear before
+    /// re-scheduling, so a stale reminder from an old lead-time setting or a
+    /// pre-budget-fix build (which used to fire at 30/14/7/0 all at once,
+    /// per DESIGN_LANGUAGE.md §8) never survives a reschedule. Scheduling
+    /// itself only ever produces ONE of these — see `warrantyReminderPlan`.
     static let warrantyOffsets = [30, 14, 7, 0]
+
+    /// Same idea as `warrantyOffsets`, for return-window reminders. Scheduling
+    /// only ever produces the 3-days-before reminder (`returnWindowLeadDays`);
+    /// `0` stays in this superset purely so a pre-budget-fix day-of reminder
+    /// gets cleared on the next reschedule.
     static let returnWindowOffsets = [3, 0]
+
+    /// The single lead time (days before the return deadline) a return-window
+    /// reminder is scheduled at — DESIGN_LANGUAGE.md §8: "return-window (once)".
+    static let returnWindowLeadDays = 3
 
     /// Warranty reminder identifier. Format: "warranty-<uuid>-<days>d" (day-of
     /// reminder uses "0d").
@@ -71,6 +87,52 @@ struct NotificationManager {
         return nil
     }
 
+    // MARK: - Reminder plans (pure, testable) — the notification budget
+
+    /// A single reminder's identifier + fire date, or `nil` if nothing should
+    /// fire (no date to anchor to, or the trigger would already be in the
+    /// past). Pure so the "exactly one reminder per record" budget
+    /// (DESIGN_LANGUAGE.md §8) is testable without `UNUserNotificationCenter`,
+    /// which needs a device/simulator with notification entitlements CI
+    /// doesn't have.
+    struct ReminderPlan: Equatable {
+        let identifier: String
+        let triggerDate: Date
+        let leadDays: Int
+    }
+
+    /// The one warranty reminder a record should have, at the user's chosen
+    /// lead time. `nil` when there's no expiry date, it's already passed, or
+    /// the lead time would fire in the past (e.g. the user set a 30-day lead
+    /// but the warranty already expires in 10 days) — in that last case we
+    /// don't fall back to a shorter lead; DESIGN_LANGUAGE.md §8 is "once", not
+    /// "once, or best effort otherwise".
+    static func warrantyReminderPlan(for record: PurchaseRecord, leadDays: Int, now: Date = .now) -> ReminderPlan? {
+        guard let expiryDate = record.warrantyExpiryDate, expiryDate > now,
+              let triggerDate = Calendar.current.date(byAdding: .day, value: -leadDays, to: expiryDate),
+              triggerDate > now
+        else { return nil }
+        return ReminderPlan(
+            identifier: warrantyIdentifier(recordID: record.id, offsetDays: leadDays),
+            triggerDate: triggerDate,
+            leadDays: leadDays
+        )
+    }
+
+    /// The one return-window reminder a record should have, always at
+    /// `returnWindowLeadDays` before the deadline.
+    static func returnWindowReminderPlan(for record: PurchaseRecord, now: Date = .now) -> ReminderPlan? {
+        guard let deadline = record.returnDeadline, deadline > now,
+              let triggerDate = Calendar.current.date(byAdding: .day, value: -returnWindowLeadDays, to: deadline),
+              triggerDate > now
+        else { return nil }
+        return ReminderPlan(
+            identifier: returnWindowIdentifier(recordID: record.id, offsetDays: returnWindowLeadDays),
+            triggerDate: triggerDate,
+            leadDays: returnWindowLeadDays
+        )
+    }
+
     /// Request notification permission.
     func requestPermission() async -> Bool {
         do {
@@ -82,56 +144,49 @@ struct NotificationManager {
         }
     }
 
-    /// Schedule warranty expiry reminders for a record.
-    /// Schedules at the user's chosen lead time, 7 days before, and on expiry day.
-    /// Returns the number of requests submitted (used by the migration sweep to
-    /// track the total against the platform's pending-notification cap).
+    /// Schedule the one warranty expiry reminder for a record, at `leadDays`
+    /// before expiry (DESIGN_LANGUAGE.md §8 notification budget). Returns the
+    /// number of requests submitted (0 or 1) — used both as a migration-sweep
+    /// running total against the platform's pending-notification cap, and by
+    /// callers to decide whether it's honest to mark the record as having a
+    /// reminder scheduled.
     @discardableResult
     func scheduleWarrantyReminders(for record: PurchaseRecord, leadDays: Int = 14) -> Int {
-        guard let expiryDate = record.warrantyExpiryDate, expiryDate > .now else { return 0 }
-
         let center = UNUserNotificationCenter.current()
 
-        // Remove any existing notifications for this record
+        // Clear every identifier this record could have under any
+        // historical offset before (maybe) scheduling the one current one —
+        // keeps a lead-time change or an old multi-reminder build from
+        // leaving a stale extra reminder behind.
         center.removePendingNotificationRequests(withIdentifiers: Self.warrantyIdentifiers(recordID: record.id))
 
-        // The configured lead time drives the first reminder; 7-day and day-of
-        // follow-ups are always useful. Deduped + sorted soonest-first.
-        let offsets = Array(Set([leadDays, 7, 0])).sorted(by: >)
-        let intervals: [(days: Int, label: String)] = offsets.map { days in
-            (days, days == 0 ? "today" : "\(days) days")
-        }
+        guard let plan = Self.warrantyReminderPlan(for: record, leadDays: leadDays) else { return 0 }
 
-        var scheduledCount = 0
-        for interval in intervals {
-            guard let triggerDate = Calendar.current.date(byAdding: .day, value: -interval.days, to: expiryDate),
-                  triggerDate > .now else { continue }
+        let content = UNMutableNotificationContent()
+        content.title = "Warranty Expiring"
+        content.body = "\(record.productName) warranty expires in \(plan.leadDays) day\(plan.leadDays == 1 ? "" : "s")."
+        content.sound = .default
+        content.categoryIdentifier = "WARRANTY_EXPIRY"
+        content.userInfo = ["recordID": record.id.uuidString]
 
-            let content = UNMutableNotificationContent()
-            content.title = "Warranty Expiring"
-            if interval.days > 0 {
-                content.body = "\(record.productName) warranty expires in \(interval.label)."
-            } else {
-                content.body = "\(record.productName) warranty expires \(interval.label)!"
-            }
-            content.sound = .default
-            content.categoryIdentifier = "WARRANTY_EXPIRY"
-            content.userInfo = ["recordID": record.id.uuidString]
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: plan.triggerDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger)
 
-            let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-
-            let id = Self.warrantyIdentifier(recordID: record.id, offsetDays: interval.days)
-            let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-
-            center.add(request) { error in
-                if let error {
-                    AppLogger.error("Failed to schedule \(id): \(error)", category: "notifications")
+        center.add(request) { error in
+            if let error {
+                AppLogger.error("Failed to schedule \(plan.identifier): \(error)", category: "notifications")
+                // The request wasn't actually accepted (e.g. authorization
+                // was revoked between the caller's settings check and this
+                // callback) — don't leave the record's "scheduled" flag
+                // lying about it; `rescheduleAll` is what re-arms it once
+                // permission is genuinely granted.
+                Task { @MainActor in
+                    record.warrantyNotificationScheduled = false
                 }
             }
-            scheduledCount += 1
         }
-        return scheduledCount
+        return 1
     }
 
     /// Remove warranty notifications for a record.
@@ -142,49 +197,39 @@ struct NotificationManager {
 
     // MARK: - Return-window reminders (§6)
 
-    /// Schedule return-window reminders for a record, using its own
-    /// `returnWindowDays` (set via the return-window picker). No-ops if the
+    /// Schedule the one return-window reminder for a record
+    /// (`returnWindowLeadDays` before its `returnDeadline`). No-ops if the
     /// record has no window configured or purchase date to anchor it to.
-    /// Returns the number of requests submitted (used by the migration sweep to
-    /// track the total against the platform's pending-notification cap).
+    /// Returns the number of requests submitted (0 or 1) — see
+    /// `scheduleWarrantyReminders` for why callers care about this value.
     @discardableResult
     func scheduleReturnWindowReminder(for record: PurchaseRecord) -> Int {
-        guard let deadline = record.returnDeadline, deadline > .now else { return 0 }
-
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: Self.returnWindowIdentifiers(recordID: record.id))
 
+        guard let plan = Self.returnWindowReminderPlan(for: record) else { return 0 }
+
         let merchantSuffix = record.merchantName.map { " — \($0)" } ?? ""
+        let content = UNMutableNotificationContent()
+        content.title = "Return window closing"
+        content.body = "Return window for \(record.productName) closes in \(plan.leadDays) day\(plan.leadDays == 1 ? "" : "s")\(merchantSuffix)."
+        content.sound = .default
+        content.categoryIdentifier = "RETURN_WINDOW"
+        content.userInfo = ["recordID": record.id.uuidString]
 
-        var scheduledCount = 0
-        for days in Self.returnWindowOffsets {
-            guard let triggerDate = Calendar.current.date(byAdding: .day, value: -days, to: deadline),
-                  triggerDate > .now else { continue }
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: plan.triggerDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger)
 
-            let content = UNMutableNotificationContent()
-            content.title = "Return window closing"
-            if days > 0 {
-                content.body = "Return window for \(record.productName) closes in \(days) day\(days == 1 ? "" : "s")\(merchantSuffix)."
-            } else {
-                content.body = "Return window for \(record.productName) closes today\(merchantSuffix)."
-            }
-            content.sound = .default
-            content.categoryIdentifier = "RETURN_WINDOW"
-            content.userInfo = ["recordID": record.id.uuidString]
-
-            let components = Calendar.current.dateComponents([.year, .month, .day, .hour], from: triggerDate)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-
-            let id = Self.returnWindowIdentifier(recordID: record.id, offsetDays: days)
-            let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-            center.add(request) { error in
-                if let error {
-                    AppLogger.error("Failed to schedule \(id): \(error)", category: "notifications")
+        center.add(request) { error in
+            if let error {
+                AppLogger.error("Failed to schedule \(plan.identifier): \(error)", category: "notifications")
+                Task { @MainActor in
+                    record.returnWindowNotificationScheduled = false
                 }
             }
-            scheduledCount += 1
         }
-        return scheduledCount
+        return 1
     }
 
     /// Remove all return-window reminders for a record.
@@ -193,26 +238,116 @@ struct NotificationManager {
             .removePendingNotificationRequests(withIdentifiers: Self.returnWindowIdentifiers(recordID: record.id))
     }
 
+    // MARK: - Reschedule-all (pure eligibility + the shared sweep)
+
+    /// Which of `records` should get a reminder on a full reschedule, and in
+    /// what order (soonest-first — see `rescheduleAll` for why order
+    /// matters). Pure: the settings-respecting filter, pulled out of
+    /// `rescheduleAll` so it's testable without `UNUserNotificationCenter`.
+    static func eligibleForReschedule(
+        records: [PurchaseRecord],
+        warrantyRemindersEnabled: Bool,
+        returnWindowRemindersEnabled: Bool
+    ) -> [PurchaseRecord] {
+        records.compactMap { record -> (record: PurchaseRecord, soonest: Date)? in
+            var soonest: Date?
+            if warrantyRemindersEnabled, let expiry = record.warrantyExpiryDate {
+                soonest = expiry
+            }
+            if returnWindowRemindersEnabled, record.returnWindowDays != nil,
+               let deadline = record.returnDeadline {
+                soonest = min(soonest ?? deadline, deadline)
+            }
+            guard let soonest else { return nil }
+            return (record, soonest)
+        }
+        .sorted { $0.soonest < $1.soonest }
+        .map(\.record)
+    }
+
+    /// Re-schedules every eligible record's reminders from scratch,
+    /// respecting `ReminderSettings` and the platform's pending-notification
+    /// budget (50-request cap of our own, well under the OS's 64). Shared by
+    /// the one-time identifier migration sweep (`migrateIdentifiersIfNeeded`)
+    /// and `SoftAskCoordinator.respondYes()`: records saved *before* the user
+    /// grants permission never get a real reminder scheduled (the
+    /// authorization guard in `scheduleWarrantyReminders`/
+    /// `scheduleReturnWindowReminder`'s completion handler only catches
+    /// already-in-flight requests, not ones skipped because permission
+    /// wasn't there yet at settings-check time) — nothing else re-arms them
+    /// once permission actually lands.
+    @MainActor
+    @discardableResult
+    func rescheduleAll(modelContext: ModelContext) async -> (warrantyRescheduled: Int, returnWindowRescheduled: Int) {
+        let records: [PurchaseRecord]
+        do {
+            records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
+        } catch {
+            AppLogger.error("rescheduleAll: record fetch failed: \(error)", category: "notifications")
+            return (0, 0)
+        }
+
+        let reminderPrefs = ReminderSettings.shared
+        let eligible = Self.eligibleForReschedule(
+            records: records,
+            warrantyRemindersEnabled: reminderPrefs.warrantyRemindersEnabled,
+            returnWindowRemindersEnabled: reminderPrefs.returnWindowRemindersEnabled
+        )
+
+        let requestCap = 50
+        var totalRequests = 0
+        var warrantyRescheduled = 0
+        var returnWindowRescheduled = 0
+        var skippedRecords = 0
+
+        for record in eligible {
+            guard totalRequests < requestCap else {
+                skippedRecords += 1
+                continue
+            }
+            if reminderPrefs.warrantyRemindersEnabled, record.warrantyExpiryDate != nil {
+                let count = scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                record.warrantyNotificationScheduled = count > 0
+                if count > 0 { warrantyRescheduled += 1 }
+                totalRequests += count
+            }
+            if reminderPrefs.returnWindowRemindersEnabled, record.returnWindowDays != nil {
+                let count = scheduleReturnWindowReminder(for: record)
+                record.returnWindowNotificationScheduled = count > 0
+                if count > 0 { returnWindowRescheduled += 1 }
+                totalRequests += count
+            }
+        }
+
+        if skippedRecords > 0 {
+            AppLogger.warn(
+                "rescheduleAll: skipped \(skippedRecords) record(s) after hitting the \(requestCap)-request cap",
+                category: "notifications"
+            )
+        }
+        return (warrantyRescheduled, returnWindowRescheduled)
+    }
+
     // MARK: - Identifier migration (persistentModelID → UUID)
 
     /// One-time sweep, run at app launch: clears every pending reminder scheduled
     /// under the old `persistentModelID`-keyed identifiers (which
     /// `removeWarrantyReminders`/`removeReturnWindowReminder` could never reliably
     /// cancel — see the type doc above) and reschedules current reminders for
-    /// every record through the normal, already-idempotent scheduling entry
-    /// points. No-ops after the first successful run (`migrationFlagKey`).
+    /// every record via `rescheduleAll`. No-ops after the first successful run
+    /// (`migrationFlagKey`).
     ///
-    /// The SwiftData fetch happens FIRST: if it throws, the sweep logs and
-    /// returns without touching any pending notification or setting the
+    /// The SwiftData count check happens FIRST: if it throws, the sweep logs
+    /// and returns without touching any pending notification or setting the
     /// migration flag, so the next launch retries from scratch rather than
     /// leaving every reminder in the app permanently wiped.
     @MainActor
     func migrateIdentifiersIfNeeded(modelContext: ModelContext) async {
         guard !UserDefaults.standard.bool(forKey: Self.migrationFlagKey) else { return }
 
-        let records: [PurchaseRecord]
+        let recordCount: Int
         do {
-            records = try modelContext.fetch(FetchDescriptor<PurchaseRecord>())
+            recordCount = try modelContext.fetchCount(FetchDescriptor<PurchaseRecord>())
         } catch {
             AppLogger.error(
                 "Notification ID migration: record fetch failed, aborting sweep without removing "
@@ -234,63 +369,13 @@ struct NotificationManager {
             center.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
 
-        let reminderPrefs = ReminderSettings.shared
-
-        // Records that would actually get a reminder scheduled, sorted by the
-        // soonest date driving that reminder — the platform caps pending
-        // notifications at 64, so when there are more eligible records than
-        // fit under our own 50-request budget, the soonest-firing reminders
-        // win.
-        let eligible = records.compactMap { record -> (record: PurchaseRecord, soonest: Date)? in
-            var soonest: Date?
-            if reminderPrefs.warrantyRemindersEnabled, let expiry = record.warrantyExpiryDate {
-                soonest = expiry
-            }
-            if reminderPrefs.returnWindowRemindersEnabled, record.returnWindowDays != nil,
-               let deadline = record.returnDeadline {
-                soonest = min(soonest ?? deadline, deadline)
-            }
-            guard let soonest else { return nil }
-            return (record, soonest)
-        }.sorted { $0.soonest < $1.soonest }
-
-        let requestCap = 50
-        var totalRequests = 0
-        var warrantyRescheduled = 0
-        var returnWindowRescheduled = 0
-        var skippedRecords = 0
-
-        for entry in eligible {
-            guard totalRequests < requestCap else {
-                skippedRecords += 1
-                continue
-            }
-            let record = entry.record
-            if reminderPrefs.warrantyRemindersEnabled, record.warrantyExpiryDate != nil {
-                let count = scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
-                if count > 0 { warrantyRescheduled += 1 }
-                totalRequests += count
-            }
-            if reminderPrefs.returnWindowRemindersEnabled, record.returnWindowDays != nil {
-                let count = scheduleReturnWindowReminder(for: record)
-                if count > 0 { returnWindowRescheduled += 1 }
-                totalRequests += count
-            }
-        }
-
-        if skippedRecords > 0 {
-            AppLogger.warn(
-                "Notification ID migration: skipped \(skippedRecords) record(s) after hitting the "
-                    + "\(requestCap)-request cap",
-                category: "notifications"
-            )
-        }
+        let (warrantyRescheduled, returnWindowRescheduled) = await rescheduleAll(modelContext: modelContext)
 
         UserDefaults.standard.set(true, forKey: Self.migrationFlagKey)
         AppLogger.info(
             "Notification ID migration: cleared \(staleIdentifiers.count) stale reminder(s); "
                 + "rescheduled \(warrantyRescheduled) warranty + \(returnWindowRescheduled) return-window "
-                + "reminder(s) across \(records.count) record(s)",
+                + "reminder(s) across \(recordCount) record(s)",
             category: "notifications"
         )
     }

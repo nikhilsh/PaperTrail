@@ -79,11 +79,22 @@ final class AppRouter {
     /// concludes (success or failure).
     var isImporting = false
 
-    /// True while a full-screen cover (scan, import review) is presented or
-    /// about to be. `SoftAskCoordinator` checks this before ever presenting
-    /// the notification soft-ask — nothing may interrupt an in-progress scan
-    /// or import (V2_BRIEF §4 acceptance criteria).
-    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting }
+    /// Lightweight, conservative signal any sheet/alert-presenting view can
+    /// set around its own presentation — not every presenter funnels through
+    /// `showCapture`/`pendingImportPayload`/`isImporting`, and `hasActiveCover`
+    /// needs to cover those too so the soft-ask never rises over them.
+    /// Deliberately dumb (a single flat bool, not a stack/count): when in
+    /// doubt about ordering between two overlapping presenters, this defers
+    /// the soft-ask to the next foreground rather than risk it slipping
+    /// through a gap.
+    var isPresentingAnySheet = false
+
+    /// True while a full-screen cover (scan, import review) or any other
+    /// tracked sheet/alert is presented or about to be. `SoftAskCoordinator`
+    /// checks this before ever presenting the notification soft-ask —
+    /// nothing may interrupt an in-progress scan, import, or other modal
+    /// (V2_BRIEF §4 acceptance criteria).
+    var hasActiveCover: Bool { showCapture || pendingImportPayload != nil || isImporting || isPresentingAnySheet }
 
     func navigate(to route: Route) {
         switch route {
@@ -239,6 +250,12 @@ struct AppShellView: View {
         }
         .onChange(of: router.pendingImportPayload) { wasPresented, isPresented in
             if wasPresented != nil, isPresented == nil { retrySoftAskIfNeeded() }
+        }
+        .onChange(of: showLearningConsent) { _, isShowing in
+            // This app-root alert is a presenter `hasActiveCover`'s named
+            // cases don't cover — feed it into the generic signal so the
+            // soft-ask can't rise underneath/behind it either.
+            router.isPresentingAnySheet = isShowing
         }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
             Button("Share anonymously") {

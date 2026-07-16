@@ -878,18 +878,23 @@ struct DraftRecordView: View {
             SpotlightIndexer.index(record, attachments: attachmentsByRecord[record.id] ?? [])
         }
 
-        // Schedule reminders per the user's preferences (§1-B, §6).
+        // Schedule reminders per the user's preferences (§1-B, §6). Use the
+        // scheduler's own return value (0 or 1 requests submitted) to decide
+        // whether to stamp "scheduled" — stamping unconditionally lies about
+        // records with no expiry/deadline to anchor to, or where the lead
+        // time would already fire in the past. `rescheduleAll` re-arms
+        // anything left unstamped once the user later grants permission.
         let reminderPrefs = ReminderSettings.shared
         if includeWarranty, reminderPrefs.warrantyRemindersEnabled {
             for record in records {
-                record.warrantyNotificationScheduled = true
-                NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                let count = NotificationManager.shared.scheduleWarrantyReminders(for: record, leadDays: reminderPrefs.warrantyLeadTime.days)
+                record.warrantyNotificationScheduled = count > 0
             }
         }
         if returnWindowDays != nil, reminderPrefs.returnWindowRemindersEnabled {
             for record in records {
-                record.returnWindowNotificationScheduled = true
-                NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+                let count = NotificationManager.shared.scheduleReturnWindowReminder(for: record)
+                record.returnWindowNotificationScheduled = count > 0
             }
         }
 
