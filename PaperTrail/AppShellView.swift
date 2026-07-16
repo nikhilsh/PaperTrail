@@ -161,6 +161,7 @@ struct AppShellView: View {
                 SpotlightIndexer.reindexAllDebounced()
                 DigestScheduler.reschedule(modelContext: modelContext)
                 WidgetSnapshotWriter.write(modelContext: modelContext)
+                ShareInboxDrain.drainIfPossible(modelContext: modelContext)
             }
         }
         .onChange(of: router.selectedTab) { _, newTab in
