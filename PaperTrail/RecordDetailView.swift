@@ -8,6 +8,7 @@ struct RecordDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Query private var allAttachments: [Attachment]
     @Bindable var record: PurchaseRecord
@@ -191,7 +192,24 @@ struct RecordDetailView: View {
         }
         .task {
             guard FeatureFlags.isOn(.recallWatch), PlusEntitlements.shared.hasPlus else { return }
-            recallRowState = RecallWatcher.rowState(for: record.id)
+            let resolved = RecallWatcher.rowState(for: record.id)
+            // v3 animPassV3 §9 #4 "Recall check resolve": hold on the
+            // checking/ellipsis state for ~600ms before revealing whatever
+            // `RecallWatcher` actually found, once per dossier open — makes
+            // the (already-instant, persisted-locally) check *read* as work
+            // happening, per Ideas.html. Off-flag (or Reduce Motion), the
+            // real state is shown immediately exactly as in the pre-anim-pass
+            // build.
+            guard AnimPass.isOn, !reduceMotion else {
+                recallRowState = resolved
+                return
+            }
+            recallRowState = .checking
+            try? await Task.sleep(for: .seconds(AnimPass.Duration.recallEllipsisHold))
+            guard !Task.isCancelled else { return }
+            withAnimation(AnimPass.animation(PTMotion.archiveEase(AnimPass.Duration.recallResolve), reduceMotion: reduceMotion)) {
+                recallRowState = resolved
+            }
         }
         .sheet(isPresented: $showPassItOnBuilder) {
             NavigationStack {
@@ -502,7 +520,8 @@ struct RecordDetailView: View {
                             unitSuffix: values.unit.suffix,
                             caption: "longest line",
                             diameter: 110,
-                            lineWidth: 8
+                            lineWidth: 8,
+                            identityKey: record.id.uuidString
                         )
                     }
 
@@ -583,7 +602,7 @@ struct RecordDetailView: View {
                 }
 
                 if let ring = passportRing {
-                    CoverageRing(totalMonths: ring.total, monthsRemaining: ring.remaining, unitSuffix: ring.unit.suffix)
+                    CoverageRing(totalMonths: ring.total, monthsRemaining: ring.remaining, unitSuffix: ring.unit.suffix, identityKey: record.id.uuidString)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 4)
                 }
@@ -924,15 +943,26 @@ struct RecordDetailView: View {
                     Text("Recall watch")
                         .font(PTFont.serif(15, weight: 600))
                         .foregroundStyle(PT.txt)
-                    // Static text — the ellipsis draw-on animation is
-                    // `animPassV3` (§9), not built in this wave.
-                    Text("Watching…")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(PT.txt2)
+                    // v3 animPassV3 §9 #4: the 3-dot ellipsis actually
+                    // animates while this hold is on-screen; "Watching…"
+                    // (static) is what v2/off-flag/Reduce-Motion shows.
+                    HStack(spacing: 5) {
+                        Text("Watching")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(PT.txt2)
+                        if AnimPass.isOn, !reduceMotion {
+                            RecallEllipsisView()
+                        } else {
+                            Text("…")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(PT.txt2)
+                        }
+                    }
                 }
                 Spacer(minLength: 8)
             }
             .padding(.vertical, 4)
+            .transition(.opacity)
 
         case .clear(let checkedAt):
             HStack(spacing: 12) {
@@ -953,6 +983,7 @@ struct RecordDetailView: View {
                     .foregroundStyle(PT.sageDeep)
             }
             .padding(.vertical, 4)
+            .transition(.opacity)
 
         case .notice(let notice):
             Button {
@@ -978,6 +1009,7 @@ struct RecordDetailView: View {
                 .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
+            .transition(.opacity)
         }
     }
 

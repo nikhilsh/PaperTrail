@@ -14,6 +14,7 @@ enum ClaimPacketAvailability {
 /// "Something's wrong with it", and Support step 1.
 struct ClaimPacketView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @Query private var allAttachments: [Attachment]
     let record: PurchaseRecord
@@ -23,9 +24,24 @@ struct ClaimPacketView: View {
     @State private var isGenerating = false
     @State private var showMailComposer = false
     @State private var mailAttachment: URL?
+    // v3 animPassV3 §9 #5 "Claim packet assembly": flips true once, on this
+    // screen's first appearance, and drives the thumbnails/gold-rule/SHARE
+    // entrance below via `ClaimAssemblyChoreography`'s per-element delays.
+    // **Delta from the brief**: Ideas.html describes this against a
+    // "generating" progress state building the packet live; this view
+    // assembles the packet PDF synchronously on demand (`makePDF()`) and has
+    // no such interstitial state — `documentCard` (the packet preview
+    // itself) already exists and IS the packet, so the choreography plays
+    // on ITS first appearance instead. Honest approximation of the same
+    // "pieces fly together, then arm SHARE" beat, not a from-scratch
+    // progress screen.
+    @State private var packetAssembled = false
 
     private var attachments: [Attachment] { allAttachments.filter { $0.recordID == record.id } }
     private var docNumber: String { ClaimPacketPDF.documentNumber(for: record) }
+    private var animPassOn: Bool { AnimPass.isOn }
+
+    private func staggerDelay(_ base: Double) -> Double { reduceMotion ? 0 : base }
 
     private var proofThumbs: [(Attachment, String)] {
         var result: [(Attachment, String)] = []
@@ -51,6 +67,10 @@ struct ClaimPacketView: View {
                 .padding(.top, 8)
 
                 documentCard
+                    .onAppear {
+                        guard animPassOn, !packetAssembled else { return }
+                        packetAssembled = true
+                    }
 
                 VStack(spacing: 10) {
                     Button { Task { await share() } } label: {
@@ -61,6 +81,18 @@ struct ClaimPacketView: View {
                     }
                     .buttonStyle(PTGoldButtonStyle())
                     .disabled(isGenerating)
+                    // v3 animPassV3 §9 #5: SHARE "arms" — fades/settles in
+                    // only after the packet's thumbnails + gold rule have
+                    // finished assembling above.
+                    .opacity(!animPassOn || packetAssembled ? 1 : 0.35)
+                    .scaleEffect(!animPassOn || packetAssembled ? 1 : 0.96)
+                    .animation(
+                        animPassOn
+                            ? AnimPass.animation(PTMotion.stampEase(0.3), reduceMotion: reduceMotion)
+                                .delay(staggerDelay(ClaimAssemblyChoreography.armDelay(thumbCount: proofThumbs.count)))
+                            : nil,
+                        value: packetAssembled
+                    )
 
                     Button { Task { await emailToSelf() } } label: {
                         Text("Email a copy to myself")
@@ -131,7 +163,19 @@ struct ClaimPacketView: View {
                 .foregroundStyle(PT.onPaper)
                 .padding(.top, 12)
 
-            GoldRule().padding(.vertical, 14)
+            // v3 animPassV3 §9 #5: the gold rule "draws" across after the
+            // proof thumbnails below have flown in — a leading-anchored
+            // scale-x from 0→1 stands in for a literal stroke draw-on.
+            GoldRule()
+                .scaleEffect(x: (!animPassOn || packetAssembled) ? 1 : 0.001, y: 1, anchor: .leading)
+                .animation(
+                    animPassOn
+                        ? AnimPass.animation(PTMotion.archiveEase(0.4), reduceMotion: reduceMotion)
+                            .delay(staggerDelay(ClaimAssemblyChoreography.ruleDelay(thumbCount: proofThumbs.count)))
+                        : nil,
+                    value: packetAssembled
+                )
+                .padding(.vertical, 14)
 
             VStack(spacing: 10) {
                 kvLine("Model", record.productName)
@@ -150,7 +194,8 @@ struct ClaimPacketView: View {
                     .foregroundStyle(PT.onPaper3)
                     .padding(.top, 18)
                 HStack(spacing: 10) {
-                    ForEach(proofThumbs, id: \.0.id) { (attachment, label) in
+                    ForEach(Array(proofThumbs.enumerated()), id: \.element.0.id) { index, pair in
+                        let (attachment, label) = pair
                         VStack(spacing: 6) {
                             Group {
                                 if let image = attachment.image {
@@ -167,6 +212,17 @@ struct ClaimPacketView: View {
                                 .textCase(.uppercase)
                                 .foregroundStyle(PT.onPaper2)
                         }
+                        // v3 animPassV3 §9 #5: thumbnails fly to center,
+                        // staggered 60ms apart.
+                        .opacity(!animPassOn || packetAssembled ? 1 : 0)
+                        .scaleEffect(!animPassOn || packetAssembled ? 1 : 0.7)
+                        .animation(
+                            animPassOn
+                                ? AnimPass.animation(PTMotion.archiveEase(0.28), reduceMotion: reduceMotion)
+                                    .delay(staggerDelay(ClaimAssemblyChoreography.thumbDelay(index: index)))
+                                : nil,
+                            value: packetAssembled
+                        )
                     }
                 }
                 .padding(.top, 8)

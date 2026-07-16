@@ -13,8 +13,14 @@ struct LibraryView: View {
     @Query private var allAttachments: [Attachment]
     @Environment(\.modelContext) private var modelContext
     @Environment(AppRouter.self) private var router
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var cloudImageSync: CloudImageSyncManager
     @State private var sortMode: LibrarySortMode = .newest
+    /// v3 animPassV3 §9 #7 "Pull-to-refresh gold bookmark": live overscroll
+    /// distance, read off the ScrollView via `LibraryScrollOffsetKey`, feeds
+    /// `GoldBookmarkRibbon`. Always 0 (ribbon never drawn) when the flag is
+    /// off or Reduce Motion is on.
+    @State private var scrollOffset: CGFloat = 0
 
     private var householdCache = HouseholdCache.shared
 
@@ -112,6 +118,18 @@ struct LibraryView: View {
         }
         .ptScreen()
         .toolbar(.hidden, for: .navigationBar)
+        // v3 animPassV3 §9 #7 "Pull-to-refresh gold bookmark": decorative
+        // ribbon layered above the (unmodified) ScrollView/refreshable
+        // content — see `content`'s doc comment for why it's decorative
+        // rather than a full custom-refresh replacement. Absent entirely
+        // off-flag/Reduce-Motion, so it can never intercept a touch
+        // (`allowsHitTesting(false)` besides).
+        .overlay(alignment: .top) {
+            if AnimPass.isOn, !reduceMotion {
+                GoldBookmarkRibbon(pull: scrollOffset)
+                    .padding(.top, 2)
+            }
+        }
     }
 
     private var content: some View {
@@ -151,7 +169,69 @@ struct LibraryView: View {
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.top, 8)
             .padding(.bottom, 120)
+            .background {
+                // v3 animPassV3 §9 #7: reports this content's Y offset inside
+                // the ScrollView's own coordinate space, so `scrollOffset`
+                // tracks live overscroll distance for `GoldBookmarkRibbon`.
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: LibraryScrollOffsetKey.self,
+                        value: proxy.frame(in: .named("libraryScroll")).minY
+                    )
+                }
+            }
         }
+        .coordinateSpace(name: "libraryScroll")
+        .onPreferenceChange(LibraryScrollOffsetKey.self) { scrollOffset = $0 }
+        // v3 animPassV3 §9 #7: the system pull-to-refresh spinner
+        // (`GoldBookmarkRibbon` above is a purely decorative layer on top of
+        // it — a from-scratch custom refresh control fights `refreshable`'s
+        // own gesture recognizer, so this keeps the reliable system
+        // behavior and lets the ribbon be the "PaperTrail-flavored" part).
+        // Refreshes the household roster, the one thing on this screen
+        // ("Shared with me") that isn't already live off `@Query`.
+        .libraryRefreshable(enabled: AnimPass.isOn) {
+            await HouseholdManager.shared.refresh()
+        }
+        // v3 animPassV3 §9 #1 "Receipt prints on save": clears the
+        // just-saved id once the entrance transition has had time to play,
+        // so it never replays on a later Library visit. Keyed on the id
+        // itself so a second save while this is still pending restarts the
+        // hold rather than clearing early.
+        .task(id: router.lastSavedRecordID) {
+            guard router.lastSavedRecordID != nil else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            router.lastSavedRecordID = nil
+        }
+    }
+
+    // MARK: v3 animPassV3 §9 #1/#2 (Receipt prints on save / shelving the card)
+
+    /// The just-saved record gets a translateY-from-top entrance with a
+    /// spring overshoot (the "receipt printing" moment); every other card
+    /// just fades in as its neighbors part to make room — SwiftUI's own
+    /// layout reflow under `libraryMotion` below does the "parting".
+    /// Identity (`.identity`, no transition at all) off-flag, matching v2.
+    private func cardTransition(for record: PurchaseRecord) -> AnyTransition {
+        guard AnimPass.isOn else { return .identity }
+        if reduceMotion { return .opacity }
+        if record.id == router.lastSavedRecordID {
+            return .asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity)
+        }
+        return .opacity
+    }
+
+    /// Drives both #1's entrance and #2's neighbor-parting reflow off one
+    /// shared spring — a single `.animation(value:)` on `sortedRecords`'
+    /// identity list, so a new/removed/reordered record animates in one
+    /// consistent motion rather than each row picking its own curve.
+    private var libraryMotion: Animation? {
+        guard AnimPass.isOn else { return nil }
+        return AnimPass.animation(
+            .interpolatingSpring(mass: 0.6, stiffness: 170, damping: 15),
+            reduceMotion: reduceMotion
+        )
     }
 
     // MARK: Header
@@ -227,8 +307,10 @@ struct LibraryView: View {
                 .contextMenu {
                     Button("Delete", role: .destructive) { deleteRecord(record) }
                 }
+                .transition(cardTransition(for: record))
             }
         }
+        .animation(libraryMotion, value: sortedRecords.map(\.id))
     }
 
     private var roomList: some View {

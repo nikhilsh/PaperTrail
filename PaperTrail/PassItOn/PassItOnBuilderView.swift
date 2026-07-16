@@ -6,6 +6,7 @@ import PDFKit
 /// next owner. Reached from `RecordDetailView.passItOnRow`.
 struct PassItOnBuilderView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var record: PurchaseRecord
 
     @State private var selection = PassItOnPacket.Selection()
@@ -19,6 +20,17 @@ struct PassItOnBuilderView: View {
     /// after the sale").
     @State private var hasShared = false
     @State private var toast: PTToastItem?
+    // v3 animPassV3 §9 #6 "Pass-it-on handover": true once the user has
+    // actually confirmed "Mark as passed on" — see `markPassedOnRow`.
+    // **Delta from the brief**: Ideas.html anchors this to "on share
+    // completion", but sharing alone doesn't change `record.passedOnDate`
+    // (this screen's own footnote says so: "Sharing doesn't remove the item
+    // — mark it passed on after the sale"). Firing the SOLD·PASSED ON stamp
+    // at share time would visually claim a state the record isn't actually
+    // in yet. Anchoring to the real state-changing tap instead keeps the
+    // animation honest about what just happened.
+    @State private var showHandoverStamp = false
+    private var animPassOn: Bool { AnimPass.isOn }
 
     // MARK: Availability
 
@@ -77,7 +89,25 @@ struct PassItOnBuilderView: View {
 
                 checklist
 
-                packetSummaryRow
+                // v3 animPassV3 §9 #6: the packet summary slides off the
+                // right edge (a document changing hands) and a mono
+                // SOLD · PASSED ON stamp takes its place — reusing
+                // `PTStamp` + `stampEase` at a lower amplitude than the
+                // paywall's MEMBER ✓ slam, per Ideas.html.
+                Group {
+                    if animPassOn && showHandoverStamp {
+                        handoverStampRow
+                    } else {
+                        packetSummaryRow
+                    }
+                }
+                .transition(handoverTransition)
+                .animation(
+                    animPassOn
+                        ? AnimPass.animation(PTMotion.stampEase(AnimPass.Duration.handover), reduceMotion: reduceMotion)
+                        : nil,
+                    value: showHandoverStamp
+                )
 
                 Button {
                     Task { await handOver() }
@@ -255,11 +285,33 @@ struct PassItOnBuilderView: View {
         .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    /// v3 animPassV3 §9 #6: what replaces `packetSummaryRow` once the
+    /// handover is confirmed.
+    private var handoverStampRow: some View {
+        HStack {
+            Spacer(minLength: 0)
+            PTStamp(text: "SOLD · PASSED ON", state: .paper)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(PT.inkCardDark, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var handoverTransition: AnyTransition {
+        guard animPassOn else { return .identity }
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.6).combined(with: .opacity),
+            removal: .move(edge: .trailing).combined(with: .opacity)
+        )
+    }
+
     private var markPassedOnRow: some View {
         Button {
             record.passedOnDate = .now
             record.updatedAt = .now
             toast = PTToastItem(message: "Marked as passed on")
+            if animPassOn { showHandoverStamp = true }
         } label: {
             Text(record.passedOnDate == nil ? "Mark as passed on" : "Marked as passed on \u{2713}")
         }

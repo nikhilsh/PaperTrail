@@ -59,6 +59,15 @@ final class AppRouter {
 
     var selectedTab: AppTab = .library
     var showCapture = false
+
+    /// v3 `animPassV3` §9 "Receipt prints on save": the just-saved record's
+    /// id, set once by `DraftRecordView.saveRecord()` (flag-gated) right
+    /// before it dismisses back into the Library. `LibraryView` gives that
+    /// one card a distinct translateY-from-top entrance instead of the
+    /// ordinary shelving transition, then clears this back to nil so the
+    /// moment plays exactly once. Always nil when the flag is off — the
+    /// steady state matches v2, which never sets it at all.
+    var lastSavedRecordID: UUID?
     /// The v3 "five ways to shelve" paper sheet (`addSheetV2`, §3 of
     /// `docs/design-v3/V3_BRIEF.md`). Flag-gated at the FAB tap site; when the
     /// flag is off the FAB goes straight to `showCapture` exactly as in v2.
