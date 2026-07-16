@@ -189,7 +189,7 @@ enum ShareInboxWriter {
 
     private static func loadFileRepresentation(provider: NSItemProvider, contentType: UTType) async -> URL? {
         await withCheckedContinuation { continuation in
-            provider.loadFileRepresentation(for: contentType) { url, error in
+            provider.loadFileRepresentation(for: contentType) { url, _, error in
                 guard let url, error == nil else {
                     continuation.resume(returning: nil)
                     return
@@ -213,7 +213,7 @@ enum ShareInboxWriter {
 
     private static func loadDataRepresentation(provider: NSItemProvider, contentType: UTType) async -> Data? {
         await withCheckedContinuation { continuation in
-            provider.loadDataRepresentation(for: contentType) { data, error in
+            _ = provider.loadDataRepresentation(for: contentType) { data, error in
                 guard let data, error == nil else {
                     continuation.resume(returning: nil)
                     return
