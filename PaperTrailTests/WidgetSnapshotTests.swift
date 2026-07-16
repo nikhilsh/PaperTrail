@@ -15,7 +15,7 @@ struct WidgetSnapshotTests {
     }
 
     private func item(_ name: String, kind: String, daysFromNow n: Int) -> WidgetSnapshotItem {
-        WidgetSnapshotItem(id: UUID(), name: name, kind: kind, date: daysFromNow(n))
+        WidgetSnapshotItem(recordID: UUID(), name: name, kind: kind, date: daysFromNow(n))
     }
 
     // MARK: - Empty
@@ -121,7 +121,11 @@ struct WidgetSnapshotTests {
         let candidates = record.widgetCandidates
         #expect(candidates.count == 2)
         #expect(Set(candidates.map(\.kind)) == ["warranty", "return"])
-        #expect(candidates.allSatisfy { $0.id == record.id && $0.name == "Espresso Machine" })
+        #expect(candidates.allSatisfy { $0.recordID == record.id && $0.name == "Espresso Machine" })
+        // Regression: both candidates share a `recordID` (same record, one
+        // warranty + one return event) — `id` must still be unique per
+        // event or SwiftUI `ForEach`/List identity collides in the widget.
+        #expect(Set(candidates.map(\.id)).count == 2)
     }
 
     @Test func recordWithNeitherDateProducesNoCandidates() {
