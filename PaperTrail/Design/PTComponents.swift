@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Screen background
 
@@ -17,6 +18,18 @@ extension View {
     /// Place the standard dark canvas behind a screen's content.
     func ptScreen() -> some View {
         background(ScreenBackground())
+    }
+
+    /// "Done" above the keyboard — .decimalPad/.numberPad have no return key.
+    func ptKeyboardDoneToolbar() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
     }
 }
 

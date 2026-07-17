@@ -73,7 +73,7 @@ struct AdvancedDiagnosticsView: View {
                 }
 
                 Button { copyDiagnostics() } label: {
-                    Label(copied ? "Copied" : "Copy diagnostics", systemImage: copied ? "checkmark" : "square.and.arrow.up")
+                    Label(copied ? "Copied" : "Copy diagnostics", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(PTGoldButtonStyle())
 
