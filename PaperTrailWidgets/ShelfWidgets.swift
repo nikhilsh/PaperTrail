@@ -14,10 +14,10 @@ import SwiftUI
 // The `WidgetBundle` composition is static: within a non-APPSTORE build
 // these three kinds always appear in the widget gallery, flag or no flag
 // (WidgetKit has no runtime way to hide a bundle member). When the flag is
-// off, every view here renders the same "Open PaperTrail to update"
-// graceful fallback the v2 widget already uses for a missing/undecodable
-// snapshot — an inert, on-brand card rather than broken or
-// placeholder-shimmer content.
+// off, every view here renders "Enable in Settings → Flags" rather than the
+// v2 widget's genuine no-data fallback ("Open PaperTrail to update") — the
+// two states need distinct copy so a user can tell "feature disabled" from
+// "broken".
 //
 // **APPSTORE builds compile these three kinds out of the bundle entirely**
 // (`PaperTrailWidgetsBundle`'s `#if !APPSTORE`, item 4 HIGH) — "the widget
@@ -248,7 +248,7 @@ private struct ClosingSoonWidgetView: View {
 
     var body: some View {
         if !FeatureFlags.isOn(.shelfWidgets) {
-            PaperEmptyStateView(message: "Open PaperTrail to update")
+            PaperEmptyStateView(message: "Enable in Settings → Flags")
         } else {
             let rows = ClosingSoonRows(entry: entry)
             if rows.isEmpty {
@@ -304,7 +304,7 @@ private struct CoverageRingWidgetView: View {
 
     var body: some View {
         if !FeatureFlags.isOn(.shelfWidgets) {
-            PaperEmptyStateView(message: "Open PaperTrail to update")
+            PaperEmptyStateView(message: "Enable in Settings → Flags")
         } else if let total = entry.totalCount, total > 0, let covered = entry.coveredCount {
             VStack(spacing: 6) {
                 ZStack {
@@ -416,9 +416,9 @@ private struct NextUpWidgetView: View {
         if !FeatureFlags.isOn(.shelfWidgets) {
             switch family {
             case .accessoryInline:
-                Text("Open PaperTrail to update")
+                Text("Enable in Settings → Flags")
             default:
-                EmptyStateView(message: "Open PaperTrail to update")
+                EmptyStateView(message: "Enable in Settings → Flags")
             }
         } else {
             switch family {

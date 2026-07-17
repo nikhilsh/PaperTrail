@@ -42,6 +42,7 @@ struct ServiceEntryFormView: View {
             }
             .navigationTitle("Log a repair")
             .navigationBarTitleDisplayMode(.inline)
+            .ptKeyboardDoneToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
