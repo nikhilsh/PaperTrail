@@ -38,7 +38,14 @@ jobs:
           node-version: '20'
 
       - name: Install Fyra CLI
-        run: curl -fsSL https://fyra.sh/install.sh | sh
+        # set -o pipefail: without it, a curl failure (e.g. the transient
+        # "could not resolve fyra.sh" the runners hit twice on 2026-07-17)
+        # feeds sh empty input, the step passes, and the job dies later
+        # with a confusing "fyra: command not found" (exit 127).
+        run: |
+          set -o pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 https://fyra.sh/install.sh | sh
+          PATH="$HOME/.local/bin:$PATH" command -v fyra || { echo "fyra install failed"; exit 1; }
 
       - name: Configure Fyra auth
         env:
