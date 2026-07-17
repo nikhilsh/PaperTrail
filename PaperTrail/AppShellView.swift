@@ -465,7 +465,7 @@ struct PTTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            tabButton(.library, label: "Library", symbol: "books.vertical")
+            tabButton(.library, label: "Records", symbol: "archivebox")
             tabButton(.warranty, label: "Warranty", symbol: "checkmark.seal")
 
             captureButton

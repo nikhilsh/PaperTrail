@@ -89,7 +89,7 @@ struct HelpAboutSettingsView: View {
                                 action: { openURL("https://apps.apple.com/app/id6788663812?action=write-review") })
                 }
 
-                SettingsSectionLabel(text: "Your library")
+                SettingsSectionLabel(text: "Your records")
                 SettingsCard {
                     NavigationLink { ProofFixListView() } label: {
                         SettingsRow(icon: "checkmark.seal", title: "Proof completeness",
