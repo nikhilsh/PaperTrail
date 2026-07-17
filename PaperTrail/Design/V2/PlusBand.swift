@@ -88,7 +88,7 @@ struct PlusBand: View {
 #Preview("PlusBand") {
     VStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Your library").font(PTFont.serif(24, weight: 600))
+            Text("Your records").font(PTFont.serif(24, weight: 600))
             Text("Backed up 13 seconds ago").font(.system(size: 13)).foregroundStyle(PT.onPaper2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

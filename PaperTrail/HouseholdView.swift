@@ -172,11 +172,11 @@ struct HouseholdView: View {
         VStack(spacing: 0) {
             SettingsSectionLabel(text: "Shared with you")
             SettingsCard {
-                SettingsRow(icon: "books.vertical", iconColor: PT.gold,
+                SettingsRow(icon: "archivebox", iconColor: PT.gold,
                             title: "Household records",
                             subtitle: cache.purchaseRecords.isEmpty
                                 ? "Nothing shared yet — records appear here as your household adds them"
-                                : "\(cache.purchaseRecords.count) shared record\(cache.purchaseRecords.count == 1 ? "" : "s") — in your Library under “Shared with me”")
+                                : "\(cache.purchaseRecords.count) shared record\(cache.purchaseRecords.count == 1 ? "" : "s") — in your Records under “Shared with me”")
             }
         }
     }
@@ -185,8 +185,8 @@ struct HouseholdView: View {
         VStack(spacing: 0) {
             SettingsSectionLabel(text: "What they can see")
             SettingsCard {
-                SettingsRow(icon: "books.vertical", iconColor: PT.gold,
-                            title: "Share my whole library",
+                SettingsRow(icon: "archivebox", iconColor: PT.gold,
+                            title: "Share all my records",
                             subtitle: "All \(records.count) records, proof & warranties",
                             toggle: Binding(
                                 get: {

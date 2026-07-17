@@ -176,7 +176,7 @@ struct SettingsView: View {
     private var heroCard: some View {
         if PlusConfig.enabled, PlusEntitlements.shared.hasPlus, let membershipInfo {
             GoldMemberCard(
-                name: "Your library",
+                name: "Your records",
                 memberNumber: membershipInfo.memberNumber,
                 term: membershipInfo.term,
                 itemCount: itemCount,

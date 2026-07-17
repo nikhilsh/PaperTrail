@@ -322,7 +322,7 @@ struct LapsedRenewBand: View {
 
 #Preview("GoldMemberCard — annual") {
     GoldMemberCard(
-        name: "Your library",
+        name: "Your records",
         memberNumber: memberNumber(fromTransactionID: "2000000123456789"),
         term: .annual(renewsOn: "12 Aug 2027"),
         itemCount: 5,
@@ -335,7 +335,7 @@ struct LapsedRenewBand: View {
 
 #Preview("GoldMemberCard — lifetime (legacy)") {
     GoldMemberCard(
-        name: "Your library",
+        name: "Your records",
         memberNumber: memberNumber(fromTransactionID: "2000000112233445"),
         term: .lifetime,
         itemCount: 5,
@@ -351,7 +351,7 @@ struct LapsedRenewBand: View {
     // `notificationsAuthorized` has no visible effect here — that hint only
     // applies to annual/trial, see the next preview.
     GoldMemberCard(
-        name: "Your library",
+        name: "Your records",
         memberNumber: memberNumber(fromTransactionID: "2000000555555555"),
         term: .monthly(renewsOn: "16 Aug 2026", dayText: "the 16th"),
         itemCount: 5,
@@ -365,7 +365,7 @@ struct LapsedRenewBand: View {
 #Preview("GoldMemberCard — annual, notifications off") {
     // §3c: the honest "Turn on notifications to get the knock" disclosure.
     GoldMemberCard(
-        name: "Your library",
+        name: "Your records",
         memberNumber: memberNumber(fromTransactionID: "2000000123456789"),
         term: .annual(renewsOn: "12 Aug 2027"),
         itemCount: 5,
@@ -379,7 +379,7 @@ struct LapsedRenewBand: View {
 
 #Preview("GoldMemberCard — trial") {
     GoldMemberCard(
-        name: "Your library",
+        name: "Your records",
         memberNumber: memberNumber(fromTransactionID: "2000000987654321"),
         term: .trial(billsOn: "30 Jul 2026"),
         itemCount: 5,
