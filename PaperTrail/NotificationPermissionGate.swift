@@ -145,7 +145,7 @@ final class NotificationPermissionGate {
 
     private let defaults: UserDefaults
     private let authorizationStatusProvider: () async -> UNAuthorizationStatus
-    private let modelContextProvider: () -> ModelContext
+    private let modelContextProvider: @MainActor () -> ModelContext
 
     /// Resumed by `respondYes`/`respondNotNow` — the single in-flight ask's
     /// continuation. `ensurePermission` suspends on this while `.ask` is
@@ -159,7 +159,7 @@ final class NotificationPermissionGate {
         authorizationStatusProvider: @escaping () async -> UNAuthorizationStatus = {
             await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         },
-        modelContextProvider: @escaping () -> ModelContext = { PaperTrailModelContainer.shared.mainContext }
+        modelContextProvider: @escaping @MainActor () -> ModelContext = { PaperTrailModelContainer.shared.mainContext }
     ) {
         self.defaults = defaults
         self.authorizationStatusProvider = authorizationStatusProvider
