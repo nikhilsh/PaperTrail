@@ -27,9 +27,10 @@ struct WidgetSnapshotItem: Codable, Sendable, Identifiable {
     var id: String { "\(recordID)-\(kind)" }
 }
 
-/// The first unregistered item that still has an active warranty — surfaced
-/// as a gold "register it" nudge on the v3 `shelfWidgets` "Closing soon"
-/// widget. `nil` when nothing qualifies.
+/// The first unregistered, recently purchased (≤ 30 days) item that still
+/// has an active warranty — surfaced as a gold "register it" nudge on the
+/// v3 `shelfWidgets` "Closing soon" widget. `nil` when nothing qualifies.
+/// `name` is the display form (`displayProductName`), never raw OCR.
 struct WidgetRegisterNudge: Codable, Sendable, Equatable {
     var recordID: UUID
     var name: String
@@ -264,12 +265,17 @@ enum WidgetSnapshotWriter {
         return "\(numberText)\(suffix)"
     }
 
-    /// The first unregistered item whose warranty is still active — the
-    /// "Closing soon" widget's gold nudge row. Deterministic ordering:
-    /// soonest-expiring first, then product name — mirrors
+    /// The first unregistered, *recently purchased* item whose warranty is
+    /// still active — the "Closing soon" widget's gold nudge row. "Recent"
+    /// means purchased within the last 30 days (day granularity,
+    /// BUILD_REVIEW W1): nudging registration of a year-old appliance is
+    /// manufactured urgency, and a record with no `purchaseDate` can't
+    /// prove it's fresh, so it never qualifies. Deterministic ordering:
+    /// soonest-expiring first, then display name — mirrors
     /// `DigestBuilder.build`'s sort for the same underlying condition
     /// (`!isRegistered && warranty not yet expired`). `nil` when nothing
-    /// qualifies.
+    /// qualifies. Name is the display form (`displayProductName`, B5) so
+    /// the widget never shouts a raw OCR string.
     nonisolated static func registerNudgeCandidate(
         for records: [PurchaseRecord],
         now: Date = .now,
@@ -278,16 +284,20 @@ enum WidgetSnapshotWriter {
         let today = calendar.startOfDay(for: now)
         let candidates: [(record: PurchaseRecord, daysLeft: Int)] = records.compactMap { record in
             guard !record.isRegistered, let expiry = record.warrantyExpiryDate else { return nil }
+            guard let purchaseDate = record.purchaseDate else { return nil }
+            let purchaseDay = calendar.startOfDay(for: purchaseDate)
+            let daysSincePurchase = calendar.dateComponents([.day], from: purchaseDay, to: today).day ?? 0
+            guard daysSincePurchase <= 30 else { return nil }
             let expiryDay = calendar.startOfDay(for: expiry)
             guard expiryDay >= today else { return nil }
             let daysLeft = calendar.dateComponents([.day], from: today, to: expiryDay).day ?? 0
             return (record, daysLeft)
         }
         let sorted = candidates.sorted {
-            $0.daysLeft != $1.daysLeft ? $0.daysLeft < $1.daysLeft : $0.record.productName < $1.record.productName
+            $0.daysLeft != $1.daysLeft ? $0.daysLeft < $1.daysLeft : $0.record.displayProductName < $1.record.displayProductName
         }
         guard let first = sorted.first else { return nil }
-        return WidgetRegisterNudge(recordID: first.record.id, name: first.record.productName)
+        return WidgetRegisterNudge(recordID: first.record.id, name: first.record.displayProductName)
     }
 }
 
@@ -296,14 +306,16 @@ extension PurchaseRecord {
     /// and/or a return-deadline entry, whichever are tracked. Not yet
     /// filtered for past dates or trimmed to a limit; that's
     /// `WidgetSnapshotWriter.nearestUpcoming`'s job. Mirrors the shape of
-    /// `digestSnapshot` in `DigestScheduler.swift`.
+    /// `digestSnapshot` in `DigestScheduler.swift`. Names are the display
+    /// form (`displayProductName`, BUILD_REVIEW B5) so widgets never shout
+    /// a raw OCR string — the raw `productName` stays on the record.
     nonisolated var widgetCandidates: [WidgetSnapshotItem] {
         var items: [WidgetSnapshotItem] = []
         if let warrantyExpiryDate {
-            items.append(WidgetSnapshotItem(recordID: id, name: productName, kind: "warranty", date: warrantyExpiryDate))
+            items.append(WidgetSnapshotItem(recordID: id, name: displayProductName, kind: "warranty", date: warrantyExpiryDate))
         }
         if let returnDeadline {
-            items.append(WidgetSnapshotItem(recordID: id, name: productName, kind: "return", date: returnDeadline))
+            items.append(WidgetSnapshotItem(recordID: id, name: displayProductName, kind: "return", date: returnDeadline))
         }
         return items
     }

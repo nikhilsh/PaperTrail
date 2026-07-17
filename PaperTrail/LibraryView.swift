@@ -449,7 +449,7 @@ struct RecordFilingCard: View {
             HStack(alignment: .top, spacing: 12) {
                 GlyphTile(symbol: warranty.glyph, size: 38, onPaper: true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(record.productName)
+                    Text(record.displayProductName)
                         .font(PTFont.serif(18, weight: 600))
                         .foregroundStyle(PT.onPaper)
                         .lineLimit(2)
@@ -471,14 +471,16 @@ struct RecordFilingCard: View {
                     .foregroundStyle(PT.onPaper2)
                     .lineLimit(1)
                 Spacer(minLength: 8)
+                // BUILD_REVIEW B3: this card is cream — pills use the deep
+                // on-paper tones, not the dark-background palette.
                 if needsProof {
-                    TonedStatusPill(text: "Add proof", tone: PT.amber, textColor: Color(hex: 0xF0D49A), background: Color(hex: 0xD7A64C, alpha: 0.15))
+                    TonedStatusPill(text: "Add proof", tone: PT.amber, textColor: Color(hex: 0x8A6420), background: Color(hex: 0xD7A64C, alpha: 0.18))
                 }
                 if record.warrantyExpiryDate != nil {
-                    StatusPill(status: warranty.status, text: warranty.pillText)
+                    StatusPill(status: warranty.status, text: warranty.pillText, onPaper: true)
                 }
                 if let badgeText = returnWindow.badgeText {
-                    TonedStatusPill(text: badgeText, tone: returnWindow.tone, textColor: returnWindow.textColor, background: returnWindow.background)
+                    TonedStatusPill(text: badgeText, tone: returnWindow.tone, textColor: Color(hex: 0x8A6420), background: Color(hex: 0xD7A64C, alpha: 0.18))
                 }
             }
         }
@@ -490,7 +492,7 @@ struct RecordFilingCard: View {
     private var priceMerchant: String {
         var parts: [String] = []
         if let amount = record.formattedAmount { parts.append(amount) }
-        if let merchant = record.merchantName, !merchant.isEmpty { parts.append(merchant) }
+        if let merchant = record.displayMerchantName, !merchant.isEmpty { parts.append(merchant) }
         return parts.isEmpty ? "—" : parts.joined(separator: "  ·  ")
     }
 }
@@ -506,7 +508,7 @@ private struct RoomRow: View {
         HStack(spacing: 12) {
             GlyphTile(symbol: warranty.glyph, size: 34)
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.productName)
+                Text(record.displayProductName)
                     .font(PTFont.serif(16, weight: 500))
                     .foregroundStyle(PT.txt)
                     .lineLimit(1)
@@ -549,11 +551,11 @@ private struct SharedRecordRow: View {
         HStack(spacing: 12) {
             GlyphTile(symbol: glyph, size: 34)
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.productName)
+                Text(PTDisplayName.product(record.productName))
                     .font(PTFont.serif(16, weight: 500))
                     .foregroundStyle(PT.txt)
                     .lineLimit(1)
-                Text(record.merchantName ?? "Shared item")
+                Text(record.merchantName.map(PTDisplayName.merchant) ?? "Shared item")
                     .font(PTFont.mono(10))
                     .foregroundStyle(PT.txt3)
             }
@@ -589,7 +591,7 @@ private struct PassedOnRow: View {
             GlyphTile(symbol: warranty.glyph, size: 34)
                 .opacity(0.6)
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.productName)
+                Text(record.displayProductName)
                     .font(PTFont.serif(16, weight: 500))
                     .foregroundStyle(PT.txt2)
                     .lineLimit(1)

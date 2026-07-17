@@ -89,6 +89,7 @@ struct EditRecordView: View {
 
             Section("Warranty") {
                 Toggle("Warranty expiry", isOn: $includeWarranty)
+                    .tint(PT.sage)
                 if includeWarranty {
                     DatePicker("Warranty expires", selection: $warrantyExpiryDate, displayedComponents: .date)
                 }
@@ -114,6 +115,7 @@ struct EditRecordView: View {
                 }
                 TextField("Covers (e.g. Parts & labor)", text: $coverageSummary)
                 Toggle("Registered with manufacturer", isOn: $isRegistered)
+                    .tint(PT.sage)
             }
 
             Section("Coverage passport — what's covered") {
@@ -121,7 +123,7 @@ struct EditRecordView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             TextField("Coverage line", text: $line.label)
-                            Toggle("", isOn: $line.covered).labelsHidden()
+                            Toggle("", isOn: $line.covered).labelsHidden().tint(PT.sage)
                         }
                         if FeatureFlags.isOn(.multiCoverage) {
                             coverageLineDetailEditor(line: $line)
@@ -133,7 +135,7 @@ struct EditRecordView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         TextField("Add coverage line (e.g. Accidental damage)", text: $newCoverageLineLabel)
-                        Toggle("", isOn: $newCoverageLineCovered).labelsHidden()
+                        Toggle("", isOn: $newCoverageLineCovered).labelsHidden().tint(PT.sage)
                         Button {
                             addCoverageLine()
                         } label: {
@@ -250,6 +252,7 @@ struct EditRecordView: View {
                 get: { date.wrappedValue != nil },
                 set: { isOn in date.wrappedValue = isOn ? (date.wrappedValue ?? .now) : nil }
             ))
+            .tint(PT.sage)
             if date.wrappedValue != nil {
                 DatePicker(
                     "",

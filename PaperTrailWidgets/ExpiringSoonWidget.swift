@@ -149,8 +149,10 @@ struct ExpiringSoonProvider: TimelineProvider {
 // MARK: - Day-count formatting
 
 // Internal (not `private`) — `ShelfWidgets.swift`'s v3 widgets reuse
-// `daysLeft`/`deepLink`/`color` rather than re-deriving the same day-math
-// and deep-link logic.
+// `daysLeft`/`deepLink` rather than re-deriving the same day-math and
+// deep-link logic. (Their remaining-time *phrasing* routes through
+// `CoverageFormatter` instead — the compact "6d"/"3d left" forms here are
+// v2-only, and this v2 surface is APPSTORE-frozen.)
 enum ExpiringSoonFormatting {
     /// Whole-day difference from `asOf` to `date`, anchored to start-of-day
     /// so it doesn't depend on time-of-day. Negative once the date has
@@ -197,9 +199,9 @@ enum ExpiringSoonFormatting {
 /// unreachable App Group container ("Open PaperTrail to update"), never
 /// crashing the widget either way. Which message applies is the caller's
 /// call, driven by `ExpiringSoonEntry.isDataAvailable`.
-// Internal (not `private`) — the v3 dark "Next up" widget in
-// `ShelfWidgets.swift` reuses this same dark-background empty state rather
-// than duplicating it.
+// Part of the pixel-frozen v2 APPSTORE surface — the v3 dark "Next up"
+// widget used to reuse this but now has its own `NextUpEmptyStateView`
+// (W6 chrome), precisely so this one never has to change.
 struct EmptyStateView: View {
     let message: String
 

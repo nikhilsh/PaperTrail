@@ -56,10 +56,15 @@ enum PlusConfig {
         /// plan list — see `subscriptionPlans`.
         static let all = [monthly, yearly, lifetime]
 
-        /// The two plans the paywall actually sells (v2.1,
-        /// docs/design-v2/DESIGN_LANGUAGE.md §7: "Two plans max... No
-        /// lifetime tier"). Annual first — it's the default-selected plan.
+        /// The two auto-renewable subscriptions (used where renewal
+        /// mechanics matter, e.g. `RenewalReminder`). Annual first — it's
+        /// the default-selected plan.
         static let subscriptionPlans = [yearly, monthly]
+
+        /// Everything the paywall sells (DESIGN_LANGUAGE.md §7, updated
+        /// 17 Jul 2026: three plans — Annual default-selected, Monthly,
+        /// and Lifetime as a quiet third row).
+        static let paywallPlans = [yearly, monthly, lifetime]
     }
 
     /// The free-forever promise (docs/MONETIZATION.md "The principle") — the

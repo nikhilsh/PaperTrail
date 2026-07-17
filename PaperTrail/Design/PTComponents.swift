@@ -183,12 +183,36 @@ extension WarrantyStatus {
         case .unknown: Color(hex: 0xE7DCC4, alpha: 0.07)
         }
     }
+
+    /// Pill text for CREAM (paper-card) backgrounds — the dark-background
+    /// tones above washed out to pale-on-pale there (BUILD_REVIEW B3).
+    /// Deep variants keep ≥ 4.5:1 contrast on `PT.paper`.
+    var pillTextColorOnPaper: Color {
+        switch self {
+        case .active: Color(hex: 0x6E8550)        // sageDeep
+        case .expiringSoon: Color(hex: 0x8A6420)  // amberDeep
+        case .expired: Color(hex: 0xA34F30)       // terraDeep
+        case .unknown: PT.onPaper2
+        }
+    }
+
+    var pillBackgroundOnPaper: Color {
+        switch self {
+        case .active: Color(hex: 0x93A86F, alpha: 0.18)
+        case .expiringSoon: Color(hex: 0xD7A64C, alpha: 0.18)
+        case .expired: Color(hex: 0xC56A45, alpha: 0.16)
+        case .unknown: Color(hex: 0x211C12, alpha: 0.07)
+        }
+    }
 }
 
-/// Small dot + mono label, tinted by warranty status.
+/// Small dot + mono label, tinted by warranty status. `onPaper` switches to
+/// the deep text tones that stay legible on cream cards (BUILD_REVIEW B3) —
+/// the default palette is tuned for the dark background.
 struct StatusPill: View {
     let status: WarrantyStatus
     var text: String
+    var onPaper: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -200,10 +224,10 @@ struct StatusPill: View {
             Text(text)
                 .ptMonoLabel(10, tracking: 1.2)
         }
-        .foregroundStyle(status.pillTextColor)
+        .foregroundStyle(onPaper ? status.pillTextColorOnPaper : status.pillTextColor)
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(status.pillBackground, in: Capsule())
+        .background(onPaper ? status.pillBackgroundOnPaper : status.pillBackground, in: Capsule())
     }
 }
 

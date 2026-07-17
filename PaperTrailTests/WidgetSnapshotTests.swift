@@ -304,9 +304,9 @@ struct WidgetSnapshotTests {
 
     @Test func registerNudgeCandidatePicksSoonestUnregisteredActiveItem() {
         let records = [
-            PurchaseRecord(productName: "Registered Soon", warrantyExpiryDate: daysFromNow(5), isRegistered: true),
-            PurchaseRecord(productName: "Unregistered Far", warrantyExpiryDate: daysFromNow(90), isRegistered: false),
-            PurchaseRecord(productName: "Unregistered Near", warrantyExpiryDate: daysFromNow(10), isRegistered: false),
+            PurchaseRecord(productName: "Registered Soon", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(5), isRegistered: true),
+            PurchaseRecord(productName: "Unregistered Far", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(90), isRegistered: false),
+            PurchaseRecord(productName: "Unregistered Near", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(10), isRegistered: false),
         ]
         let nudge = WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now)
         #expect(nudge?.name == "Unregistered Near")
@@ -314,27 +314,27 @@ struct WidgetSnapshotTests {
 
     @Test func registerNudgeCandidateIgnoresExpiredWarranties() {
         let records = [
-            PurchaseRecord(productName: "Expired Unregistered", warrantyExpiryDate: daysFromNow(-3), isRegistered: false),
+            PurchaseRecord(productName: "Expired Unregistered", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(-3), isRegistered: false),
         ]
         #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now) == nil)
     }
 
     @Test func registerNudgeCandidateIgnoresRegisteredItems() {
         let records = [
-            PurchaseRecord(productName: "Already Registered", warrantyExpiryDate: daysFromNow(5), isRegistered: true),
+            PurchaseRecord(productName: "Already Registered", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(5), isRegistered: true),
         ]
         #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now) == nil)
     }
 
     @Test func registerNudgeCandidateIgnoresItemsWithoutWarranty() {
-        let records = [PurchaseRecord(productName: "No Warranty Tracked", isRegistered: false)]
+        let records = [PurchaseRecord(productName: "No Warranty Tracked", purchaseDate: daysFromNow(-2), isRegistered: false)]
         #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now) == nil)
     }
 
     @Test func registerNudgeCandidateBreaksTiesByProductName() {
         let records = [
-            PurchaseRecord(productName: "Zebra Print", warrantyExpiryDate: daysFromNow(5), isRegistered: false),
-            PurchaseRecord(productName: "Alpha Kettle", warrantyExpiryDate: daysFromNow(5), isRegistered: false),
+            PurchaseRecord(productName: "Zebra Print", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(5), isRegistered: false),
+            PurchaseRecord(productName: "Alpha Kettle", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(5), isRegistered: false),
         ]
         let nudge = WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now)
         #expect(nudge?.name == "Alpha Kettle")
@@ -342,5 +342,54 @@ struct WidgetSnapshotTests {
 
     @Test func registerNudgeCandidateOnEmptyRecordsIsNil() {
         #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: [], now: now) == nil)
+    }
+
+    // MARK: - registerNudgeCandidate: 30-day freshness window (W1)
+
+    /// Nudging registration of an old item is manufactured urgency — the
+    /// nudge only fires within 30 days of purchase, day granularity.
+    @Test func registerNudgeCandidateIgnoresItemsPurchasedOver30DaysAgo() {
+        let records = [
+            PurchaseRecord(productName: "Old Purchase", purchaseDate: daysFromNow(-31), warrantyExpiryDate: daysFromNow(300), isRegistered: false),
+        ]
+        #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now) == nil)
+    }
+
+    @Test func registerNudgeCandidateAcceptsPurchaseExactly30DaysAgo() {
+        let records = [
+            PurchaseRecord(productName: "Boundary Purchase", purchaseDate: daysFromNow(-30), warrantyExpiryDate: daysFromNow(300), isRegistered: false),
+        ]
+        let nudge = WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now)
+        #expect(nudge?.name == "Boundary Purchase")
+    }
+
+    /// A record with no purchase date can't prove it's fresh — never nudge.
+    @Test func registerNudgeCandidateIgnoresItemsWithoutPurchaseDate() {
+        let records = [
+            PurchaseRecord(productName: "Undated Purchase", warrantyExpiryDate: daysFromNow(10), isRegistered: false),
+        ]
+        #expect(WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now) == nil)
+    }
+
+    // MARK: - Display names in the snapshot (B5)
+
+    /// The widget never shouts a raw OCR name — the writer emits the
+    /// display form; the raw string stays on the record.
+    @Test func widgetCandidatesUseDisplayProductName() {
+        let record = PurchaseRecord(
+            productName: "RHEEM STORAGE HEATER 20L",
+            purchaseDate: now,
+            warrantyExpiryDate: daysFromNow(30)
+        )
+        #expect(record.widgetCandidates.map(\.name) == ["Rheem Storage Heater 20L"])
+        #expect(record.productName == "RHEEM STORAGE HEATER 20L")
+    }
+
+    @Test func registerNudgeCandidateUsesDisplayProductName() {
+        let records = [
+            PurchaseRecord(productName: "SONY BRAVIA TV", purchaseDate: daysFromNow(-2), warrantyExpiryDate: daysFromNow(10), isRegistered: false),
+        ]
+        let nudge = WidgetSnapshotWriter.registerNudgeCandidate(for: records, now: now)
+        #expect(nudge?.name == "Sony Bravia TV")
     }
 }

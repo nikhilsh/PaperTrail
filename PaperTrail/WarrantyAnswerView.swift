@@ -7,7 +7,6 @@ struct WarrantyAnswerView: View {
     @Query private var allAttachments: [Attachment]
     let record: PurchaseRecord
 
-    private var warranty: PTWarranty { PTWarranty(record: record) }
     private var attachments: [Attachment] { allAttachments.filter { $0.recordID == record.id } }
 
     /// Lead word + emphasis word + tail. Emphasis is gold for covered/expiring,
@@ -34,7 +33,7 @@ struct WarrantyAnswerView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Text(record.productName)
+                Text(record.displayProductName)
                     .ptMonoLabel(11, tracking: 2)
                     .foregroundStyle(PT.txt3)
                     .multilineTextAlignment(.center)
@@ -47,18 +46,29 @@ struct WarrantyAnswerView: View {
 
                 StampBadge(text: stamp.text, tone: stamp.tone)
 
-                timelineCard
+                ringCard
 
                 if !attachments.isEmpty {
                     ProofChips(attachments: attachments)
                 }
 
-                NavigationLink {
-                    SupportView(record: record)
-                } label: {
-                    Text("Something's wrong with it  →")
+                // BUILD_REVIEW B2: proof + actions sit right under the ring —
+                // no dead bottom half — and the full dossier is one tap away.
+                VStack(spacing: 10) {
+                    NavigationLink {
+                        RecordDetailView(record: record)
+                    } label: {
+                        Text("View full passport  →")
+                    }
+                    .buttonStyle(PTOutlineButtonStyle())
+
+                    NavigationLink {
+                        SupportView(record: record)
+                    } label: {
+                        Text("Something's wrong with it  →")
+                    }
+                    .buttonStyle(PTOutlineButtonStyle())
                 }
-                .buttonStyle(PTOutlineButtonStyle())
                 .padding(.top, 4)
             }
             .padding(.horizontal, PT.Metric.screenPad)
@@ -80,61 +90,38 @@ struct WarrantyAnswerView: View {
         }
     }
 
-    private var timelineCard: some View {
+    /// BUILD_REVIEW B2: the old horizontal bar-with-knob read as a slider
+    /// and invited dragging. The blessed progress idiom here is the same
+    /// coverage ring as the passport, with BOUGHT / TODAY / EXPIRES as
+    /// ledger rows beneath — nothing on this card looks draggable.
+    private var ringCard: some View {
         VStack(spacing: 16) {
-            VStack(spacing: 2) {
-                Text(record.warrantyStatus == .expired ? "Lapsed" : warranty.remainingShort.replacingOccurrences(of: " left", with: ""))
-                    .font(PTFont.serif(40, weight: 600))
-                    .foregroundStyle(PT.onPaper)
-                Text(record.warrantyStatus == .expired ? "out of warranty" : "remaining")
-                    .ptMonoLabel(9.5, tracking: 1.8)
-                    .foregroundStyle(PT.onPaper3)
+            if let expiry = record.warrantyExpiryDate {
+                let values = coverageRingValues(purchaseDate: record.purchaseDate, expiryDate: expiry)
+                CoverageRing(
+                    totalMonths: values.total,
+                    monthsRemaining: values.remaining,
+                    unitSuffix: values.unit.suffix,
+                    caption: record.warrantyStatus == .expired ? "LAPSED" : "REMAINING",
+                    diameter: 132
+                )
+            } else {
+                Text("No warranty dates on file")
+                    .font(PTFont.serif(18, weight: 500))
+                    .foregroundStyle(PT.onPaper2)
+                    .padding(.vertical, 8)
             }
 
-            // Timeline: purchase ── Today ── expiry
-            VStack(spacing: 6) {
-                GeometryReader { geo in
-                    let elapsed = warranty.progressElapsed
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(PT.onPaperHair).frame(height: 5)
-                        Capsule()
-                            .fill(LinearGradient(colors: [warranty.status.tone.opacity(0.7), warranty.status.tone],
-                                                 startPoint: .leading, endPoint: .trailing))
-                            .frame(width: max(0, min(1, elapsed)) * geo.size.width, height: 5)
-                        Circle()
-                            .fill(PT.onPaper)
-                            .frame(width: 11, height: 11)
-                            .overlay(Circle().stroke(PT.paper, lineWidth: 2))
-                            .offset(x: max(0, min(1, elapsed)) * geo.size.width - 5.5)
-                    }
-                }
-                .frame(height: 12)
-
-                HStack {
-                    endpoint(label: "Bought", value: record.purchaseDate)
-                    Spacer()
-                    Text("Today")
-                        .ptMonoLabel(8.5, tracking: 1.2)
-                        .foregroundStyle(PT.onPaper2)
-                    Spacer()
-                    endpoint(label: "Expires", value: record.warrantyExpiryDate, trailing: true)
-                }
+            VStack(spacing: 0) {
+                LedgerRow(key: "Bought", value: record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
+                LedgerRow(key: "Today", value: PTDate.dayMonthYear.string(from: .now))
+                LedgerRow(key: record.warrantyStatus == .expired ? "Expired" : "Expires",
+                          value: record.warrantyExpiryDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
         .paperCard(goldFold: true)
-    }
-
-    private func endpoint(label: String, value: Date?, trailing: Bool = false) -> some View {
-        VStack(alignment: trailing ? .trailing : .leading, spacing: 2) {
-            Text(label)
-                .ptMonoLabel(8, tracking: 1.2)
-                .foregroundStyle(PT.onPaper3)
-            Text(value.map { PTDate.dayMonthYear.string(from: $0) } ?? "—")
-                .font(PTFont.mono(10))
-                .foregroundStyle(PT.onPaper2)
-        }
     }
 }
 
