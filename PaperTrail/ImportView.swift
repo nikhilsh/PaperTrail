@@ -20,10 +20,8 @@ struct ImportView: View {
     @State private var processingNote = ""
     @State private var reviewQueue: [DraftPayload] = []
     @State private var currentDraft: DraftPayload?
-    @State private var copiedAddress = false
 
     private let scanningService = ScanningService()
-    private let forwardingAddress = "receipts@in.papertrail.app"
 
     var body: some View {
         ScrollView {
@@ -45,7 +43,7 @@ struct ImportView: View {
                 sourceRow(icon: "envelope", title: "Email receipts",
                           sub: "Connect Gmail or Apple Mail") { showEmailComingSoon = true }
 
-                forwardingCard
+                fromEmailCard
             }
             .padding(.horizontal, PT.Metric.screenPad)
             .padding(.bottom, 130)
@@ -80,7 +78,7 @@ struct ImportView: View {
         .alert("Coming soon", isPresented: $showEmailComingSoon) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Connecting Gmail or Apple Mail is on the way. For now, forward receipts to your private address, or import from Photos and Files.")
+            Text("Connecting Gmail or Apple Mail is on the way. For now, open the receipt in Mail and share it into PaperTrail, or import from Photos and Files.")
         }
         .navigationDestination(item: $currentDraft) { payload in
             DraftRecordView(seedType: payload.type, seededAttachments: payload.attachments, seededOCR: payload.ocr)
@@ -116,36 +114,20 @@ struct ImportView: View {
         .buttonStyle(.plain)
     }
 
-    private var forwardingCard: some View {
+    /// The real path for a receipt that arrives by email: PaperTrail is
+    /// registered to open PDFs/images directly (`CFBundleDocumentTypes`) and
+    /// ships a share extension, so the attachment routes through the same
+    /// on-device extraction pipeline as Photos/Files import — no inbox,
+    /// nothing sent off-device.
+    private var fromEmailCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FORWARD ANYTIME")
+            Text("FROM YOUR EMAIL")
                 .ptMonoLabel(9.5, tracking: 2.4)
                 .foregroundStyle(PT.onPaper3)
-            Text("Forward any order confirmation to your private inbox and it files itself:")
+            Text("In Mail, open the receipt attachment, tap Share, then choose PaperTrail.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(PT.onPaper2)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text(forwardingAddress)
-                    .font(PTFont.mono(13, medium: true))
-                    .foregroundStyle(PT.onPaper)
-                Spacer()
-                Button {
-                    UIPasteboard.general.string = forwardingAddress
-                    copiedAddress = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedAddress = false }
-                } label: {
-                    Image(systemName: copiedAddress ? "checkmark" : "square.and.arrow.up")
-                        .font(.system(size: 14))
-                        .foregroundStyle(PT.goldDeep)
-                }
-            }
-            .padding(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                    .foregroundStyle(PT.onPaperHair)
-            )
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

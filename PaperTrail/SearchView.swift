@@ -64,6 +64,7 @@ struct SearchView: View {
         }
         .ptScreen()
         .toolbar(.hidden, for: .navigationBar)
+        .ptKeyboardDoneToolbar()
         .onAppear { searchFocused = true }
     }
 

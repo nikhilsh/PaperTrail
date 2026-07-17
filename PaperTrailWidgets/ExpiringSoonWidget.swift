@@ -26,6 +26,9 @@ struct ExpiringSoonEntry: TimelineEntry {
     let coveredCount: Int?
     let totalCount: Int?
     let totalValueText: String?
+    /// Abbreviated form of `totalValueText` (e.g. "S$3.1k" vs "SGD 3,116")
+    /// for tight widget layouts — see `WidgetSnapshot.totalValueCompactText`.
+    let totalValueCompactText: String?
     let registerNudge: WidgetRegisterNudge?
 }
 
@@ -104,6 +107,7 @@ struct ExpiringSoonProvider: TimelineProvider {
             coveredCount: snapshot?.coveredCount,
             totalCount: snapshot?.totalCount,
             totalValueText: snapshot?.totalValueText,
+            totalValueCompactText: snapshot?.totalValueCompactText,
             registerNudge: snapshot?.registerNudge
         )
     }
@@ -115,6 +119,7 @@ struct ExpiringSoonProvider: TimelineProvider {
         coveredCount: Int? = nil,
         totalCount: Int? = nil,
         totalValueText: String? = nil,
+        totalValueCompactText: String? = nil,
         registerNudge: WidgetRegisterNudge? = nil
     ) -> ExpiringSoonEntry {
         ExpiringSoonEntry(
@@ -124,6 +129,7 @@ struct ExpiringSoonProvider: TimelineProvider {
             coveredCount: coveredCount,
             totalCount: totalCount,
             totalValueText: totalValueText,
+            totalValueCompactText: totalValueCompactText,
             registerNudge: registerNudge
         )
     }

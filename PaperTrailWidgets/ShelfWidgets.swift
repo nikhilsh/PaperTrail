@@ -14,10 +14,10 @@ import SwiftUI
 // The `WidgetBundle` composition is static: within a non-APPSTORE build
 // these three kinds always appear in the widget gallery, flag or no flag
 // (WidgetKit has no runtime way to hide a bundle member). When the flag is
-// off, every view here renders the same "Open PaperTrail to update"
-// graceful fallback the v2 widget already uses for a missing/undecodable
-// snapshot — an inert, on-brand card rather than broken or
-// placeholder-shimmer content.
+// off, every view here renders "Enable in Settings → Flags" rather than the
+// v2 widget's genuine no-data fallback ("Open PaperTrail to update") — the
+// two states need distinct copy so a user can tell "feature disabled" from
+// "broken".
 //
 // **APPSTORE builds compile these three kinds out of the bundle entirely**
 // (`PaperTrailWidgetsBundle`'s `#if !APPSTORE`, item 4 HIGH) — "the widget
@@ -136,20 +136,31 @@ private struct UrgencyPill: View {
     }
 }
 
-private struct ReturnWindowRow: View {
+/// One "closing soon" row — a return window or a warranty deadline, sharing
+/// one visual treatment (name + kind-specific subtitle + day-count pill) so
+/// up to three can sit together at the same density as the dark
+/// ExpiringSoon medium widget's `MediumWidgetRow`, without singling out
+/// returns the way the old return-only row did.
+private struct ClosingSoonItemRow: View {
     let item: WidgetSnapshotItem
     let asOf: Date
+
+    private var subtitle: String {
+        item.kind == "return"
+            ? "Last day to change your mind: \(ShelfFormatting.shortDate(item.date))"
+            : "Warranty ends \(ShelfFormatting.shortDate(item.date))"
+    }
 
     var body: some View {
         let daysLeft = ExpiringSoonFormatting.daysLeft(from: asOf, to: item.date)
         let row = HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(item.name) — return window")
+                Text(item.name)
                     .font(.system(.subheadline, design: .serif).weight(.semibold))
                     .foregroundStyle(WidgetPalette.ink)
                     .lineLimit(1)
                     .privacySensitive()
-                Text("Last day to change your mind: \(ShelfFormatting.shortDate(item.date))")
+                Text(subtitle)
                     .font(.caption2)
                     .foregroundStyle(WidgetPalette.inkSecondary)
                     .lineLimit(1)
@@ -166,18 +177,29 @@ private struct ReturnWindowRow: View {
     }
 }
 
+/// The register-it nudge, given the same two-line title-plus-subtitle
+/// treatment as `ClosingSoonItemRow` so it never reads as a single thin
+/// line floating alone in the card. The subtitle stays generic — the
+/// snapshot doesn't carry the record's warranty term, so this doesn't
+/// invent a specific duration.
 private struct RegisterNudgeRow: View {
     let nudge: WidgetRegisterNudge
 
     var body: some View {
         let row = HStack(alignment: .center, spacing: 8) {
-            Text("\(nudge.name) — register it")
-                .font(.system(.subheadline, design: .serif).weight(.semibold))
-                .foregroundStyle(WidgetPalette.ink)
-                .lineLimit(1)
-                .privacySensitive()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(nudge.name) — register it")
+                    .font(.system(.subheadline, design: .serif).weight(.semibold))
+                    .foregroundStyle(WidgetPalette.ink)
+                    .lineLimit(1)
+                    .privacySensitive()
+                Text("Register to unlock full coverage")
+                    .font(.caption2)
+                    .foregroundStyle(WidgetPalette.inkSecondary)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 8)
-            Text("DO IT →")
+            Text("REGISTER →")
                 .font(.system(.caption2, design: .monospaced).weight(.semibold))
                 .foregroundStyle(WidgetPalette.goldDeep)
         }
@@ -189,58 +211,21 @@ private struct RegisterNudgeRow: View {
     }
 }
 
-/// Fallback row when neither a return-window item nor a register nudge is
-/// available — "fallback = nearest warranty rows" per the brief. Styled for
-/// the paper background, same information density as the v2 widget's
-/// `MediumWidgetRow`.
-private struct NearestEventRow: View {
-    let item: WidgetSnapshotItem
-    let asOf: Date
-
-    var body: some View {
-        let daysLeft = ExpiringSoonFormatting.daysLeft(from: asOf, to: item.date)
-        let row = HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.system(.subheadline, design: .serif).weight(.semibold))
-                    .foregroundStyle(WidgetPalette.ink)
-                    .lineLimit(1)
-                    .privacySensitive()
-                Text(ExpiringSoonFormatting.kindLabel(item.kind))
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(WidgetPalette.goldDeep.opacity(0.85))
-            }
-            Spacer(minLength: 8)
-            Text(ShelfFormatting.dayPhrase(daysLeft))
-                .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                .foregroundStyle(WidgetPalette.ink)
-        }
-        if let destination = ExpiringSoonFormatting.deepLink(for: item) {
-            Link(destination: destination) { row }
-        } else {
-            row
-        }
-    }
-}
-
-/// Up to two urgency rows for the "Closing soon" card: the nearest return
-/// window, then the register nudge. When neither exists, falls back to the
-/// nearest one or two upcoming events of any kind.
+/// Up to three closing-soon rows, nearest deadline first (mixed return and
+/// warranty events, already sorted by `WidgetSnapshotWriter.nearestUpcoming`),
+/// plus the register nudge as a bonus row when there's room left under the
+/// three-row cap — the nudge never bumps a genuine deadline out.
 private struct ClosingSoonRows {
-    let returnRow: WidgetSnapshotItem?
+    let items: [WidgetSnapshotItem]
     let registerNudge: WidgetRegisterNudge?
-    let fallbackItems: [WidgetSnapshotItem]
 
     init(entry: ExpiringSoonEntry) {
-        let returnItem = entry.items.first { $0.kind == "return" }
-        returnRow = returnItem
-        registerNudge = entry.registerNudge
-        fallbackItems = (returnItem == nil && entry.registerNudge == nil)
-            ? Array(entry.items.prefix(2))
-            : []
+        let capped = Array(entry.items.prefix(3))
+        items = capped
+        registerNudge = capped.count < 3 ? entry.registerNudge : nil
     }
 
-    var isEmpty: Bool { returnRow == nil && registerNudge == nil && fallbackItems.isEmpty }
+    var isEmpty: Bool { items.isEmpty && registerNudge == nil }
 }
 
 private struct ClosingSoonWidgetView: View {
@@ -248,7 +233,7 @@ private struct ClosingSoonWidgetView: View {
 
     var body: some View {
         if !FeatureFlags.isOn(.shelfWidgets) {
-            PaperEmptyStateView(message: "Open PaperTrail to update")
+            PaperEmptyStateView(message: "Enable in Settings → Flags")
         } else {
             let rows = ClosingSoonRows(entry: entry)
             if rows.isEmpty {
@@ -260,24 +245,17 @@ private struct ClosingSoonWidgetView: View {
                         .foregroundStyle(WidgetPalette.goldDeep)
                         .padding(.bottom, 12)
 
-                    if let returnItem = rows.returnRow {
-                        ReturnWindowRow(item: returnItem, asOf: entry.date)
-                        if rows.registerNudge != nil {
-                            DashedRule()
-                        }
+                    ForEach(Array(rows.items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { DashedRule() }
+                        ClosingSoonItemRow(item: item, asOf: entry.date)
                     }
                     if let nudge = rows.registerNudge {
+                        if !rows.items.isEmpty { DashedRule() }
                         RegisterNudgeRow(nudge: nudge)
-                    }
-                    if rows.returnRow == nil && rows.registerNudge == nil {
-                        ForEach(Array(rows.fallbackItems.enumerated()), id: \.element.id) { index, item in
-                            if index > 0 { DashedRule() }
-                            NearestEventRow(item: item, asOf: entry.date)
-                        }
                     }
                 }
                 .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .containerBackground(shelfPaperBackground, for: .widget)
             }
         }
@@ -292,7 +270,7 @@ struct ClosingSoonWidget: Widget {
             ClosingSoonWidgetView(entry: entry)
         }
         .configurationDisplayName("Closing Soon")
-        .description("Return windows and register-it nudges that need attention.")
+        .description("Warranties, return windows, and register-it nudges that need attention.")
         .supportedFamilies([.systemMedium])
     }
 }
@@ -304,29 +282,30 @@ private struct CoverageRingWidgetView: View {
 
     var body: some View {
         if !FeatureFlags.isOn(.shelfWidgets) {
-            PaperEmptyStateView(message: "Open PaperTrail to update")
+            PaperEmptyStateView(message: "Enable in Settings → Flags")
         } else if let total = entry.totalCount, total > 0, let covered = entry.coveredCount {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .stroke(WidgetPalette.ringTrack, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .stroke(WidgetPalette.ringTrack, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                     Circle()
                         .trim(from: 0, to: CGFloat(covered) / CGFloat(total))
-                        .stroke(WidgetPalette.sage, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .stroke(WidgetPalette.sage, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Text("\(covered)/\(total)")
-                        .font(.system(.title3, design: .serif).weight(.semibold))
+                        .font(.system(.title2, design: .serif).weight(.semibold))
+                        .monospacedDigit()
                         .foregroundStyle(WidgetPalette.ink)
                         .minimumScaleFactor(0.7)
                         .privacySensitive()
                 }
-                .frame(width: 64, height: 64)
+                .frame(width: 92, height: 92)
 
                 Text(captionText)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(WidgetPalette.inkTertiary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.75)
                     .privacySensitive()
             }
             .padding()
@@ -338,9 +317,13 @@ private struct CoverageRingWidgetView: View {
         }
     }
 
+    /// Prefers the compact total ("S$3.1k") so it never truncates in a
+    /// small widget's caption line; falls back to the long form
+    /// (`totalValueText`, e.g. "SGD 3,116") for a snapshot written by an
+    /// app build that predates the compact field.
     private var captionText: String {
-        guard let totalValueText = entry.totalValueText else { return "covered" }
-        return "covered · \(totalValueText)"
+        guard let valueText = entry.totalValueCompactText ?? entry.totalValueText else { return "covered" }
+        return "covered · \(valueText)"
     }
 }
 
@@ -382,6 +365,7 @@ private struct NextUpSmallView: View {
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(WidgetPalette.cream.opacity(0.6))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .privacySensitive()
             }
             .padding()
@@ -416,9 +400,9 @@ private struct NextUpWidgetView: View {
         if !FeatureFlags.isOn(.shelfWidgets) {
             switch family {
             case .accessoryInline:
-                Text("Open PaperTrail to update")
+                Text("Enable in Settings → Flags")
             default:
-                EmptyStateView(message: "Open PaperTrail to update")
+                EmptyStateView(message: "Enable in Settings → Flags")
             }
         } else {
             switch family {
