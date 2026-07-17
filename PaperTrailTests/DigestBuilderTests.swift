@@ -71,23 +71,18 @@ struct DigestBuilderTests {
         #expect(summary.headline.contains("2 return windows close"))
     }
 
-    @Test func singularUnregisteredHeadline() {
-        let record = DigestRecordSnapshot(
-            productName: "Mixer", warrantyExpiryDate: daysFromNow(200), isRegistered: false
-        )
-        let summary = DigestBuilder.build(from: [record], now: now)
-        #expect(summary.unregisteredActiveCount == 1)
-        #expect(summary.headline.contains("1 unregistered item is still under warranty"))
-    }
-
-    @Test func pluralUnregisteredHeadline() {
+    @Test func unregisteredItemsAreCountedButNeverHeadlined() {
+        // The count still feeds register-nudge surfaces, but the digest
+        // headline stays silent about it — and a month where unregistered
+        // items are the ONLY news is an empty (quiet) digest.
         let records = [
             DigestRecordSnapshot(productName: "Mixer", warrantyExpiryDate: daysFromNow(200), isRegistered: false),
             DigestRecordSnapshot(productName: "Fan", warrantyExpiryDate: daysFromNow(300), isRegistered: false),
         ]
         let summary = DigestBuilder.build(from: records, now: now)
         #expect(summary.unregisteredActiveCount == 2)
-        #expect(summary.headline.contains("2 unregistered items are still under warranty"))
+        #expect(!summary.headline.contains("unregistered"))
+        #expect(summary.isEmpty)
     }
 
     @Test func headlineJoinsMultiplePartsWithSeparator() {

@@ -137,6 +137,15 @@ struct GoldMemberCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
+    /// The gold strike-in is a *purchase moment*, not a Settings transition —
+    /// it plays exactly once per membership (keyed by member number) and the
+    /// card renders settled on every later visit. Without this, `.onAppear`
+    /// replayed the flip every time the Settings tab was opened.
+    private var strikeInDefaultsKey: String { "goldCard.struckIn.\(memberNumber)" }
+    private var alreadyStruck: Bool {
+        UserDefaults.standard.bool(forKey: strikeInDefaultsKey)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -275,6 +284,11 @@ struct GoldMemberCard: View {
     }
 
     private func strikeIn() {
+        guard !alreadyStruck else {
+            appeared = true
+            return
+        }
+        UserDefaults.standard.set(true, forKey: strikeInDefaultsKey)
         withAnimation(PTMotion.reduced(PTMotion.archiveEase(0.55), reduceMotion: reduceMotion)) {
             appeared = true
         }
