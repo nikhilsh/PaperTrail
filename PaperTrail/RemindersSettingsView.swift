@@ -6,6 +6,13 @@ import SwiftUI
 struct RemindersSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     private let reminders = ReminderSettings.shared
+    private var gate = NotificationPermissionGate.shared
+
+    /// Honest-states rule (graceful notification permission, item 5): once
+    /// the system has actually denied notifications, a toggle left ON is a
+    /// lie unless the row says so. Doesn't fight the user's intent by
+    /// flipping the toggle back — only the label changes.
+    private var isDenied: Bool { gate.lastKnownAuthorizationStatus == .denied }
 
     var body: some View {
         @Bindable var reminders = reminders
@@ -25,8 +32,9 @@ struct RemindersSettingsView: View {
                 SettingsCard {
                     SettingsRow(
                         icon: "bell", iconColor: PT.gold, title: "Warranty reminders",
-                        subtitle: reminders.warrantyRemindersEnabled ? "Before each warranty runs out" : "Off — you won't be warned",
-                        toggle: $reminders.warrantyRemindersEnabled
+                        subtitle: warrantySubtitle, subtitleColor: warrantyHonestlyDenied ? PT.amber : PT.txt3,
+                        toggle: $reminders.warrantyRemindersEnabled,
+                        onRowTap: warrantyHonestlyDenied ? { gate.presentDeniedDirectly(context: .warranty) } : nil
                     )
                     if reminders.warrantyRemindersEnabled {
                         SettingsRowDivider()
@@ -42,14 +50,16 @@ struct RemindersSettingsView: View {
                     SettingsRowDivider()
                     SettingsRow(
                         icon: "arrow.uturn.backward", iconColor: PT.gold, title: "Return windows",
-                        subtitle: "Warn before a return or refund period closes",
-                        toggle: $reminders.returnWindowRemindersEnabled
+                        subtitle: returnWindowSubtitle, subtitleColor: returnWindowHonestlyDenied ? PT.amber : PT.txt3,
+                        toggle: $reminders.returnWindowRemindersEnabled,
+                        onRowTap: returnWindowHonestlyDenied ? { gate.presentDeniedDirectly(context: .warranty) } : nil
                     )
                     SettingsRowDivider()
                     SettingsRow(
                         icon: "calendar.badge.clock", iconColor: PT.gold, title: "Monthly coverage digest",
-                        subtitle: "One summary of what's expiring and closing",
-                        toggle: $reminders.digestEnabled
+                        subtitle: digestSubtitle, subtitleColor: digestHonestlyDenied ? PT.amber : PT.txt3,
+                        toggle: $reminders.digestEnabled,
+                        onRowTap: digestHonestlyDenied ? { gate.presentDeniedDirectly(context: .digest) } : nil
                     )
                     SettingsRowDivider()
                     SettingsRow(
@@ -76,6 +86,47 @@ struct RemindersSettingsView: View {
                 }
             }
         }
+        .task {
+            // Refreshes `isDenied` against the real current status on every
+            // appearance — the last observation could be stale if the user
+            // changed it in Settings and came straight back to this screen
+            // rather than foregrounding the app root first.
+            await gate.refreshAuthorizationStatus()
+        }
+        // Item 4: on toggle ON, funnel through the gate before trusting the
+        // setting. A "Not now"/denied response leaves the toggle ON — the
+        // user's intent is real — the honest subtitle above is what tells
+        // the truth instead.
+        .onChange(of: reminders.warrantyRemindersEnabled) { wasOn, isOn in
+            guard isOn, !wasOn else { return }
+            Task { await gate.ensurePermission(context: .warranty) }
+        }
+        .onChange(of: reminders.returnWindowRemindersEnabled) { wasOn, isOn in
+            guard isOn, !wasOn else { return }
+            Task { await gate.ensurePermission(context: .warranty) }
+        }
+        .onChange(of: reminders.digestEnabled) { wasOn, isOn in
+            guard isOn, !wasOn else { return }
+            Task { await gate.ensurePermission(context: .digest) }
+        }
+    }
+
+    // MARK: Honest rows (item 5)
+
+    private var warrantyHonestlyDenied: Bool { isDenied && reminders.warrantyRemindersEnabled }
+    private var warrantySubtitle: String {
+        guard reminders.warrantyRemindersEnabled else { return "Off — you won't be warned" }
+        return isDenied ? "Off in iOS Settings — notifications can't reach you" : "Before each warranty runs out"
+    }
+
+    private var returnWindowHonestlyDenied: Bool { isDenied && reminders.returnWindowRemindersEnabled }
+    private var returnWindowSubtitle: String {
+        returnWindowHonestlyDenied ? "Off in iOS Settings — notifications can't reach you" : "Warn before a return or refund period closes"
+    }
+
+    private var digestHonestlyDenied: Bool { isDenied && reminders.digestEnabled }
+    private var digestSubtitle: String {
+        digestHonestlyDenied ? "Off in iOS Settings — notifications can't reach you" : "One summary of what's expiring and closing"
     }
 }
 

@@ -171,6 +171,19 @@ enum RecallWatcher {
                 // that doesn't exist. See `RecallFeedAdapter.isFixture` and
                 // `shouldNotify`.
                 if shouldNotify(isNewMatch: !alreadyKnown, isFixture: feed.isFixture) {
+                    // Cap-exempt safety notifications schedule regardless of
+                    // authorization (see `scheduleSafetyNotification`'s doc)
+                    // — that's deliberate, but a denied user will never
+                    // actually see it, which must never be a silent drop for
+                    // a safety recall. Sentry-warn so it's diagnosable
+                    // without a device.
+                    let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                    if status == .denied {
+                        AppLogger.warn(
+                            "RecallWatcher: safety notification scheduled for \(record.id.uuidString) while notifications are denied — it will not be delivered",
+                            category: "recall"
+                        )
+                    }
                     scheduleSafetyNotification(record: record, notice: matched)
                 }
             } else {

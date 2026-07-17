@@ -241,6 +241,18 @@ struct PaperTrailApp: App {
                     // here is a harmless no-op (no UI, just re-reads the
                     // existing status), so behavior for already-decided users
                     // is unchanged.
+                    //
+                    // Graceful notification permission (NotificationPermissionGate):
+                    // this `!= .notDetermined` gate must NEVER be loosened or
+                    // removed. `NotificationPermissionGate.ensurePermission`
+                    // and `SoftAskCoordinator` both assume the system prompt
+                    // is only ever triggered from their own explicit ask
+                    // sheets while status is `.notDetermined` — if this
+                    // launch-time call requested authorization unconditionally,
+                    // it would fire the real system prompt before either ask
+                    // sheet ever got a chance to show, burning the user's one
+                    // shot at the OS prompt on an unexplained launch-time
+                    // popup instead of an in-context ask.
                     let notificationStatus = await UNUserNotificationCenter.current()
                         .notificationSettings().authorizationStatus
                     if notificationStatus != .notDetermined {
