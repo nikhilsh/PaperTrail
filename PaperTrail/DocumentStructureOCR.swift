@@ -152,8 +152,13 @@ struct DocumentStructureOCRService: Sendable {
     /// mentions "total" (preferring "grand total" / "total due" / "amount due"
     /// over "subtotal"). This replaces the `pickLargerAmount` guesswork.
     nonisolated static func detectTotal(in tables: [OCRTable]) -> Double? {
-        let strongLabels = ["grand total", "total due", "amount due", "balance due", "total amount", "total"]
-        let weakLabels = ["subtotal", "sub total", "sub-total"]
+        // "合計" (total) is placed before the trailing "total" so `dropLast()`
+        // below still excludes "total" specifically — that's what stops a
+        // "subtotal" row (which contains "total" as a substring) from always
+        // passing the weak-label override check.
+        let strongLabels = ["grand total", "total due", "amount due", "balance due", "total amount",
+                             "合計金額", "お買上げ計", "合計", "total"]
+        let weakLabels = ["subtotal", "sub total", "sub-total", "小計"]
         // Rows that contain "total" but are NOT the grand total — a "Total Savings"
         // or "Total Discount" line otherwise out-ranks the real total.
         let negativeLabels = ["saving", "discount", "rounding", "voucher", "rebate", "cashback"]
@@ -185,7 +190,8 @@ struct DocumentStructureOCRService: Sendable {
     /// Reconstruct line items from table rows: a name-ish cell + an amount cell.
     /// Skips total/subtotal/tax summary rows.
     nonisolated static func lineItems(from tables: [OCRTable]) -> [LineItem] {
-        let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst", "vat", "balance", "change", "amount due", "rounding"]
+        let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst", "vat", "balance", "change", "amount due", "rounding",
+                               "小計", "合計", "クレジット", "お釣り"]
         var items: [LineItem] = []
         for table in tables {
             for row in table.rows {

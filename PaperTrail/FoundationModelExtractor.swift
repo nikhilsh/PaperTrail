@@ -322,14 +322,39 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
     // MARK: - OCR text cleaning
 
+    /// How aggressively `cleanOCRTextForModel` filters OCR junk. Ordered from
+    /// least to most destructive so the locale-error retry ladder escalates
+    /// through them in order rather than jumping straight to `.stripNonASCII` —
+    /// jumping straight there used to wipe every CJK line (labels like 合計/
+    /// 領収証 included) on the very first retry, i.e. exactly when a locale
+    /// error (usually caused by non-English text) had just fired.
+    private enum OCRCleanLevel: String {
+        /// Standard junk filtering only. Keeps everything else, including
+        /// non-Latin-script (CJK, etc.) lines.
+        case normal
+        /// Adds the length/junk filters from `.stripNonASCII` but skips the
+        /// non-ASCII strip itself: a non-Latin-script line survives if it
+        /// carries a digit or a currency symbol (i.e. it's plausibly an
+        /// amount/date/total line) and is dropped only when it's "pure prose"
+        /// with neither (addresses, thank-you notes, etc.).
+        case gentleNonASCIITrim
+        /// Full non-ASCII strip (the original "aggressive" mode) — drops any
+        /// line that isn't ASCII-majority. Last resort only.
+        case stripNonASCII
+    }
+
+    /// Currency symbols recognized by `.gentleNonASCIITrim` as "this non-Latin
+    /// line is plausibly an amount line, keep it" even without a digit.
+    private static let ocrCleanCurrencySymbols: Set<Character> = ["¥", "￥", "$", "€", "£", "₩", "฿", "₫", "₹", "元", "円"]
+
     /// Cleans raw OCR text to remove junk lines that may trigger the on-device model's
     /// language detection (causing "unsupported language or locale" errors).
     ///
     /// - Parameter text: Raw OCR text from Vision.
-    /// - Parameter aggressive: If true, applies stricter filtering (removes more lines).
+    /// - Parameter level: How aggressively to filter — see `OCRCleanLevel`.
     /// - Parameter maxLength: Maximum character count for the returned string.
     /// - Returns: Cleaned text with an English context prefix.
-    private func cleanOCRTextForModel(_ text: String, aggressive: Bool = false, maxLength: Int = 3000) -> String {
+    private func cleanOCRTextForModel(_ text: String, level: OCRCleanLevel = .normal, maxLength: Int = 3000) -> String {
         let lines = text.components(separatedBy: .newlines)
 
         let filtered = lines.compactMap { line -> String? in
@@ -353,8 +378,50 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 return nil
             }
 
-            // In aggressive mode, apply stricter filters
-            if aggressive {
+            switch level {
+            case .normal:
+                // Remove lines that start with unmatched parenthesis (OCR fragment)
+                if trimmed.hasPrefix("(") && trimmed.count < 6 && !trimmed.contains(")") {
+                    return nil
+                }
+                // Remove lines that are clearly junk fragments (< 2 letter chars)
+                let letterCount = trimmed.filter { $0.isLetter }.count
+                if letterCount < 2 { return nil }
+
+            case .gentleNonASCIITrim:
+                // Remove lines shorter than 5 characters
+                guard trimmed.count >= 5 else { return nil }
+
+                // Remove lines with fewer than 2 letter characters (likely codes/junk)
+                let letterCount = trimmed.filter { $0.isLetter }.count
+                guard letterCount >= 2 else { return nil }
+
+                // Remove lines that start with punctuation/special chars (OCR fragments)
+                if let first = trimmed.first, !first.isLetter && !first.isNumber {
+                    return nil
+                }
+
+                let asciiCount = trimmed.unicodeScalars.filter { $0.isASCII }.count
+                if asciiCount <= trimmed.count / 2 {
+                    // Non-Latin-majority line: only keep it if it plausibly carries an
+                    // amount/date/total (a digit or a known currency symbol) — drop
+                    // pure-prose lines with neither.
+                    let hasDigit = trimmed.contains(where: { $0.isNumber })
+                    let hasCurrencySymbol = trimmed.contains(where: { Self.ocrCleanCurrencySymbols.contains($0) })
+                    if !hasDigit && !hasCurrencySymbol { return nil }
+                } else {
+                    // ASCII-majority: same low-English-word-ratio filter as .stripNonASCII.
+                    let words = trimmed.split(separator: " ")
+                    if words.count >= 2 {
+                        let englishishWords = words.filter { word in
+                            let w = String(word).lowercased()
+                            return w.count >= 2 && w.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" })
+                        }
+                        if englishishWords.count == 0 { return nil }
+                    }
+                }
+
+            case .stripNonASCII:
                 // Remove lines shorter than 5 characters
                 guard trimmed.count >= 5 else { return nil }
 
@@ -381,15 +448,6 @@ struct FoundationModelExtractionService: FieldExtractionService {
                     }
                     if englishishWords.count == 0 { return nil }
                 }
-            } else {
-                // Standard mode: remove lines that start with unmatched parenthesis (OCR fragment)
-                if trimmed.hasPrefix("(") && trimmed.count < 6 && !trimmed.contains(")") {
-                    return nil
-                }
-
-                // Remove lines that are clearly junk fragments (< 3 letter chars)
-                let letterCount = trimmed.filter { $0.isLetter }.count
-                if letterCount < 2 { return nil }
             }
 
             return trimmed
@@ -501,6 +559,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
 
         let instructions = """
             You are a receipt and warranty document parser. Process all text in English regardless of the device locale or language settings. \
+            Source documents may be in any language; extract fields regardless of the document's language. \
             Extract structured fields from the OCR text below. \
             Be precise: prefer exact values from the text over guesses. \
             If a field is not clearly present, leave it null. \
@@ -516,26 +575,33 @@ struct FoundationModelExtractionService: FieldExtractionService {
             """
 
         // Build the extraction attempts: each is (label, inputText, instructions).
-        // Attempt 1: cleaned OCR text (standard filter)
-        // Attempt 2: aggressively cleaned text (on locale error)
-        // Attempt 3: first 500 chars of aggressively cleaned text (on locale error)
+        // Attempt 1: normal clean (keeps CJK and every other script as-is)
+        // Attempt 2: gentle CJK-preserving clean (on locale/context error) — drops
+        //   junk lines but keeps non-Latin lines that carry a digit/currency symbol
+        // Attempt 3: full non-ASCII strip (on locale/context error) — last resort
         // Progressively smaller inputs: large receipts overflow the on-device
         // model's context window, so each retry feeds less text.
-        let cleanedText = cleanOCRTextForModel(ocrText, maxLength: 2200)
-        let aggressiveText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 1200)
-        let minimalText = cleanOCRTextForModel(ocrText, aggressive: true, maxLength: 600)
+        let cleanedText = cleanOCRTextForModel(ocrText, level: .normal, maxLength: 2200)
+        let gentleText = cleanOCRTextForModel(ocrText, level: .gentleNonASCIITrim, maxLength: 1200)
+        let strippedText = cleanOCRTextForModel(ocrText, level: .stripNonASCII, maxLength: 600)
 
         let attempts: [(label: String, input: String)] = [
-            ("attempt 1: cleaned OCR (2200)", cleanedText),
-            ("attempt 2: aggressive (1200)", aggressiveText),
-            ("attempt 3: minimal (600)", minimalText),
+            ("attempt 1: normal clean (2200)", cleanedText),
+            ("attempt 2: gentle CJK-preserving clean (1200)", gentleText),
+            ("attempt 3: full non-ASCII strip (600)", strippedText),
         ]
 
         var lastError: Error?
+        var sawLocaleError = false
+        var sawContextWindowError = false
 
         for (index, attempt) in attempts.enumerated() {
             let attemptNumber = index + 1
             Self.logger.info("FM \(attempt.label, privacy: .public) (\(attempt.input.count, privacy: .public) chars)")
+            AppLogger.info(
+                "FM attempt \(attemptNumber)/\(attempts.count): \(attempt.label) — \(attempt.input.count) chars",
+                category: "extraction.fm.clean_level"
+            )
 
             do {
                 let session = LanguageModelSession(instructions: instructions)
@@ -552,10 +618,11 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 Self.logger.info("FM \(attempt.label, privacy: .public) succeeded with \(fieldCount, privacy: .public) fields")
 
                 // Log to Sentry which attempt worked
-                let skipReason: String? = attemptNumber > 1 ? "locale retry succeeded on \(attempt.label)" : nil
+                let skipReason: String? = attemptNumber > 1 ? "retry succeeded on \(attempt.label)" : nil
                 if attemptNumber > 1 {
                     AppLogger.info(
-                        "FM extraction succeeded on \(attempt.label) after \(attemptNumber - 1) locale error(s)",
+                        "FM extraction succeeded on \(attempt.label) after \(attemptNumber - 1) retry error(s) "
+                            + "(locale=\(sawLocaleError), contextWindow=\(sawContextWindowError))",
                         category: "extraction.fm.retry"
                     )
                 }
@@ -575,10 +642,23 @@ struct FoundationModelExtractionService: FieldExtractionService {
                 Self.logger.warning("FM \(attempt.label, privacy: .public) failed: \(errorDesc, privacy: .public)")
                 lastError = error
 
+                let isLocale = isLocaleError(error)
+                let isContextWindow = isContextWindowError(error)
+                if isLocale { sawLocaleError = true }
+                if isContextWindow { sawContextWindowError = true }
+                // Breadcrumb every retryable failure — this is what makes a Japanese
+                // (or any non-English) receipt's extraction path diagnosable from
+                // Sentry alone: which clean level failed, and whether it was a
+                // locale error specifically (vs. context-window overflow).
+                AppLogger.warn(
+                    "FM \(attempt.label) failed (locale=\(isLocale), contextWindow=\(isContextWindow)): \(errorDesc)",
+                    category: "extraction.fm.clean_level"
+                )
+
                 // Retry on locale errors (anchor language) and context-window
                 // overflows (feed less text on the next, shorter attempt). Other
                 // errors fail immediately.
-                guard isLocaleError(error) || isContextWindowError(error) else {
+                guard isLocale || isContextWindow else {
                     Self.logger.error("FM non-retryable error, not retrying: \(errorDesc, privacy: .public)")
                     break
                 }
@@ -597,7 +677,9 @@ struct FoundationModelExtractionService: FieldExtractionService {
             tags: [
                 "fm_error": finalErrorDesc,
                 "fm_attempts": String(attempts.count),
-                "fm_is_locale_error": String(lastError.map { isLocaleError($0) } ?? false)
+                "fm_is_locale_error": String(lastError.map { isLocaleError($0) } ?? false),
+                "fm_saw_locale_error": String(sawLocaleError),
+                "fm_saw_context_window_error": String(sawContextWindowError)
             ]
         )
 
@@ -1341,8 +1423,16 @@ struct HeuristicFieldExtractor {
         // or contain a space (multi-word like "Harvey Norman")
         let words = trimmed.split(separator: " ")
         if words.count == 1 {
-            // Single word: must start with uppercase and be >= 5 chars, or be a known brand
-            guard let first = trimmed.first, first.isUppercase else { return false }
+            // Caseless scripts (CJK, etc.) have no concept of uppercase — every
+            // character reports `isUppercase == false`, so a Japanese/Chinese/
+            // Korean merchant name would otherwise always fail this check. Only
+            // enforce the capitalization rule when the candidate contains a Latin
+            // letter to judge case on.
+            let hasLatinLetter = trimmed.contains(where: { $0.isASCII && $0.isLetter })
+            if hasLatinLetter {
+                // Single word: must start with uppercase and be >= 5 chars, or be a known brand
+                guard let first = trimmed.first, first.isUppercase else { return false }
+            }
         }
 
         return true
@@ -1524,6 +1614,7 @@ struct HeuristicFieldExtractor {
             "Co.", "Co.,", "& Co",
             "Ltd", "Ltd.", "Limited",
             "GmbH", "Pty Ltd", "Pty. Ltd",
+            "株式会社", "有限会社",   // Japanese "K.K." / "Ltd." company suffixes
         ]
 
         for line in lines {
@@ -1716,12 +1807,60 @@ struct HeuristicFieldExtractor {
             }
         }
 
+        // Final fallback: unconditionally re-run the full per-line parser (which
+        // includes NSDataDetector) over the top half of the receipt, where the
+        // purchase date almost always prints. Every pass above only looks at a
+        // line if it contains an English date keyword ("date", "purchase",
+        // "invoice", ...) — a wholly non-English receipt (e.g. Japanese) never
+        // matches any of those, so without this the date is silently dropped even
+        // though a parseable date (via the 年月日 pattern above, or NSDataDetector)
+        // is sitting right there. Plausibility-gated exactly like every other pass.
+        //
+        // Floor of 12 lines: on a short receipt (a handful of lines) "half" would
+        // scan almost nothing — a compact Japanese receipt prints header, 領収証
+        // title, THEN the date, which already exhausts half of a 5–6 line scan.
+        // The half-of-receipt cap only exists to avoid footer junk (return-policy
+        // dates etc.) on LONG receipts, so it should never bite on short ones.
+        let fallbackLineCount = min(lines.count, max(lines.count / 2, 12))
+        for line in lines.prefix(fallbackLineCount) {
+            guard !looksLikeBoilerplate(line) else { continue }
+            if let date = parseDateFromLine(line), isPlausibleDate(date) {
+                return date
+            }
+        }
+
         // Conservative: don't guess.
         return nil
     }
 
     /// Parse a date from a single line of text, trying multiple formats.
     private func parseDateFromLine(_ line: String) -> Date? {
+        // Japanese-style dates: "2026年04月15日" (any day-of-week/time suffix like
+        // "（水）17時43分" is simply not matched by the pattern and ignored).
+        // Built via explicit Gregorian DateComponents — NOT Calendar.current — so a
+        // device with the Japanese calendar as its region calendar can't shift the
+        // era/year interpretation.
+        let japanesePattern = #"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日"#
+        if let regex = try? NSRegularExpression(pattern: japanesePattern),
+           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+           let yearRange = Range(match.range(at: 1), in: line),
+           let monthRange = Range(match.range(at: 2), in: line),
+           let dayRange = Range(match.range(at: 3), in: line),
+           let year = Int(line[yearRange]), let month = Int(line[monthRange]), let day = Int(line[dayRange]),
+           day >= 1, day <= 31, month >= 1, month <= 12, year >= 2015, year <= 2099 {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            // Explicit Gregorian calendar (device timezone, matching the rest of
+            // this file's date construction) — not `Calendar.current`, whose
+            // *identifier* can be non-Gregorian (e.g. Japanese) on a device set
+            // to that region, which would misinterpret the year/era.
+            if let date = Calendar(identifier: .gregorian).date(from: components) {
+                return date
+            }
+        }
+
         // Try explicit numeric patterns first: DD/MM/YYYY, DD-MM-YYYY, etc.
         let numericPatterns = [
             #"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"#,
@@ -1799,9 +1938,10 @@ struct HeuristicFieldExtractor {
             ("grand total", 0),
             ("nett total", 1), ("net total", 1),
             ("total amount", 2), ("total due", 2), ("amount due", 2),
+            ("合計金額", 2), ("お買上げ計", 2),   // Japanese "total amount" phrases
             ("total value", 3), ("balance due", 3), ("amount payable", 3),
-            ("total", 4),
-            ("nett", 5), ("amount", 5),
+            ("total", 4), ("合計", 4),           // 合計 = "total"
+            ("nett", 5), ("amount", 5), ("小計", 5), ("クレジット", 5),   // 小計 = subtotal, クレジット = credit payment line
         ]
 
         // Pass 1: Look for lines with total keywords and extract amounts from them.
@@ -1816,8 +1956,11 @@ struct HeuristicFieldExtractor {
                 // Skip "subtotal" lines if keyword is "total" (avoid matching subtotal as total)
                 if keyword == "total" && lower.contains("subtotal") { continue }
 
-                // Try extracting from this line
-                if let amount = extractDecimalAmount(from: line), amount > 0 {
+                // Try extracting from this line. Decimal-bearing amounts (SGD/MYR-style)
+                // are preferred; fall back to comma-grouped/symbol-anchored no-decimal
+                // amounts for currencies that don't use decimal subunits on everyday
+                // receipts (JPY/KRW-style, e.g. "合計 ¥15,000").
+                if let amount = extractDecimalAmount(from: line) ?? extractNoDecimalAmount(from: line), amount > 0 {
                     totalAmounts.append((amount, priority))
                     break
                 }
@@ -1831,7 +1974,7 @@ struct HeuristicFieldExtractor {
                     var blockAmounts: [(amount: Double, lineOffset: Int)] = []
                     for offset in 1...maxLookahead {
                         let nextLine = lines[i + offset]
-                        if let amount = extractDecimalAmount(from: nextLine), amount > 0 {
+                        if let amount = extractDecimalAmount(from: nextLine) ?? extractNoDecimalAmount(from: nextLine), amount > 0 {
                             blockAmounts.append((amount, offset))
                         } else if !blockAmounts.isEmpty {
                             // We've passed the contiguous amount block
@@ -1844,7 +1987,7 @@ struct HeuristicFieldExtractor {
                     }
                     // Also try combining with the immediate next line
                     let combined = line + " " + lines[i + 1]
-                    if let amount = extractDecimalAmount(from: combined), amount > 0 {
+                    if let amount = extractDecimalAmount(from: combined) ?? extractNoDecimalAmount(from: combined), amount > 0 {
                         totalAmounts.append((amount, priority))
                         break
                     }
@@ -1865,7 +2008,7 @@ struct HeuristicFieldExtractor {
         // Pass 2: Look for currency-prefixed amounts anywhere in the text.
         // These are amounts like "SGD 3,180.00", "$99.90", "S$1,200.00"
         var currencyAmounts: [Double] = []
-        let amountPattern = #"(?:\$|SGD|S\$|MYR|RM)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"#
+        let amountPattern = #"(?:\$|SGD|S\$|MYR|RM|¥|￥|JPY|₩|KRW|₫|VND)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"#
         if let regex = try? NSRegularExpression(pattern: amountPattern, options: .caseInsensitive) {
             let fullText = text as NSString
             let matches = regex.matches(in: text, range: NSRange(location: 0, length: fullText.length))
@@ -1914,7 +2057,17 @@ struct HeuristicFieldExtractor {
                 }
             }
         }
-        return allAmounts.max()
+        if let largest = allAmounts.max() {
+            return largest
+        }
+
+        // Pass 5: Last resort — comma-grouped/currency-symbol-anchored amounts with
+        // NO decimal point anywhere in the text (JPY/KRW/VND-style receipts, e.g. a
+        // Japanese receipt whose only total is "合計 ¥15,000"). Deliberately runs
+        // LAST, after every decimal-based pass above, so a receipt that genuinely
+        // has decimal amounts never has them shadowed by an unrelated comma-grouped
+        // number (an order/reference code, say).
+        return extractNoDecimalAmount(from: text)
     }
 
     /// Extract a decimal amount from a line, handling comma-separated thousands.
@@ -1939,6 +2092,39 @@ struct HeuristicFieldExtractor {
                     amounts.append(num)
                 }
             }
+        }
+        return amounts.max()
+    }
+
+    /// Extract a comma-grouped or currency-symbol-anchored INTEGER amount — for
+    /// currencies that don't use decimal subunits on everyday receipts (JPY/KRW/VND/
+    /// THB-style, e.g. "¥15,000", "₩89,000"). Works on either a single line or the
+    /// whole receipt text.
+    ///
+    /// The symbol-anchored form trusts any digit run right after the symbol (a
+    /// currency symbol is a strong signal by itself). Without a symbol, only
+    /// comma-grouped digits are trusted — a bare digit run is too easily an order
+    /// number, phone number, or receipt/reference code.
+    private func extractNoDecimalAmount(from text: String) -> Double? {
+        let symbolPattern = #"(?:¥|￥|₩|₫|฿)\s*(\d{1,3}(?:,\d{3})+|\d+)"#
+        if let amount = largestRegexMatch(of: symbolPattern, in: text) {
+            return amount
+        }
+        let commaGroupedPattern = #"(\d{1,3}(?:,\d{3})+)"#
+        return largestRegexMatch(of: commaGroupedPattern, in: text)
+    }
+
+    /// Returns the largest numeric value matched by `pattern`'s first capture
+    /// group anywhere in `text`, stripping comma thousands separators.
+    private func largestRegexMatch(of pattern: String, in text: String) -> Double? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let fullText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: fullText.length))
+        let amounts: [Double] = matches.compactMap { match in
+            guard let range = Range(match.range(at: 1), in: text) else { return nil }
+            let numStr = String(text[range]).replacingOccurrences(of: ",", with: "")
+            guard let num = Double(numStr), num > 0 else { return nil }
+            return num
         }
         return amounts.max()
     }
@@ -1982,9 +2168,32 @@ struct HeuristicFieldExtractor {
 
     private func extractCurrency(from text: String) -> String? {
         let lower = text.lowercased()
+
+        // Multi-character "$" symbols must be checked BEFORE the loose "s$"/"sgd"
+        // check (and before the bare "$" fallback) — "us$" contains "s$" as a
+        // substring, so without this ordering a US$ receipt would be miscoded SGD.
+        if lower.contains("hk$") { return "HKD" }
+        if lower.contains("nt$") { return "TWD" }
+        if lower.contains("us$") || lower.contains("usd") { return "USD" }
+        if lower.contains("a$") || lower.contains("aud") { return "AUD" }
+        if lower.contains("nz$") || lower.contains("nzd") { return "NZD" }
         if lower.contains("sgd") || lower.contains("s$") { return "SGD" }
         if lower.contains("myr") || lower.contains("rm") { return "MYR" }
-        if lower.contains("usd") || lower.contains("us$") { return "USD" }
+
+        // Non-"$" symbols and ISO codes.
+        if text.contains("¥") || text.contains("￥") || text.contains("円") || lower.contains("jpy") { return "JPY" }
+        if text.contains("€") || lower.contains("eur") { return "EUR" }
+        if text.contains("£") || lower.contains("gbp") { return "GBP" }
+        if text.contains("₩") || lower.contains("krw") { return "KRW" }
+        if text.contains("฿") || lower.contains("thb") { return "THB" }
+        if text.contains("₫") || lower.contains("vnd") { return "VND" }
+        if text.contains("元") || lower.contains("rmb") || lower.contains("cny") { return "CNY" }
+        if text.contains("₹") || lower.contains("inr") { return "INR" }
+        // "Rp" (Indonesian Rupiah) requires a following digit to avoid matching
+        // ordinary words like "corporate"/"sharp".
+        if lower.range(of: #"\brp\.?\s?\d"#, options: .regularExpression) != nil || lower.contains("idr") { return "IDR" }
+
+        // Bare "$" defaults to SGD — existing users are SG.
         if lower.contains("$") { return "SGD" }
         return nil
     }

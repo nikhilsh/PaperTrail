@@ -66,7 +66,7 @@ struct SettingsView: View {
 
     private var totalValue: String {
         let sum = activeRecords.compactMap(\.amount).reduce(0, +)
-        let currency = activeRecords.compactMap(\.currency).first ?? "SGD"
+        let currency = activeRecords.compactMap(\.currency).first ?? PTCurrency.deviceDefault
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = currency
