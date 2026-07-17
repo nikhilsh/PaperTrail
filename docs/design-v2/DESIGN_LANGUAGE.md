@@ -65,13 +65,13 @@ Gold foil gradient: `linear(90°, goldDeep, gold 40%, goldHi 52%, gold 64%, gold
 - Forbidden: "unlock", "supercharge", exclamation marks, urgency countdowns on paywalls.
 
 ## 7. IAP presentation rules (subscription)
-- Plus is an **annual membership** — framed as renewing your library card, never "unlock features".
-- Two plans max: Annual (default-selected, ≈/month math shown) and Monthly. No lifetime tier.
+- Plus is a **membership** — framed as your library card, never "unlock features".
+- Three plans (updated 17 Jul 2026): Annual (default-selected, ≈/month math shown), Monthly, and **Lifetime** ("Purchased once. Yours forever.") presented as a quiet third row, not a countdown-driven upsell.
 - Trial: "First 2 weeks free" — always stated with the renewal price in the same breath.
 - Honesty is the differentiator: "We'll remind you before every renewal. Cancel keeps everything." Renewal reminder is a REAL notification (counts toward the 2/month cap in its month).
 - Anchor against a denied claim (~$300), not against other subscriptions.
 - Paywall dismissible ✕ top-right, Restore/Privacy/Terms always visible. No countdowns, no fake discounts, no pre-selected upsells.
-- Post-purchase: library card re-strikes in gold (P3) with MEMBER Nº · ANNUAL and the renewal date + MANAGE link (deep-link to App Store subscription settings).
+- Post-purchase: library card re-strikes in gold (P3) with MEMBER Nº · plan. Annual/Monthly show renewal date + MANAGE link (deep-link to App Store subscription settings); Lifetime shows NEVER EXPIRES + "Purchased once. Yours forever." — no manage link needed.
 - Lapsed state: gold card fades back to cream with a quiet "Renew your card" band. Nothing is deleted; free features keep working — data is never hostage.
 
 ## 8. Notifications
