@@ -281,7 +281,7 @@ struct PassItOnBuilderView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .tint(PT.gold)
+        .tint(PT.sage)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }

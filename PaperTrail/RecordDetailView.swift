@@ -85,7 +85,9 @@ struct RecordDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            // Lazy + pinned so the dossier tab bar can pin below the safe
+            // area instead of sliding under the status bar (BUILD_REVIEW B4).
+            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
                 heroCard
 
                 detailsCard
@@ -133,6 +135,19 @@ struct RecordDetailView: View {
             .padding(.bottom, 120)
         }
         .ptScreen()
+        // BUILD_REVIEW B4: ink scrim behind the floating Back/share/edit
+        // pills — they were sitting on raw card content mid-scroll. Fades
+        // ink900 → transparent over ~120pt; never intercepts touches.
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [PT.inkCanvas.opacity(0.94), PT.inkCanvas.opacity(0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 120)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        }
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -282,7 +297,7 @@ struct RecordDetailView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(record.productName)
+                Text(record.displayProductName)
                     .font(PTFont.serif(26, weight: 600))
                     .foregroundStyle(PT.onPaper)
                     .lineLimit(3)
@@ -298,7 +313,7 @@ struct RecordDetailView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 heroStat(label: "Paid", value: record.formattedAmount ?? "—", mono: true)
-                heroStat(label: "From", value: record.merchantName ?? "—", mono: false)
+                heroStat(label: "From", value: record.displayMerchantName ?? "—", mono: false)
                 heroStat(label: "Bought", value: record.purchaseDate.map { PTDate.dayMonthYear.string(from: $0) } ?? "—", mono: true)
             }
         }
@@ -330,7 +345,7 @@ struct RecordDetailView: View {
     // MARK: Details card (§8 — serial / coverage / registration)
 
     private var brand: String {
-        record.supportInfo?.providerName ?? record.merchantName ?? "the manufacturer"
+        record.supportInfo?.providerName ?? record.displayMerchantName ?? "the manufacturer"
     }
 
     private var detailsCard: some View {
@@ -899,16 +914,25 @@ struct RecordDetailView: View {
     @ViewBuilder
     private var dossierSection: some View {
         if visibleDossierTabs.count > 1 {
-            VStack(alignment: .leading, spacing: 14) {
-                DossierTabBar(tabs: visibleDossierTabs, selection: Binding(
-                    get: { selectedDossierTab },
-                    set: { selectedDossierTabRaw = $0 }
-                ))
+            // A pinned section header (the enclosing LazyVStack passes
+            // `.sectionHeaders`), so the tab bar stops below the safe area
+            // while its section scrolls, instead of sliding under the
+            // status bar (BUILD_REVIEW B4). The solid ink backing keeps
+            // scrolling content from ghosting through while pinned.
+            Section {
                 switch selectedDossierTab {
                 case .proof: proofSection
                 case .service: serviceLedgerSection
                 case .papers: papersSection
                 }
+            } header: {
+                DossierTabBar(tabs: visibleDossierTabs, selection: Binding(
+                    get: { selectedDossierTab },
+                    set: { selectedDossierTabRaw = $0 }
+                ))
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(PT.inkCanvas)
             }
         } else {
             proofSection

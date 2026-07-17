@@ -125,7 +125,7 @@ private struct AttentionCard: View {
             HStack(alignment: .top, spacing: 11) {
                 GlyphTile(symbol: warranty.glyph, size: 36, onPaper: true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(record.productName)
+                    Text(record.displayProductName)
                         .font(PTFont.serif(16, weight: 600))
                         .foregroundStyle(PT.onPaper)
                         .lineLimit(2)
@@ -175,7 +175,7 @@ private struct RestingEasyCard: View {
                 } label: {
                     HStack(spacing: 12) {
                         GlyphTile(symbol: warranty.glyph, size: 34, onPaper: true)
-                        Text(record.productName)
+                        Text(record.displayProductName)
                             .font(PTFont.serif(16, weight: 500))
                             .foregroundStyle(PT.onPaper)
                             .lineLimit(1)
