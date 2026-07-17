@@ -197,6 +197,7 @@ struct EditRecordView: View {
             }
         }
         .navigationTitle("Edit Record")
+        .ptKeyboardDoneToolbar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save") {

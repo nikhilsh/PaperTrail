@@ -209,6 +209,7 @@ struct DraftRecordView: View {
         }
         .ptScreen()
         .navigationBarBackButtonHidden()
+        .ptKeyboardDoneToolbar()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {

@@ -136,9 +136,9 @@ struct WidgetSnapshotTests {
     // MARK: - Back-compat decode (v3 shelfWidgets additive fields)
 
     /// A pre-v3 snapshot on disk has no `coveredCount`/`totalCount`/
-    /// `totalValueText`/`registerNudge` keys at all. Regression: the four
-    /// new fields must decode as `nil` rather than throwing
-    /// `DecodingError.keyNotFound`.
+    /// `totalValueText`/`totalValueCompactText`/`registerNudge` keys at all.
+    /// Regression: the five new fields must decode as `nil` rather than
+    /// throwing `DecodingError.keyNotFound`.
     @Test func preV3SnapshotJSONWithoutNewFieldsStillDecodes() throws {
         let json = """
         {
@@ -156,7 +156,33 @@ struct WidgetSnapshotTests {
         #expect(decoded.coveredCount == nil)
         #expect(decoded.totalCount == nil)
         #expect(decoded.totalValueText == nil)
+        #expect(decoded.totalValueCompactText == nil)
         #expect(decoded.registerNudge == nil)
+    }
+
+    /// `totalValueCompactText` shipped after the other four v3 fields — a
+    /// snapshot written by an app build that has those but predates the
+    /// compact field must still decode, with just that one key `nil`.
+    /// Regression guard for the "add/emit a compact variant, keep the
+    /// struct backward-compatible" requirement.
+    @Test func snapshotWithV3FieldsButNoCompactTextStillDecodes() throws {
+        let json = """
+        {
+            "generatedAt": "2026-07-16T00:00:00Z",
+            "items": [],
+            "coveredCount": 4,
+            "totalCount": 5,
+            "totalValueText": "SGD 3,116"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
+
+        #expect(decoded.coveredCount == 4)
+        #expect(decoded.totalCount == 5)
+        #expect(decoded.totalValueText == "SGD 3,116")
+        #expect(decoded.totalValueCompactText == nil)
     }
 
     /// The new fields round-trip through the same encoder/decoder pair the
@@ -169,6 +195,7 @@ struct WidgetSnapshotTests {
             coveredCount: 4,
             totalCount: 5,
             totalValueText: "SGD 3,116",
+            totalValueCompactText: "S$3.1k",
             registerNudge: nudge
         )
 
@@ -183,6 +210,7 @@ struct WidgetSnapshotTests {
         #expect(decoded.coveredCount == 4)
         #expect(decoded.totalCount == 5)
         #expect(decoded.totalValueText == "SGD 3,116")
+        #expect(decoded.totalValueCompactText == "S$3.1k")
         #expect(decoded.registerNudge == nudge)
     }
 
@@ -234,6 +262,42 @@ struct WidgetSnapshotTests {
             PurchaseRecord(productName: "B", amount: 100, currency: "EUR"),
         ]
         #expect(WidgetSnapshotWriter.dominantCurrencyTotalText(for: records) == "EUR 100")
+    }
+
+    // MARK: - dominantCurrencyTotalCompactText / compactAmountText
+
+    @Test func dominantCurrencyTotalCompactTextAbbreviatesThousands() {
+        let records = [
+            PurchaseRecord(productName: "A", amount: 1_200, currency: "SGD"),
+            PurchaseRecord(productName: "B", amount: 1_916, currency: "SGD"),
+        ]
+        // 3,116 -> "3.1k", mapped through the compact currency symbol table.
+        #expect(WidgetSnapshotWriter.dominantCurrencyTotalCompactText(for: records) == "S$3.1k")
+    }
+
+    @Test func dominantCurrencyTotalCompactTextFallsBackToCodeForUnmappedCurrency() {
+        let records = [PurchaseRecord(productName: "A", amount: 100, currency: "SEK")]
+        #expect(WidgetSnapshotWriter.dominantCurrencyTotalCompactText(for: records) == "SEK100")
+    }
+
+    @Test func dominantCurrencyTotalCompactTextIsNilWhenNoAmounts() {
+        let records = [PurchaseRecord(productName: "A")]
+        #expect(WidgetSnapshotWriter.dominantCurrencyTotalCompactText(for: records) == nil)
+    }
+
+    @Test func compactAmountTextBelowOneThousandIsExact() {
+        #expect(WidgetSnapshotWriter.compactAmountText(842) == "842")
+    }
+
+    @Test func compactAmountTextThousandsGetsOneDecimalNoTrailingZero() {
+        #expect(WidgetSnapshotWriter.compactAmountText(3_116) == "3.1k")
+        #expect(WidgetSnapshotWriter.compactAmountText(1_000) == "1k")
+    }
+
+    @Test func compactAmountTextMillionsUsesMSuffix() {
+        // 1.34, not a rounding-mode tie (.x5), so this is unambiguous
+        // regardless of NumberFormatter's default half-even rounding.
+        #expect(WidgetSnapshotWriter.compactAmountText(1_340_000) == "1.3m")
     }
 
     // MARK: - registerNudgeCandidate

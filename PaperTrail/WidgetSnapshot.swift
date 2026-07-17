@@ -37,10 +37,10 @@ struct WidgetRegisterNudge: Codable, Sendable, Equatable {
 
 /// The full snapshot written to the App Group container.
 ///
-/// `coveredCount`/`totalCount`/`totalValueText`/`registerNudge` are v3
-/// `shelfWidgets` additions (`docs/design-v3/V3_BRIEF.md` §1) — all
-/// `Optional`, so a pre-v3 JSON blob on disk (missing these keys) still
-/// decodes cleanly with them as `nil`: Swift's synthesized `Decodable`
+/// `coveredCount`/`totalCount`/`totalValueText`/`totalValueCompactText`/
+/// `registerNudge` are v3 `shelfWidgets` additions (`docs/design-v3/V3_BRIEF.md`
+/// §1) — all `Optional`, so a pre-v3 JSON blob on disk (missing these keys)
+/// still decodes cleanly with them as `nil`: Swift's synthesized `Decodable`
 /// already treats a missing key as `nil` for `Optional` stored properties,
 /// no custom `init(from:)` needed. Encoding mirrors that: a `nil` value is
 /// omitted from the JSON entirely rather than written as `null`.
@@ -53,6 +53,11 @@ struct WidgetSnapshot: Codable, Sendable {
     /// currency (the currency with the largest summed `amount`), e.g.
     /// `"SGD 3,116"`. `nil` when no record has both an amount and currency.
     var totalValueText: String? = nil
+    /// Abbreviated form of `totalValueText`, e.g. `"S$3.1k"` — added later
+    /// than the other v3 fields so the same additive-optional rule applies:
+    /// a snapshot written by an app build that predates this field simply
+    /// omits the key, and the widget falls back to `totalValueText`.
+    var totalValueCompactText: String? = nil
     var registerNudge: WidgetRegisterNudge? = nil
 }
 
@@ -104,6 +109,7 @@ enum WidgetSnapshotWriter {
             coveredCount: coverage.covered,
             totalCount: coverage.total,
             totalValueText: dominantCurrencyTotalText(for: records),
+            totalValueCompactText: dominantCurrencyTotalCompactText(for: records),
             registerNudge: registerNudgeCandidate(for: records)
         )
 
@@ -185,22 +191,7 @@ enum WidgetSnapshotWriter {
     /// currency symbol) so the string is deterministic across devices —
     /// same rationale as `DigestSummary.totalsText`.
     nonisolated static func dominantCurrencyTotalText(for records: [PurchaseRecord]) -> String? {
-        var totalsByCurrency: [String: Double] = [:]
-        for record in records {
-            guard let amount = record.amount else { continue }
-            let currency = record.currency ?? "SGD"
-            totalsByCurrency[currency, default: 0] += amount
-        }
-        // Highest total wins; a tie goes to the alphabetically-first
-        // currency code. The comparator folds the tie-break in directly
-        // (an alphabetically-later key compares "less" on equal totals),
-        // so the maximum is unique — no reliance on `max(by:)`'s
-        // first-vs-last behavior for equal elements or on dictionary
-        // iteration order.
-        guard let dominant = totalsByCurrency.max(by: { lhs, rhs in
-            lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key > rhs.key
-        }) else { return nil }
-
+        guard let dominant = dominantCurrencyTotal(for: records) else { return nil }
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 0
@@ -211,8 +202,66 @@ enum WidgetSnapshotWriter {
         // the separator are pinned here.
         formatter.usesGroupingSeparator = true
         formatter.groupingSeparator = ","
-        let amountText = formatter.string(from: NSNumber(value: dominant.value)) ?? "\(Int(dominant.value))"
-        return "\(dominant.key) \(amountText)"
+        let amountText = formatter.string(from: NSNumber(value: dominant.amount)) ?? "\(Int(dominant.amount))"
+        return "\(dominant.currency) \(amountText)"
+    }
+
+    /// Same dominant-currency total as `dominantCurrencyTotalText`, but
+    /// abbreviated for tight widget layouts (the coverage-ring small
+    /// widget's caption line) — e.g. `"S$3.1k"` instead of `"SGD 3,116"`,
+    /// which was truncating there. `compactCurrencySymbols` is a small,
+    /// fixed table (not the device locale) so this stays deterministic
+    /// across devices, same rationale as the long form; falls back to the
+    /// raw ISO code for anything unmapped.
+    nonisolated static func dominantCurrencyTotalCompactText(for records: [PurchaseRecord]) -> String? {
+        guard let dominant = dominantCurrencyTotal(for: records) else { return nil }
+        let symbol = compactCurrencySymbols[dominant.currency] ?? dominant.currency
+        return "\(symbol)\(compactAmountText(dominant.amount))"
+    }
+
+    /// The currency with the largest summed `amount` across `records`
+    /// (records with no `amount` are skipped; a `nil` `currency` defaults
+    /// to `"SGD"`), shared by both the long and compact total-text
+    /// formatters. Ties broken alphabetically for determinism — see
+    /// `dominantCurrencyTotalText`'s doc for the comparator rationale.
+    private nonisolated static func dominantCurrencyTotal(for records: [PurchaseRecord]) -> (currency: String, amount: Double)? {
+        var totalsByCurrency: [String: Double] = [:]
+        for record in records {
+            guard let amount = record.amount else { continue }
+            let currency = record.currency ?? "SGD"
+            totalsByCurrency[currency, default: 0] += amount
+        }
+        guard let dominant = totalsByCurrency.max(by: { lhs, rhs in
+            lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key > rhs.key
+        }) else { return nil }
+        return (dominant.key, dominant.value)
+    }
+
+    /// ISO 4217 code → a short display symbol for the compact widget total
+    /// only — never used for money math or the long-form text, which stays
+    /// in explicit-code form. Deliberately a fixed table, not locale-derived.
+    private static let compactCurrencySymbols: [String: String] = [
+        "USD": "$", "SGD": "S$", "EUR": "€", "GBP": "£", "JPY": "¥",
+        "CNY": "¥", "AUD": "A$", "CAD": "C$", "NZD": "NZ$", "HKD": "HK$",
+        "INR": "₹", "KRW": "₩", "CHF": "CHF",
+    ]
+
+    /// "842", "3.1k", "1.2m" — one decimal place above 1,000, none below,
+    /// trailing ".0" trimmed. `en_US_POSIX`-pinned like the rest of this
+    /// file, for the same cross-device determinism reason.
+    nonisolated static func compactAmountText(_ value: Double) -> String {
+        let absValue = abs(value)
+        let (scaled, suffix): (Double, String) =
+            absValue >= 1_000_000 ? (value / 1_000_000, "m")
+            : absValue >= 1_000 ? (value / 1_000, "k")
+            : (value, "")
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.maximumFractionDigits = suffix.isEmpty ? 0 : 1
+        formatter.minimumFractionDigits = 0
+        let numberText = formatter.string(from: NSNumber(value: scaled)) ?? "\(Int(scaled))"
+        return "\(numberText)\(suffix)"
     }
 
     /// The first unregistered item whose warranty is still active — the
