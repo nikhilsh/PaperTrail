@@ -1815,8 +1815,14 @@ struct HeuristicFieldExtractor {
         // matches any of those, so without this the date is silently dropped even
         // though a parseable date (via the 年月日 pattern above, or NSDataDetector)
         // is sitting right there. Plausibility-gated exactly like every other pass.
-        let topHalfLineCount = max(1, lines.count / 2)
-        for line in lines.prefix(topHalfLineCount) {
+        //
+        // Floor of 12 lines: on a short receipt (a handful of lines) "half" would
+        // scan almost nothing — a compact Japanese receipt prints header, 領収証
+        // title, THEN the date, which already exhausts half of a 5–6 line scan.
+        // The half-of-receipt cap only exists to avoid footer junk (return-policy
+        // dates etc.) on LONG receipts, so it should never bite on short ones.
+        let fallbackLineCount = min(lines.count, max(lines.count / 2, 12))
+        for line in lines.prefix(fallbackLineCount) {
             guard !looksLikeBoilerplate(line) else { continue }
             if let date = parseDateFromLine(line), isPlausibleDate(date) {
                 return date
