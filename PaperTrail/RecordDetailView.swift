@@ -184,7 +184,7 @@ struct RecordDetailView: View {
             Text("This will permanently remove the record and its attachments.")
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
-            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
+            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID, ocrText: selected.ocrText)
         }
         .sheet(isPresented: $showRegisterSafari) {
             if let url = registerSearchURL {
@@ -1487,12 +1487,12 @@ struct RecordDetailView: View {
 
     private func openAttachment(_ attachment: Attachment) {
         if attachment.image != nil {
-            selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+            selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id, ocrText: attachment.ocrText)
         } else {
             Task {
                 let success = await cloudImageSync.download(attachmentID: attachment.id, localFilename: attachment.localFilename)
                 if success {
-                    selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                    selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id, ocrText: attachment.ocrText)
                 }
             }
         }
@@ -1602,9 +1602,15 @@ struct SelectedFilename: Identifiable {
     let id = UUID()
     let value: String
     let attachmentID: UUID?
-    init(_ value: String, attachmentID: UUID? = nil) {
+    /// The attachment's OCR text, if any — threaded through to
+    /// `ImageViewerView` so it can offer on-device translation (`Flag.translate`)
+    /// without a second SwiftData lookup. `nil` for call sites (e.g. the
+    /// Draft flow) that don't need the translate affordance.
+    let ocrText: String?
+    init(_ value: String, attachmentID: UUID? = nil, ocrText: String? = nil) {
         self.value = value
         self.attachmentID = attachmentID
+        self.ocrText = ocrText
     }
 }
 

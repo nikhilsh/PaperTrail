@@ -17,6 +17,7 @@ enum Flag: String, CaseIterable {
     case passItOn
     case siriIntents
     case animPassV3
+    case translate
 }
 
 /// Read-only feature-flag check for the widget extension. Reads the same App

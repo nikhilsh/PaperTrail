@@ -13,6 +13,12 @@ enum Flag: String, CaseIterable {
     case passItOn
     case siriIntents
     case animPassV3
+    /// Milestone: receipt translation. On-device only (`import Translation`)
+    /// — detects the OCR text's dominant language with `NLLanguageRecognizer`
+    /// and, if it differs from the user's preferred language and the pairing
+    /// is supported, offers a translate affordance in `ImageViewerView`. Not
+    /// part of the original v3 nine; added later behind the same pattern.
+    case translate
 }
 
 /// Runtime feature-flag reads (and, outside APPSTORE builds, writes) for v3.
@@ -90,6 +96,7 @@ extension Flag {
         case .passItOn: "Buyer resale packet · Plus"
         case .siriIntents: "Siri, Spotlight, App Intents"
         case .animPassV3: "Ten new motion moments"
+        case .translate: "Translate receipts on-device"
         }
     }
 }
