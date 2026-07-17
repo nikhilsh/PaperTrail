@@ -17,11 +17,17 @@ func ptGlyph(category: String?, productName: String = "") -> String {
     case has(["fridge", "refriger", "freezer"]): return "refrigerator"
     case has(["wash", "dryer", "laundry"]): return "washer"
     case has(["speaker", "soundbar", "audio", "hifi", "headphone", "earbud", "airpod"]): return "hifispeaker"
+    // Heaters/climate before the kitchen keywords — a "Kitchen appliance"
+    // category or a water heater must never win the teacup (BUILD_REVIEW B6:
+    // wrong-but-confident beats neutral, so specific matches come first).
+    case has(["heater", "geyser", "boiler"]): return "heater.vertical"
+    case has(["aircon", "air con", "hvac", "climate", "air purifier"]): return "air.conditioner.horizontal"
+    case has(["microwave"]): return "microwave"
     case has(["cook", "stove", "oven", "hob", "cooktop", "range"]): return "cooktop"
-    case has(["coffee", "espresso", "kettle", "blender", "mixer", "kitchen"]): return "cup.and.saucer"
+    case has(["coffee", "espresso", "kettle", "blender", "mixer"]): return "cup.and.saucer"
     case has(["camera", "lens", "gopro"]): return "camera"
     case has(["console", "playstation", "xbox", "nintendo", "game"]): return "gamecontroller"
-    case has(["thermo", "heater", "aircon", "hvac", "climate"]): return "thermometer.medium"
+    case has(["thermo"]): return "thermometer.medium"
     case has(["vacuum", "cleaner", "robot"]): return "fan"
     case has(["light", "lamp", "bulb"]): return "lightbulb"
     case has(["tool", "drill", "saw"]): return "wrench.and.screwdriver"
@@ -89,7 +95,8 @@ struct PTWarranty {
             self.progressRemaining = 0.5
         }
 
-        // Remaining-time phrasing
+        // Remaining-time phrasing — all through `CoverageFormatter` so the
+        // app, widgets, and notifications agree on units (BUILD_REVIEW W2).
         switch status {
         case .expired:
             if let expiry { self.remainingShort = "Expired " + PTWarranty.relativePast(expiry) }
@@ -97,13 +104,19 @@ struct PTWarranty {
             self.pillText = "Expired"
             self.stampText = "Out of warranty"
         case .active, .expiringSoon:
-            let phrase = expiry.map { PTWarranty.relativeFuture($0) } ?? "covered"
-            self.remainingShort = "\(phrase) left"
+            let daysLeft = expiry.map { max(0, CoverageFormatter.daysLeft(from: now, to: $0)) }
+            self.remainingShort = daysLeft.map { CoverageFormatter.remainingLeft(days: $0) } ?? "Covered"
             if status == .expiringSoon {
-                self.pillText = "Expires in \(phrase)"
+                if let daysLeft {
+                    self.pillText = daysLeft == 0
+                        ? "Expires today"
+                        : "Expires in \(CoverageFormatter.remaining(days: daysLeft))"
+                } else {
+                    self.pillText = "Expiring"
+                }
                 self.stampText = "Expiring"
             } else {
-                self.pillText = "Covered · \(phrase) left"
+                self.pillText = daysLeft.map { "Covered · \(CoverageFormatter.remainingLeft(days: $0))" } ?? "Covered"
                 self.stampText = "Under warranty"
             }
         case .unknown:
@@ -113,29 +126,14 @@ struct PTWarranty {
         }
     }
 
-    /// "9 mo", "28 days", "2 yr" — coarse future distance to `date`.
+    /// "9 mo", "28 days" — future distance to `date`, `CoverageFormatter` units.
     static func relativeFuture(_ date: Date) -> String {
-        let days = max(0, Calendar.current.dateComponents([.day], from: .now, to: date).day ?? 0)
-        return coarse(days)
+        CoverageFormatter.remaining(days: max(0, CoverageFormatter.daysLeft(from: .now, to: date)))
     }
 
-    /// "4 mo ago", "12 days ago" — coarse past distance from `date`.
+    /// "4 mo ago", "12 days ago" — past distance from `date`.
     static func relativePast(_ date: Date) -> String {
-        let days = max(0, Calendar.current.dateComponents([.day], from: date, to: .now).day ?? 0)
-        return coarse(days) + " ago"
-    }
-
-    private static func coarse(_ days: Int) -> String {
-        if days >= 365 {
-            let yr = days / 365
-            return "\(yr) yr"
-        } else if days >= 60 {
-            return "\(days / 30) mo"
-        } else if days >= 14 {
-            return "\(days / 7) wk"
-        } else {
-            return "\(days) day\(days == 1 ? "" : "s")"
-        }
+        CoverageFormatter.past(daysAgo: max(0, CoverageFormatter.daysLeft(from: date, to: .now)))
     }
 }
 
