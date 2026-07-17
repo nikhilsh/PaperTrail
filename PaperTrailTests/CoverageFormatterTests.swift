@@ -68,7 +68,10 @@ struct DisplayNameTests {
     }
 
     @Test func merchantNeverCollapsesToEmpty() {
-        #expect(PTDisplayName.merchant("LTD") == "LTD")
+        // A vendor that IS just a legal suffix keeps its one token (the cut
+        // only applies after something displayable) — it still gets
+        // un-shouted like any other all-caps name.
+        #expect(PTDisplayName.merchant("LTD") == "Ltd")
     }
 
     @Test func glyphAuditWaterHeaterIsNotATeacup() {
