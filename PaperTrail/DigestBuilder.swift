@@ -62,8 +62,12 @@ struct DigestSummary: Equatable, Sendable {
 
     /// True when there is nothing worth telling the user this month — the
     /// scheduler skips notifying (and clears any pending one) in this case.
+    /// Unregistered items deliberately don't count: registration nudges have
+    /// their own surfaces (widget, record rows) — a month where they're the
+    /// only news is a quiet month, not a reason to nag (device feedback,
+    /// build 40).
     var isEmpty: Bool {
-        expiringWarrantyCount == 0 && closingReturnCount == 0 && unregisteredActiveCount == 0
+        expiringWarrantyCount == 0 && closingReturnCount == 0
     }
 
     /// One-line summary, e.g. "3 warranties end within 60 days (SGD 4,200 of
@@ -88,11 +92,6 @@ struct DigestSummary: Equatable, Sendable {
             parts.append("\(closingReturnCount) \(noun) \(DigestSummary.dayLabel(daysLeft: soonest.daysLeft))")
         }
 
-        if unregisteredActiveCount > 0 {
-            let noun = unregisteredActiveCount == 1 ? "item is" : "items are"
-            parts.append("\(unregisteredActiveCount) unregistered \(noun) still under warranty")
-        }
-
         return parts.joined(separator: " · ")
     }
 
@@ -114,11 +113,6 @@ struct DigestSummary: Equatable, Sendable {
         if closingReturnCount > 0 {
             let noun = closingReturnCount == 1 ? "return window is closing" : "return windows are closing"
             parts.append("\(closingReturnCount) \(noun)")
-        }
-
-        if unregisteredActiveCount > 0 {
-            let noun = unregisteredActiveCount == 1 ? "item is" : "items are"
-            parts.append("\(unregisteredActiveCount) unregistered \(noun) still under warranty")
         }
 
         return parts.joined(separator: " · ")
