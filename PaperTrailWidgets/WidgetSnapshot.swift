@@ -28,14 +28,20 @@ struct WidgetRegisterNudge: Codable, Sendable, Equatable {
     var name: String
 }
 
-/// `coveredCount`/`totalCount`/`totalValueText`/`registerNudge` are v3
-/// `shelfWidgets` additions — all `Optional` so a pre-v3 snapshot on disk
-/// (missing these keys) still decodes with them as `nil`.
+/// `coveredCount`/`totalCount`/`totalValueText`/`totalValueCompactText`/
+/// `registerNudge` are v3 `shelfWidgets` additions — all `Optional` so a
+/// pre-v3 (or pre-compact-field) snapshot on disk still decodes with the
+/// missing ones as `nil`.
 struct WidgetSnapshot: Codable, Sendable {
     var generatedAt: Date
     var items: [WidgetSnapshotItem]
     var coveredCount: Int? = nil
     var totalCount: Int? = nil
     var totalValueText: String? = nil
+    /// Abbreviated form of `totalValueText` (e.g. "S$3.1k" vs "SGD 3,116"),
+    /// added after the other v3 fields — an app build that predates it
+    /// simply never writes the key, and the widget falls back to
+    /// `totalValueText`.
+    var totalValueCompactText: String? = nil
     var registerNudge: WidgetRegisterNudge? = nil
 }
