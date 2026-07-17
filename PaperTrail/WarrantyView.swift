@@ -210,20 +210,8 @@ private struct DigestCard: View {
     let summary: DigestSummary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    // v3 animPassV3 §9 #9 "Digest page-curl": true once the one-time corner
-    // reveal has played for this card's current appearance. **Delta from
-    // the brief**: Ideas.html's mock (V3-5) is a full standalone digest
-    // screen with its own three-stat header/"Needs eyes"/"Quiet this month"
-    // groups — that screen doesn't exist yet. This card (`WarrantyView`'s
-    // "This month" section) is the real, shipped in-app digest surface, so
-    // the curl plays on it instead.
-    @State private var revealed = false
 
     private var animPassOn: Bool { AnimPass.isOn }
-    /// The literal 3D corner-curl transform is a Reduce-Motion "transform"
-    /// (ANIMATION_SPEC "Don'ts"), so it's only ever attempted when Reduce
-    /// Motion is off — under Reduce Motion this card only ever crossfades.
-    private var showCurl: Bool { animPassOn && !reduceMotion }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -266,22 +254,10 @@ private struct DigestCard: View {
                 .padding(16)
             }
         }
-        // v3 animPassV3 §9 #9: one-time corner-curl reveal, approximated
-        // with a `rotation3DEffect` anchored top-trailing + opacity rather
-        // than a literal page-curl mesh/shader.
-        .rotation3DEffect(
-            .degrees(showCurl && !revealed ? -55 : 0),
-            axis: (x: 0, y: 1, z: 0.35),
-            anchor: .topTrailing,
-            perspective: 0.45
-        )
-        .opacity((animPassOn && !revealed) ? 0 : 1)
-        .onAppear {
-            guard animPassOn, !revealed else { return }
-            withAnimation(AnimPass.animation(PTMotion.archiveEase(AnimPass.Duration.digestCurl), reduceMotion: reduceMotion)) {
-                revealed = true
-            }
-        }
+        // animPassV3 §9 #9's corner-curl reveal is retired: the
+        // rotation3DEffect approximation read as a broken skew on device
+        // and replayed on every tab visit (device feedback, build 40).
+        // The card renders settled; the odometer roll above stays.
     }
 }
 
