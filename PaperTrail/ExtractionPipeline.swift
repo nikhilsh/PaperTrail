@@ -329,7 +329,8 @@ struct ExtractionPipeline: Sendable {
     }
 
     private static let summaryMarkers = ["total", "subtotal", "sub total", "tax", "gst",
-                                         "vat", "balance", "change", "amount due", "rounding"]
+                                         "vat", "balance", "change", "amount due", "rounding",
+                                         "小計", "合計", "クレジット", "お釣り"]
 
     static func isSummaryLine(_ line: String) -> Bool {
         let lower = line.lowercased()

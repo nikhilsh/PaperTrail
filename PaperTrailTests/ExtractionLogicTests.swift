@@ -378,4 +378,115 @@ struct ExtractionLogicTests {
         #expect(ClaimPacketAvailability.isOffered(attachmentCount: 1))
         #expect(ClaimPacketAvailability.isOffered(attachmentCount: 5))
     }
+
+    // MARK: - International receipts (JPY/Japanese hardening)
+    //
+    // Real device failure: an all-Japanese Onitsuka Tiger Tokyo receipt (領収証,
+    // date "2026年04月15日（水）17時43分", 合計 ¥15,000, merchant アシックス
+    // ジャパン株式会社) came back with every field blank. These lock in the fix
+    // via the public `HeuristicFieldExtractor.extract` entry point (the specific
+    // regexes/keyword tables are private).
+
+    @Test func extractsJapaneseYenCurrencyAndTotalFromFullReceipt() {
+        // Representative flattening of the failing Onitsuka Tiger Tokyo receipt.
+        let text = """
+        アシックスジャパン株式会社
+        領収証
+        2026年04月15日（水）17時43分
+        Tax Free
+        item ¥15,000
+        小計 1点 ¥15,000
+        合計 ¥15,000
+        クレジット ¥15,000
+        """
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.currency.value == "JPY")
+        #expect(result.amount.value == 15000)
+        #expect(result.merchantName.value == "アシックスジャパン株式会社")
+    }
+
+    @Test func japaneseStrongTotalKeywordOutranksWeakSubtotal() {
+        // 合計 (total, strong) must win over 小計 (subtotal, weak) even though the
+        // subtotal figure is larger — priority tiering, not "pick the biggest number".
+        let text = "小計 ¥12,000\n合計 ¥10,000"
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.amount.value == 10000)
+    }
+
+    @Test func detectsJapaneseTotalOverSubtotalInStructuredTable() {
+        let table = OCRTable(rows: [
+            ["小計", "1点", "¥15,000"],
+            ["合計", "¥15,000"],
+        ])
+        #expect(DocumentStructureOCRService.detectTotal(in: [table]) == 15000)
+    }
+
+    @Test func japaneseSummaryRowsExcludedFromLineItems() {
+        let table = OCRTable(rows: [
+            ["Onitsuka Tiger Sneaker", "¥15,000"],
+            ["小計", "¥15,000"],
+            ["合計", "¥15,000"],
+            ["クレジット", "¥15,000"],
+        ])
+        let items = DocumentStructureOCRService.lineItems(from: [table])
+        #expect(items.count == 1)
+        #expect(items.first?.name == "Onitsuka Tiger Sneaker")
+    }
+
+    @Test func parsesJapaneseStyleDateFromUnlabeledReceipt() throws {
+        // No English date keyword anywhere — exercises the unconditional
+        // NSDataDetector/pattern fallback over the top half of the receipt.
+        let text = """
+        アシックスジャパン株式会社
+        Onitsuka Tiger Tokyo
+        領収証
+        2026年04月15日（水）17時43分
+        合計 ¥15,000
+        """
+        let result = HeuristicFieldExtractor().extract(from: text)
+        let date = try #require(result.purchaseDate.value)
+        let c = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+        #expect((c.year!, c.month!, c.day!) == (2026, 4, 15))
+    }
+
+    @Test func acceptsCaselessMerchantNameWithJapaneseCompanySuffix() {
+        let text = """
+        アシックスジャパン株式会社
+        領収証
+        2026年04月15日
+        合計 ¥15,000
+        """
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.merchantName.value == "アシックスジャパン株式会社")
+    }
+
+    @Test func extractsKoreanWonCurrencyAndCommaGroupedAmount() {
+        let text = "Seoul Store\nTotal ₩89,000"
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.currency.value == "KRW")
+        #expect(result.amount.value == 89000)
+    }
+
+    @Test func currencySymbolOrderingPrefersSpecificSymbolsOverSGDDefault() {
+        // "US$"/"HK$"/"A$" all contain (or precede-collide with) the loose "s$"/"a$"
+        // checks — this locks in the fix that ranks the specific symbol first.
+        #expect(HeuristicFieldExtractor().extract(from: "Total US$45.00").currency.value == "USD")
+        #expect(HeuristicFieldExtractor().extract(from: "Total HK$45.00").currency.value == "HKD")
+        #expect(HeuristicFieldExtractor().extract(from: "Total A$45.00").currency.value == "AUD")
+    }
+
+    // Regression: existing SGD/MYR decimal-amount parsing must be unaffected.
+
+    @Test func regressionSGDCommaDecimalAmountStillWorks() {
+        let text = "ACME Pte Ltd\nGrand Total S$3,180.00"
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.currency.value == "SGD")
+        #expect(result.amount.value == 3180.00)
+    }
+
+    @Test func regressionPlainTotalDecimalStillWorks() {
+        let text = "Some Shop\nTotal: 45.90"
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.amount.value == 45.90)
+    }
 }

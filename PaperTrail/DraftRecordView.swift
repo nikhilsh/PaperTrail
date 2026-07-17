@@ -107,7 +107,7 @@ struct DraftRecordView: View {
         _notes = State(initialValue: seededOCR?.suggestedNotes ?? "")
         _purchaseDate = State(initialValue: seededOCR?.suggestedPurchaseDate ?? .now)
         _amountText = State(initialValue: initialAmount)
-        _currency = State(initialValue: seededOCR?.suggestedCurrency ?? "SGD")
+        _currency = State(initialValue: seededOCR?.suggestedCurrency ?? PTCurrency.deviceDefault)
         _category = State(initialValue: seededOCR?.suggestedCategory ?? "")
         _room = State(initialValue: "")
         _serialNumber = State(initialValue: seededOCR?.serialCandidate?.payload ?? "")
@@ -630,7 +630,7 @@ struct DraftRecordView: View {
             }
         }
 
-        if currency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || currency == "SGD",
+        if currency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || currency == PTCurrency.deviceDefault,
            let suggestedCurrency = learningContext.currencySuggestion,
            !suggestedCurrency.isEmpty,
            seededOCR?.suggestedCurrency == nil {

@@ -53,7 +53,7 @@ struct EditRecordView: View {
         } else {
             _amountText = State(initialValue: "")
         }
-        _currency = State(initialValue: record.currency ?? "SGD")
+        _currency = State(initialValue: record.currency ?? PTCurrency.deviceDefault)
         _category = State(initialValue: record.category ?? "")
         _room = State(initialValue: record.room ?? "")
         _tagsText = State(initialValue: record.tags.joined(separator: ", "))

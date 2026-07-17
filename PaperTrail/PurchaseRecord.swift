@@ -212,7 +212,7 @@ extension PurchaseRecord {
     /// Formatted display string for amount + currency.
     var formattedAmount: String? {
         guard let amount else { return nil }
-        let cur = currency ?? "SGD"
+        let cur = currency ?? PTCurrency.deviceDefault
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = cur
