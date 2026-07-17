@@ -219,10 +219,14 @@ private struct ClosingSoonRows {
     let items: [WidgetSnapshotItem]
     let registerNudge: WidgetRegisterNudge?
 
+    /// systemMedium fits the header plus TWO ~30pt rows and one divider —
+    /// three rows overflowed the canvas and clipped the bottom row on
+    /// device (build 39). The nudge only rides along when it fits in the
+    /// two-row budget, i.e. when there's at most one real item.
     init(entry: ExpiringSoonEntry) {
-        let capped = Array(entry.items.prefix(3))
+        let capped = Array(entry.items.prefix(2))
         items = capped
-        registerNudge = capped.count < 3 ? entry.registerNudge : nil
+        registerNudge = capped.count < 2 ? entry.registerNudge : nil
     }
 
     var isEmpty: Bool { items.isEmpty && registerNudge == nil }
@@ -254,7 +258,9 @@ private struct ClosingSoonWidgetView: View {
                         RegisterNudgeRow(nudge: nudge)
                     }
                 }
-                .padding()
+                // No manual .padding() — WidgetKit already applies content
+                // margins around containerBackground content; doubling them
+                // cost ~30pt of the canvas and contributed to the clipping.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .containerBackground(shelfPaperBackground, for: .widget)
             }
