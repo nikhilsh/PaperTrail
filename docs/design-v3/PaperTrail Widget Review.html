@@ -1,0 +1,163 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="design_doc_mode" content="canvas"><title>PaperTrail — Widget Review &amp; Options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="pt.css">
+<style>
+body{margin:0;background:#26231e;font-family:var(--serif)}
+a{color:var(--gold)}a:hover{color:var(--gold-hi)}
+.frame{position:absolute}
+.flabel{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#9c9382;margin:0 0 6px;font-weight:600}
+.fnote{font-family:-apple-system,system-ui;font-size:12px;line-height:1.45;color:#7d766a;margin:0 0 14px}
+.seclabel{position:absolute;font-family:var(--serif);font-size:34px;font-weight:600;color:#c9c0ae;letter-spacing:-.01em}
+.seclabel small{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#8a8272;margin-top:6px;font-weight:500}
+.shot{width:320px;border-radius:24px;box-shadow:0 30px 70px -30px rgba(0,0,0,.8);outline:1px solid rgba(231,220,196,.16);display:block}
+.callout{position:absolute;width:26px;height:26px;border-radius:50%;background:#C56A45;color:#fff;font:600 13px/26px var(--mono);text-align:center;box-shadow:0 4px 10px rgba(0,0,0,.5)}
+.issue{display:flex;gap:12px;padding:12px 0;border-bottom:1px dashed rgba(231,220,196,.14);align-items:baseline;max-width:520px}
+.issue .n{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:#C56A45;color:#fff;font:600 12px/24px var(--mono);text-align:center}
+.issue .n.ok{background:var(--sage-deep,#6E8550)}
+.issue b{font:600 13px -apple-system,system-ui;color:var(--txt);display:block}
+.issue p{font:400 12.5px/1.5 -apple-system,system-ui;color:var(--txt-2);margin:2px 0 0}
+.issue .tag{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--terra,#C56A45)}
+/* widget kit */
+.homebg{background:linear-gradient(160deg,#2e2a22,#171410 70%);padding:22px 24px 26px;border-radius:34px;outline:1px solid rgba(231,220,196,.14);box-shadow:0 30px 70px -30px rgba(0,0,0,.8)}
+.wgt{border-radius:22px;background:linear-gradient(180deg,#F6EEDD,#EDE2C8);color:var(--on-paper);box-shadow:0 16px 34px -16px rgba(0,0,0,.7);padding:15px 16px;position:relative;overflow:hidden}
+.wgt.dark{background:linear-gradient(180deg,#221C15,#171310);color:var(--txt);outline:.5px solid rgba(231,220,196,.14)}
+.wgt .fold{position:absolute;top:0;right:0;width:0;height:0;border-style:solid;border-width:0 20px 20px 0;border-color:transparent #D6C7A2 transparent transparent}
+.kick{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;font-weight:600}
+.row{display:flex}.between{justify-content:space-between}
+.pillw{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;padding:4px 9px;border-radius:99px;display:inline-flex;align-items:center;gap:5px;font-weight:600}
+.pillw .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.p-sage{background:rgba(147,168,111,.18);color:#5C7440}
+.p-amber{background:rgba(215,166,76,.18);color:#8A6420}
+.p-ghost{background:rgba(231,220,196,.08);color:var(--txt-2)}
+.serifw{font-family:var(--serif);font-weight:600;letter-spacing:-.01em}
+.sfw{font:400 11.5px -apple-system,system-ui}
+.monow{font-family:var(--mono)}
+/* option cards */
+.board{display:grid;grid-template-columns:repeat(3,300px);gap:16px}
+.opt{background:linear-gradient(180deg,#F6EEDD,#F0E7D2);color:var(--on-paper);border-radius:12px;padding:16px 17px;box-shadow:0 14px 28px -18px rgba(0,0,0,.65)}
+.opt.dark{background:var(--ink-750);color:var(--txt)}
+.opt h5{font-family:var(--serif);font-size:19px;font-weight:600;margin:6px 0;letter-spacing:-.01em}
+.opt p{font:400 12.5px/1.5 -apple-system,system-ui;margin:0;color:var(--on-paper-2)}
+.opt.dark p{color:var(--txt-2)}
+.opt .src{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-paper-3)}
+.opt.dark .src{color:var(--txt-3)}
+.verdict{display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;padding:4px 8px;border-radius:5px;font-weight:600;margin-top:10px}
+.v-keep{background:rgba(147,168,111,.25);color:#5C7440}
+.opt.dark .v-keep{color:#cfe0b0}
+.v-add{background:linear-gradient(90deg,#8A6E3A,#C2A15C 45%,#E0C588 55%,#C2A15C 65%,#8A6E3A);color:#2A2110}
+.v-cut{background:rgba(197,106,69,.2);color:#C56A45}
+.v-later{background:rgba(33,28,18,.1);color:var(--on-paper-2)}
+/* rules table */
+.rules{background:var(--ink-750);border-radius:14px;padding:6px 18px;width:520px}
+.rrow{display:flex;gap:14px;padding:11px 0;border-bottom:1px solid var(--hair-2);align-items:baseline}
+.rrow:last-child{border-bottom:0}
+.rrow .rk{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);width:150px;flex:0 0 auto;font-weight:600}
+.rrow .rv{font:400 12.5px/1.5 -apple-system,system-ui;color:var(--txt-2);flex:1}
+</style></head>
+<body>
+
+<!-- A · what shipped -->
+<h2 class="seclabel" style="left:40px;top:30px">A · What shipped<small>Build screenshot · 17 Jul · flags = BUILD_REVIEW.md IDs</small></h2>
+<div class="frame" style="left:40px;top:150px;width:320px">
+<div style="position:relative">
+<img class="shot" src="uploads/IMG_1382.png" alt="Current widget build">
+<span class="callout" style="left:118px;top:118px">3</span>
+<span class="callout" style="left:284px;top:160px">4</span>
+<span class="callout" style="left:262px;top:272px">1</span>
+<span class="callout" style="left:262px;top:326px">2</span>
+<span class="callout" style="left:284px;top:432px">5</span>
+</div>
+</div>
+<div class="frame" style="left:410px;top:150px;width:540px">
+<p class="flabel">The verdict — practical, but only if it tells the truth</p>
+<p class="fnote" style="max-width:520px">Widgets are the right bet for PaperTrail: this is an app you open four times a year, and the shelf is how it stays hired in between. But a warranty widget earns its slot with <b>ambient reassurance</b>, not manufactured urgency — right now every surface screams countdown at items 321 days from expiry.</p>
+<div class="issue"><span class="n">1</span><div><b>Amber urgency at 321 days <span class="tag">W1 · P0</span></b><p>"Closing soon" with amber dots for items ~11 months out. Amber is a state, not a decoration. Threshold: only windows ≤ 60 days appear; otherwise show the quiet state ("Nothing closing soon").</p></div></div>
+<div class="issue"><span class="n">2</span><div><b>Three formats for one number <span class="tag">W2 · P0</span></b><p>"321 days", "321d", and the app's own "10 mo". One formatter: ≥90d → months · 8–89d → days · ≤7d → amber "6 days" · last day → "today".</p></div></div>
+<div class="issue"><span class="n">3</span><div><b>"Warranty…" truncated headline <span class="tag">W3 · P0</span></b><p>The serif headline is a cut-off event type. Headline = item name; sub = the stake with year; footer = mono months-left.</p></div></div>
+<div class="issue"><span class="n">4</span><div><b>40pt gold "321d" alarm <span class="tag">W4 · P1</span></b><p>Reads like a missile countdown for a TV that's fine. This slot is the coverage ring from spec C1 — the one widget that's always true.</p></div></div>
+<div class="issue"><span class="n">5</span><div><b>Large widget duplicates medium <span class="tag">W5 · P1</span></b><p>Same two items, less info, no dates. Cut it — ship Small ×2 + Medium + lock screen.</p></div></div>
+<div class="issue"><span class="n ok">✓</span><div><b>What's right</b><p>Paper medium card, mono kickers, gold-on-ink palette, dashed divider — the aesthetic survived the trip to WidgetKit. This review is logic + typography, not a repaint.</p></div></div>
+</div>
+
+<!-- B · the fixed set -->
+<h2 class="seclabel" style="left:40px;top:1050px">B · The fixed shelf<small>Ship this set · both medium states shown</small></h2>
+<div class="frame" style="left:40px;top:1170px;width:390px">
+<p class="flabel">Small ×2 + medium (quiet state)</p>
+<p class="fnote" style="max-width:370px">Nothing is urgent in the real data — so nothing pretends to be. Ring = portfolio truth. Next up = the single nearest event, item first.</p>
+<div class="homebg" style="width:342px">
+<div class="row" style="gap:16px">
+<div class="wgt" style="width:155px;height:155px;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center"><span class="fold"></span>
+<div style="position:relative;width:88px;height:88px">
+<svg style="transform:rotate(-90deg)" width="88" height="88"><circle cx="44" cy="44" r="37" fill="none" stroke="rgba(33,28,18,.12)" stroke-width="7"/><circle cx="44" cy="44" r="37" fill="none" stroke="#93A86F" stroke-width="7" stroke-linecap="round" stroke-dasharray="186 233"/></svg>
+<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span class="serifw" style="font-size:22px">4/5</span></div>
+</div>
+<span class="monow" style="font-size:8.5px;letter-spacing:.14em;color:var(--on-paper-3);margin-top:7px;font-weight:600">COVERED · $3,116</span>
+</div>
+<div class="wgt dark" style="width:155px;height:155px;flex:0 0 auto;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box">
+<span class="kick" style="color:var(--gold)">Next up</span>
+<div class="serifw" style="font-size:18px;line-height:1.12">Samsung TV</div>
+<div><div class="sfw" style="color:var(--txt-2)">Warranty ends 3 Jun 2027</div><div class="monow" style="font-size:9px;letter-spacing:.14em;color:var(--txt-3);margin-top:5px;font-weight:600">10 MO LEFT</div></div>
+</div>
+</div>
+<div class="wgt" style="margin-top:16px"><span class="fold"></span>
+<div class="row between"><span class="kick" style="color:var(--gold-deep)">Papertrail · Closing soon</span></div>
+<div class="serifw" style="font-size:17px;margin-top:12px">Nothing closing soon.</div>
+<div class="sfw" style="color:var(--on-paper-2);margin-top:3px">Next: Samsung TV warranty · 3 Jun 2027</div>
+<hr style="border:0;border-top:1px dashed rgba(33,28,18,.18);margin:11px 0">
+<div class="row between" style="align-items:center"><span class="monow" style="font-size:9px;letter-spacing:.14em;color:var(--on-paper-3);font-weight:600">5 ITEMS · $3,116 ON FILE</span><span class="pillw p-sage"><span class="dot"></span>ALL COVERED</span></div>
+</div>
+</div>
+</div>
+<div class="frame" style="left:470px;top:1170px;width:390px">
+<p class="flabel">Medium (urgent state) + lock screen</p>
+<p class="fnote" style="max-width:370px">Amber appears only when it's true. Rows are stakes, not labels — and each deep-links to the item.</p>
+<div class="homebg" style="width:342px">
+<div class="wgt"><span class="fold"></span>
+<div class="row between"><span class="kick" style="color:var(--gold-deep)">Papertrail · Closing soon</span></div>
+<div class="row between" style="margin-top:12px;align-items:center"><div><div class="serifw" style="font-size:16px">Samsung TV</div><div class="sfw" style="color:var(--on-paper-2);margin-top:2px">Last day to change your mind: 22 Jul</div></div><span class="pillw p-amber" style="flex:0 0 auto"><span class="dot"></span>6 DAYS</span></div>
+<hr style="border:0;border-top:1px dashed rgba(33,28,18,.18);margin:10px 0">
+<div class="row between" style="align-items:center"><div><div class="serifw" style="font-size:16px">Rheem heater</div><div class="sfw" style="color:var(--on-paper-2);margin-top:2px">Register to unlock the full 5 years</div></div><span class="monow" style="font-size:9.5px;letter-spacing:.12em;color:var(--gold-deep);font-weight:600">DO IT →</span></div>
+</div>
+<div style="margin-top:22px">
+<div class="monow" style="font-size:9px;letter-spacing:.2em;color:rgba(239,230,210,.5);text-align:center">LOCK SCREEN · INLINE</div>
+<div style="margin-top:8px;background:rgba(0,0,0,.35);border-radius:14px;padding:10px 14px;text-align:center;outline:.5px solid rgba(231,220,196,.12)">
+<span class="monow" style="font-size:11px;letter-spacing:.08em;color:#EFE6D2">⌂ Return window: 6 days — Samsung TV</span>
+</div>
+<div style="margin-top:8px;background:rgba(0,0,0,.35);border-radius:14px;padding:10px 14px;text-align:center;outline:.5px solid rgba(231,220,196,.12)">
+<span class="monow" style="font-size:11px;letter-spacing:.08em;color:rgba(239,230,210,.75)">⌂ 5 items covered · next: Jun 2027</span>
+</div>
+<div class="fnote" style="margin-top:6px;text-align:center">urgent ≤ 14 days · quiet otherwise</div>
+</div>
+</div>
+</div>
+<div class="frame" style="left:900px;top:1170px">
+<p class="flabel">Widget logic — one source of truth</p>
+<div class="rules">
+<div class="rrow"><span class="rk">Units</span><span class="rv">≥ 90 days → "10 mo" · 8–89 → "34 days" · ≤ 7 → "6 days" amber · last day → "today". Same formatter as the app. Never "321d".</span></div>
+<div class="rrow"><span class="rk">Closing soon</span><span class="rv">Return windows always qualify; warranties only ≤ 60 days from expiry; register nudges ≤ 30 days from purchase. Max 2 rows, nearest first.</span></div>
+<div class="rrow"><span class="rk">Quiet state</span><span class="rv">"Nothing closing soon." + next expiry + portfolio line with sage ALL COVERED pill. This is the widget's default life — design it as the hero, not the fallback.</span></div>
+<div class="rrow"><span class="rk">Pill color</span><span class="rv">sage = fine · amber &lt; 60d · terra &lt; 7d / expired. Amber never appears above 60 days, anywhere.</span></div>
+<div class="rrow"><span class="rk">Type</span><span class="rv">Item names serif · stakes SF · metadata/counters mono caps. Headline is always the item, never a truncated event type.</span></div>
+<div class="rrow"><span class="rk">Deep links</span><span class="rv">Ring → Coverage tab · row → item dossier · quick-shelve → scanner. Reload on data change + daily 09:00.</span></div>
+<div class="rrow"><span class="rk">Motion</span><span class="rv">None. WidgetKit is static — ring renders pre-filled, no shimmer, no fake countdown ticks.</span></div>
+</div>
+</div>
+
+<!-- C · options ranked -->
+<h2 class="seclabel" style="left:40px;top:2140px">C · Every option, ranked<small>Keep · add · later · cut</small></h2>
+<div class="frame" style="left:40px;top:2260px">
+<div class="board">
+<div class="opt"><span class="src">Small · paper</span><h5>Coverage ring</h5><p>4/5 · $3,116. The only widget that's always true and never nags — ambient proof the library is doing its job. This is the flagship; it was missing from the build.</p><span class="verdict v-keep">Keep · flagship</span></div>
+<div class="opt"><span class="src">Medium · paper</span><h5>Closing soon</h5><p>Up to 2 real deadlines with stake copy, or the quiet state. The quiet state is what users see 340 days a year — it must feel like reassurance, not an empty list.</p><span class="verdict v-keep">Keep · fix logic</span></div>
+<div class="opt"><span class="src">Small · dark</span><h5>Next up</h5><p>Single nearest event: item name, stake, months-left. Pairs with the ring as a light/dark duo on the shelf. Fix the truncated headline.</p><span class="verdict v-keep">Keep · fix type</span></div>
+<div class="opt"><span class="src">Lock screen · inline</span><h5>One-liner</h5><p>Mono text above the clock: urgent line when something's ≤ 14 days, otherwise "5 items covered · next: Jun 2027". Cheapest surface, seen 100×/day.</p><span class="verdict v-keep">Keep</span></div>
+<div class="opt"><span class="src">Lock screen · circular</span><h5>Quick-shelve</h5><p>A gold library glyph that launches straight into the scanner. Turns the #1 funnel leak (adding is homework) into a lock-screen habit — receipt in hand, one tap.</p><span class="verdict v-add">Add · adoption</span></div>
+<div class="opt"><span class="src">Small · configurable</span><h5>Watch one item</h5><p>User picks a big purchase; widget shows its ring + months left. This is what the shipped "321d" widget wanted to be — legitimate once it's the user's own choice via widget config.</p><span class="verdict v-later">Later · Plus-ish</span></div>
+<div class="opt"><span class="src">Large</span><h5>List of everything</h5><p>Duplicates the medium with more black space. A warranty app doesn't have enough daily change to feed a large widget honestly.</p><span class="verdict v-cut">Cut</span></div>
+<div class="opt"><span class="src">StandBy / nightstand</span><h5>Bedside ring</h5><p>Free with the small ring (StandBy reuses small widgets). No extra work; don't design for it separately.</p><span class="verdict v-later">Free ride</span></div>
+<div class="opt dark"><span class="src">Principle</span><h5>The shelf test</h5><p>A widget earns its slot if it's honest on a boring day. Countdown theatre gets the app deleted from the home screen — quiet confidence keeps it there. Design the 340 quiet days first.</p></div>
+</div>
+</div>
+
+</body></html>
