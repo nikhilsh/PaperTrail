@@ -65,6 +65,9 @@ struct PaywallView: View {
     /// delay.
     @State private var purchaseSucceeded = false
     @State private var alert: PaywallAlert?
+    /// A product refetch triggered from an unloaded-plan row or the
+    /// unavailable block — drives the row's "Checking the App Store…" copy.
+    @State private var isRetrying = false
 
     private var selectedProduct: Product? {
         selectedIsYearly ? yearlyProduct : monthlyProduct
@@ -142,6 +145,8 @@ struct PaywallView: View {
                         isSelected: selectedIsYearly,
                         action: { selectedIsYearly = true }
                     )
+                } else {
+                    unloadedPlanRow(title: "Annual")
                 }
                 if let monthlyProduct {
                     PlanPickerRow(
@@ -150,10 +155,36 @@ struct PaywallView: View {
                         isSelected: !selectedIsYearly,
                         action: { selectedIsYearly = false }
                     )
+                } else {
+                    unloadedPlanRow(title: "Monthly")
                 }
                 PlanFinePrint(text: finePrintText)
             }
             .frame(maxWidth: 262)
+        }
+    }
+
+    /// A plan whose product the App Store didn't return still gets a row —
+    /// hiding it silently made a two-plan paywall look single-plan whenever
+    /// one product lagged (seen live: yearly missing while sandbox caught up
+    /// after an ASC metadata change). Tapping retries the fetch; both plans
+    /// are configured products, so the row never lies about what's on offer.
+    private func unloadedPlanRow(title: String) -> some View {
+        PlanPickerRow(
+            title: title,
+            price: "—",
+            detail: isRetrying ? "Checking the App Store…" : "Couldn't load · tap to retry",
+            isSelected: false,
+            action: retryLoad
+        )
+    }
+
+    private func retryLoad() {
+        guard !isRetrying else { return }
+        Task {
+            isRetrying = true
+            await loadProducts()
+            isRetrying = false
         }
     }
 
@@ -197,6 +228,15 @@ struct PaywallView: View {
                 .foregroundStyle(PT.onPaper3)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            if PlusConfig.enabled {
+                Button(action: retryLoad) {
+                    Text(isRetrying ? "Checking the App Store…" : "Try again")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PT.goldDeep)
+                }
+                .disabled(isRetrying)
+                .padding(.top, 4)
+            }
         }
         .frame(maxWidth: 240)
     }
@@ -280,20 +320,31 @@ struct PaywallView: View {
         }
         do {
             let loaded = try await Product.products(for: PlusConfig.ProductID.subscriptionPlans)
-            yearlyProduct = loaded.first { $0.id == PlusConfig.ProductID.yearly }
-            monthlyProduct = loaded.first { $0.id == PlusConfig.ProductID.monthly }
-            guard yearlyProduct != nil || monthlyProduct != nil else {
-                loadState = .unavailable
-                return
+            // Never let a flaky refetch drop a product we already have —
+            // a retry that fails must not turn a loaded row back into "—".
+            yearlyProduct = loaded.first { $0.id == PlusConfig.ProductID.yearly } ?? yearlyProduct
+            monthlyProduct = loaded.first { $0.id == PlusConfig.ProductID.monthly } ?? monthlyProduct
+            if yearlyProduct == nil || monthlyProduct == nil {
+                let missing = [yearlyProduct == nil ? PlusConfig.ProductID.yearly : nil,
+                               monthlyProduct == nil ? PlusConfig.ProductID.monthly : nil]
+                    .compactMap(\.self)
+                AppLogger.warn("Plus products missing from store response: \(missing.joined(separator: ", "))", category: "plus")
             }
-            yearlyOffersTrial = await offersTrial(yearlyProduct)
-            monthlyOffersTrial = await offersTrial(monthlyProduct)
-            selectedIsYearly = yearlyProduct != nil
-            loadState = .loaded
         } catch {
             AppLogger.error("Failed to load Plus products: \(error.localizedDescription)", category: "plus")
-            loadState = .unavailable
         }
+        guard yearlyProduct != nil || monthlyProduct != nil else {
+            loadState = .unavailable
+            return
+        }
+        yearlyOffersTrial = await offersTrial(yearlyProduct)
+        monthlyOffersTrial = await offersTrial(monthlyProduct)
+        // Only pick a default selection on first load — a retry that fills
+        // in the other plan must not stomp what the user already selected.
+        if loadState != .loaded {
+            selectedIsYearly = yearlyProduct != nil
+        }
+        loadState = .loaded
     }
 
     /// True only when `product` both defines an intro offer AND this
