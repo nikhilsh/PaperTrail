@@ -6,20 +6,17 @@ import UIKit
 /// V2_BRIEF.md §3 P1, DESIGN_LANGUAGE.md §7, ANIMATION_SPEC.md §3/§4/§8b).
 /// A full-screen sheet built on `CertificateView` (Wave A, `Design/V2/
 /// CertificateView.swift`): kicker, serif title, italic tagline, gold seal,
-/// four benefit checks (`PlusConfig.benefits`), gold rule, then a two-plan
-/// picker (Annual default-selected + Monthly — v2.1 supersedes the old
-/// three-tier paywall; no lifetime tier is sold anymore, see `PlusConfig
-/// .ProductID.subscriptionPlans`).
+/// four benefit checks (`PlusConfig.benefits`), gold rule, then a three-plan
+/// picker (DESIGN_LANGUAGE.md §7, updated 17 Jul 2026 / BUILD_REVIEW B1):
+/// Annual default-selected with ≈/month math, Monthly, and Lifetime as a
+/// quiet third row ("Purchased once. Yours forever.") — no countdowns, no
+/// fake discounts. See `PlusConfig.ProductID.paywallPlans`.
 ///
 /// Purchase choreography per ANIMATION_SPEC §3: the CTA label swaps to
 /// "Confirming with the App Store…" on tap, then a MEMBER ✓ `PTStamp` slams
 /// onto the certificate on verified success (`.success` haptic) before the
 /// sheet dismisses ~1.2s later — Settings then shows the gold member-card
 /// entrance (`GoldMemberCard`, Wave A) and a "struck in gold" toast.
-///
-/// Lifetime stays recognized as a *past* entitlement (see `PlusConfig
-/// .ProductID.all` / `PlusEntitlements`) — this screen just never sells it
-/// again; `PlusDebugView` keeps its lifetime buy button for sandbox testing.
 ///
 /// Present with `.sheet` wrapped in its own `NavigationStack` (see
 /// `SettingsView`/`HouseholdView` call sites) so the trailing close button
@@ -49,6 +46,7 @@ struct PaywallView: View {
     @State private var loadState: LoadState = .loading
     @State private var yearlyProduct: Product?
     @State private var monthlyProduct: Product?
+    @State private var lifetimeProduct: Product?
     /// Per-plan intro-offer eligibility, resolved once at `loadProducts` —
     /// true only when the product both defines an intro offer AND this
     /// account is actually eligible for it (`isEligibleForIntroOffer`).
@@ -57,7 +55,7 @@ struct PaywallView: View {
     /// trial monthly doesn't have (§2).
     @State private var yearlyOffersTrial = false
     @State private var monthlyOffersTrial = false
-    @State private var selectedIsYearly = true
+    @State private var selectedPlan: PaywallPlan = .annual
     @State private var isPurchasing = false
     @State private var isRestoring = false
     /// Set on verified purchase success — mounts the MEMBER ✓ stamp overlay
@@ -70,7 +68,11 @@ struct PaywallView: View {
     @State private var isRetrying = false
 
     private var selectedProduct: Product? {
-        selectedIsYearly ? yearlyProduct : monthlyProduct
+        switch selectedPlan {
+        case .annual: yearlyProduct
+        case .monthly: monthlyProduct
+        case .lifetime: lifetimeProduct
+        }
     }
 
     var body: some View {
@@ -142,8 +144,8 @@ struct PaywallView: View {
                         title: "Annual",
                         price: "\(yearlyProduct.displayPrice)/yr",
                         detail: "≈ \(monthlyEquivalent(of: yearlyProduct)) a month",
-                        isSelected: selectedIsYearly,
-                        action: { selectedIsYearly = true }
+                        isSelected: selectedPlan == .annual,
+                        action: { selectedPlan = .annual }
                     )
                 } else {
                     unloadedPlanRow(title: "Annual")
@@ -152,11 +154,24 @@ struct PaywallView: View {
                     PlanPickerRow(
                         title: "Monthly",
                         price: "\(monthlyProduct.displayPrice)/mo",
-                        isSelected: !selectedIsYearly,
-                        action: { selectedIsYearly = false }
+                        isSelected: selectedPlan == .monthly,
+                        action: { selectedPlan = .monthly }
                     )
                 } else {
                     unloadedPlanRow(title: "Monthly")
+                }
+                // The quiet third row (DL §7): no upsell framing, just the
+                // fact of it.
+                if let lifetimeProduct {
+                    PlanPickerRow(
+                        title: "Lifetime",
+                        price: lifetimeProduct.displayPrice,
+                        detail: "Purchased once. Yours forever.",
+                        isSelected: selectedPlan == .lifetime,
+                        action: { selectedPlan = .lifetime }
+                    )
+                } else {
+                    unloadedPlanRow(title: "Lifetime")
                 }
                 PlanFinePrint(text: finePrintText)
             }
@@ -241,24 +256,31 @@ struct PaywallView: View {
         .frame(maxWidth: 240)
     }
 
-    /// Live per-plan price text, e.g. "S$39.98/yr" / "S$5.98/mo" — `nil`
-    /// until that plan's product has loaded.
+    /// Live per-plan price text, e.g. "S$39.98/yr" / "S$5.98/mo" / a bare
+    /// lifetime price — `nil` until that plan's product has loaded.
     private var selectedPriceText: String? {
-        selectedIsYearly
-            ? yearlyProduct.map { "\($0.displayPrice)/yr" }
-            : monthlyProduct.map { "\($0.displayPrice)/mo" }
+        switch selectedPlan {
+        case .annual: yearlyProduct.map { "\($0.displayPrice)/yr" }
+        case .monthly: monthlyProduct.map { "\($0.displayPrice)/mo" }
+        case .lifetime: lifetimeProduct.map(\.displayPrice)
+        }
     }
 
     /// Whether the SELECTED plan actually offers a trial to this account —
-    /// monthly is always false (no intro offer exists on it in ASC); yearly
-    /// is only true when both the product defines one AND this account is
-    /// eligible (§2: never promise a trial that won't apply).
+    /// monthly is always false (no intro offer exists on it in ASC) and
+    /// lifetime can't have one (non-consumable); yearly is only true when
+    /// both the product defines one AND this account is eligible (§2:
+    /// never promise a trial that won't apply).
     private var selectedOffersTrial: Bool {
-        selectedIsYearly ? yearlyOffersTrial : monthlyOffersTrial
+        switch selectedPlan {
+        case .annual: yearlyOffersTrial
+        case .monthly: monthlyOffersTrial
+        case .lifetime: false
+        }
     }
 
     private var finePrintText: String {
-        PaywallCopy.finePrint(offersTrial: selectedOffersTrial, isYearly: selectedIsYearly, priceText: selectedPriceText)
+        PaywallCopy.finePrint(plan: selectedPlan, offersTrial: selectedOffersTrial, priceText: selectedPriceText)
     }
 
     private func monthlyEquivalent(of product: Product) -> String {
@@ -279,7 +301,7 @@ struct PaywallView: View {
     }
 
     private var ctaTitle: String {
-        PaywallCopy.ctaTitle(offersTrial: selectedOffersTrial, priceText: selectedPriceText)
+        PaywallCopy.ctaTitle(plan: selectedPlan, offersTrial: selectedOffersTrial, priceText: selectedPriceText)
     }
 
     private var restoreButton: some View {
@@ -319,30 +341,35 @@ struct PaywallView: View {
             return
         }
         do {
-            let loaded = try await Product.products(for: PlusConfig.ProductID.subscriptionPlans)
+            let loaded = try await Product.products(for: PlusConfig.ProductID.paywallPlans)
             // Never let a flaky refetch drop a product we already have —
             // a retry that fails must not turn a loaded row back into "—".
             yearlyProduct = loaded.first { $0.id == PlusConfig.ProductID.yearly } ?? yearlyProduct
             monthlyProduct = loaded.first { $0.id == PlusConfig.ProductID.monthly } ?? monthlyProduct
-            if yearlyProduct == nil || monthlyProduct == nil {
-                let missing = [yearlyProduct == nil ? PlusConfig.ProductID.yearly : nil,
-                               monthlyProduct == nil ? PlusConfig.ProductID.monthly : nil]
-                    .compactMap(\.self)
+            lifetimeProduct = loaded.first { $0.id == PlusConfig.ProductID.lifetime } ?? lifetimeProduct
+            let missing = [yearlyProduct == nil ? PlusConfig.ProductID.yearly : nil,
+                           monthlyProduct == nil ? PlusConfig.ProductID.monthly : nil,
+                           lifetimeProduct == nil ? PlusConfig.ProductID.lifetime : nil]
+                .compactMap(\.self)
+            if !missing.isEmpty {
                 AppLogger.warn("Plus products missing from store response: \(missing.joined(separator: ", "))", category: "plus")
             }
         } catch {
             AppLogger.error("Failed to load Plus products: \(error.localizedDescription)", category: "plus")
         }
-        guard yearlyProduct != nil || monthlyProduct != nil else {
+        guard yearlyProduct != nil || monthlyProduct != nil || lifetimeProduct != nil else {
             loadState = .unavailable
             return
         }
         yearlyOffersTrial = await offersTrial(yearlyProduct)
         monthlyOffersTrial = await offersTrial(monthlyProduct)
         // Only pick a default selection on first load — a retry that fills
-        // in the other plan must not stomp what the user already selected.
+        // in another plan must not stomp what the user already selected.
+        // Annual is the default whenever it loaded (DL §7).
         if loadState != .loaded {
-            selectedIsYearly = yearlyProduct != nil
+            selectedPlan = yearlyProduct != nil ? .annual
+                : monthlyProduct != nil ? .monthly
+                : .lifetime
         }
         loadState = .loaded
     }
@@ -452,17 +479,29 @@ private struct MemberStampOverlay: View {
 
 // MARK: - Paywall copy (§2/§3 trial-copy + renewal-promise honesty)
 
+/// The three plans the paywall sells (DL §7, updated 17 Jul 2026).
+enum PaywallPlan {
+    case annual
+    case monthly
+    case lifetime
+}
+
 /// Pure paywall CTA/fine-print copy logic — extracted for testability
-/// (`PaywallCopyTests`): given only the selected plan's resolved trial
-/// eligibility and price, decides what to say. No StoreKit `Product`
+/// (`PaywallCopyTests`): given only the selected plan, its resolved trial
+/// eligibility, and price, decides what to say. No StoreKit `Product`
 /// involved, so no live App Store Connect state is needed to test the
 /// eligible×hasIntro matrix (§2).
 enum PaywallCopy {
     /// "Start 2 weeks free" only when the selected plan actually offers a
-    /// trial to this account; otherwise "Subscribe — <price>" (or the bare
-    /// "Subscribe" while price hasn't loaded yet) — monthly (no intro offer
-    /// in ASC) always falls here, never promising a trial it doesn't have.
-    static func ctaTitle(offersTrial: Bool, priceText: String?) -> String {
+    /// trial to this account; lifetime buys, it never subscribes ("Buy
+    /// once — <price>"); otherwise "Subscribe — <price>" (or the bare verb
+    /// while price hasn't loaded yet) — monthly (no intro offer in ASC)
+    /// never promises a trial it doesn't have.
+    static func ctaTitle(plan: PaywallPlan, offersTrial: Bool, priceText: String?) -> String {
+        if plan == .lifetime {
+            guard let priceText else { return "Buy once" }
+            return "Buy once — \(priceText)"
+        }
         if offersTrial { return "Start 2 weeks free" }
         guard let priceText else { return "Subscribe" }
         return "Subscribe — \(priceText)"
@@ -472,17 +511,24 @@ enum PaywallCopy {
     /// `offersTrial`; a paid annual keeps the renewal-reminder promise
     /// (it's real — `RenewalReminder` schedules it); a paid monthly drops
     /// it (no renewal reminder is ever scheduled for monthly — see
-    /// `PlusEntitlements.updateRenewalReminder`), so the copy shouldn't
-    /// promise one either.
-    static func finePrint(offersTrial: Bool, isYearly: Bool, priceText: String?) -> String {
+    /// `PlusEntitlements.updateRenewalReminder`); lifetime states the
+    /// no-renewal fact plainly, no membership theatre.
+    static func finePrint(plan: PaywallPlan, offersTrial: Bool, priceText: String?) -> String {
         let priceText = priceText ?? "—"
-        if offersTrial {
-            return "First 2 weeks free · then \(priceText). We'll remind you before every renewal. Cancel keeps everything."
-        }
-        if isYearly {
+        switch plan {
+        case .lifetime:
+            return "\(priceText) once. Nothing renews. Yours forever."
+        case .annual:
+            if offersTrial {
+                return "First 2 weeks free · then \(priceText). We'll remind you before every renewal. Cancel keeps everything."
+            }
             return "\(priceText). We'll remind you before every renewal. Cancel keeps everything."
+        case .monthly:
+            if offersTrial {
+                return "First 2 weeks free · then \(priceText). We'll remind you before every renewal. Cancel keeps everything."
+            }
+            return "\(priceText). Cancel keeps everything."
         }
-        return "\(priceText). Cancel keeps everything."
     }
 }
 
