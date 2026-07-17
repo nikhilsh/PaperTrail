@@ -138,8 +138,10 @@ with (1) + (5) now; build (2) when there's a real user base to feed it;
 
 ### Implemented (2026-06): Supabase majority-learning pipeline — no curation
 
-Product decisions superseding the sketch above: **opt-OUT** (default on,
-Settings → Your data → "Share anonymous learning data"), **no human curation
+Product decisions superseding the sketch above: **opt-IN** (default OFF; a
+first-launch "Help improve extraction?" prompt plus Settings → Your data →
+"Share anonymous learning data" — see `CommunityLearning.swift:38` and
+`AppShellView`), **no human curation
 anywhere** — aggregation is pure SQL — and aggressive-but-anonymized
 collection (structured field corrections; never transcripts, images, or
 identity).
