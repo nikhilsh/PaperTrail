@@ -82,12 +82,13 @@ struct FeatureFlagsTests {
         #expect(FeatureFlags.key(for: .passItOn) == "flag.passItOn")
         #expect(FeatureFlags.key(for: .siriIntents) == "flag.siriIntents")
         #expect(FeatureFlags.key(for: .animPassV3) == "flag.animPassV3")
+        #expect(FeatureFlags.key(for: .translate) == "flag.translate")
     }
 
-    @Test func allNineFlagsExist() {
+    @Test func allTenFlagsExist() {
         // Tripwire: catches an accidental addition/removal against the
-        // brief's fixed nine-feature list.
-        #expect(Flag.allCases.count == 9)
+        // brief's fixed nine-feature list plus the later `translate` add.
+        #expect(Flag.allCases.count == 10)
     }
 
     @Test func everyFlagHasANonEmptySubtitle() {
