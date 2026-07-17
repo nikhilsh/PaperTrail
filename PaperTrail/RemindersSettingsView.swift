@@ -6,7 +6,12 @@ import SwiftUI
 struct RemindersSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     private let reminders = ReminderSettings.shared
-    private var gate = NotificationPermissionGate.shared
+    // `let`, not `var` — a `var` stored property with a default value is
+    // included as a parameter in the synthesized memberwise init, so a
+    // `private var` here would drag that init's access level down to
+    // `private`, breaking `RemindersSettingsView()` construction from
+    // `SettingsView.swift`'s `NavigationLink`.
+    private let gate = NotificationPermissionGate.shared
 
     /// Honest-states rule (graceful notification permission, item 5): once
     /// the system has actually denied notifications, a toggle left ON is a

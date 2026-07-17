@@ -43,8 +43,14 @@ struct RecordDetailView: View {
     /// Graceful notification permission, item 5: RecallWatcher has no
     /// toggle of its own (its safety notification is cap-exempt and always
     /// schedules), so the honest "off in Settings" line surfaces here, on
-    /// the row itself, instead.
-    private var notificationGate = NotificationPermissionGate.shared
+    /// the row itself, instead. `let`, not `var` — same reasoning as
+    /// `ReminderSettings.shared` above: a `var` stored property with a
+    /// default value is included as a parameter in the struct's synthesized
+    /// memberwise init, so a `private var` here would drag that init's
+    /// access level down to `private` too, breaking
+    /// `RecordDetailView(record:)` construction from every other file. A
+    /// `private let` with a default is excluded from the init entirely.
+    private let notificationGate = NotificationPermissionGate.shared
     private var recallNotificationsDenied: Bool { notificationGate.lastKnownAuthorizationStatus == .denied }
     /// True only while the artificial "Watching…" resolve hold (below) is
     /// actively running. The ellipsis animates ONLY during this window —
