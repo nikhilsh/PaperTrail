@@ -41,18 +41,24 @@ struct SettingsRowDivider: View {
 
 /// A single settings row: optional icon tile, title + subtitle, and a trailing
 /// accessory (value text, chevron, and/or a toggle). When `action` is set (and
-/// there's no toggle) the whole row is tappable.
+/// there's no toggle) the whole row is tappable. When `onRowTap` is set (with
+/// or without a toggle) just the icon/title/subtitle region is tappable,
+/// leaving the toggle's own hit area alone — used by the graceful
+/// notification permission honest rows, where tapping the label re-presents
+/// the DENIED sheet without fighting the toggle itself.
 struct SettingsRow: View {
     var icon: String? = nil
     var iconColor: Color = PT.txt2
     var title: String
     var subtitle: String? = nil
+    var subtitleColor: Color = PT.txt3
     var value: String? = nil
     var valueColor: Color = PT.txt3
     var showChevron: Bool = false
     var toggle: Binding<Bool>? = nil
     var danger: Bool = false
     var action: (() -> Void)? = nil
+    var onRowTap: (() -> Void)? = nil
 
     var body: some View {
         if let action, toggle == nil {
@@ -63,6 +69,26 @@ struct SettingsRow: View {
     }
 
     private var rowContent: some View {
+        HStack(spacing: 13) {
+            labelContent
+            Spacer(minLength: 8)
+            accessoryView
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var labelContent: some View {
+        if let onRowTap {
+            Button(action: onRowTap) { labelStack }.buttonStyle(.plain)
+        } else {
+            labelStack
+        }
+    }
+
+    private var labelStack: some View {
         HStack(spacing: 13) {
             if let icon {
                 Image(systemName: icon)
@@ -80,15 +106,10 @@ struct SettingsRow: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 12))
-                        .foregroundStyle(PT.txt3)
+                        .foregroundStyle(subtitleColor)
                 }
             }
-            Spacer(minLength: 8)
-            accessoryView
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder

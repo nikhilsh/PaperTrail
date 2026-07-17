@@ -16,6 +16,14 @@ struct SoftAskSheet: View {
     /// is ready if you need it."
     let stakeText: String
     var timeLabel: String = "now"
+    /// Copy parameters, defaulted to the original N1 first-save copy —
+    /// `SoftAskCoordinator`'s call site never passes these, so its behavior
+    /// stays byte-for-byte identical. `NotificationPermissionGate` passes
+    /// per-`AskContext` copy (e.g. the monthly digest ask) through the same
+    /// sheet rather than duplicating the whole paper-card scaffolding.
+    var kicker: String = "BEFORE YOU PUT THIS AWAY"
+    var title: String = "May we leave a note?"
+    var bodyText: String = "One quiet heads-up before a warranty or return window closes. That's the only reason we'll ever knock. No marketing, ever."
     var onYes: () -> Void
     var onNotNow: () -> Void
 
@@ -24,16 +32,16 @@ struct SoftAskSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("BEFORE YOU PUT THIS AWAY")
+            Text(kicker)
                 .ptMonoLabel(10, tracking: 2.2)
                 .foregroundStyle(PT.goldDeep)
 
-            Text("May we leave a note?")
+            Text(title)
                 .font(PTFont.serif(27, weight: 600))
                 .foregroundStyle(PT.onPaper)
                 .padding(.top, 8)
 
-            Text("One quiet heads-up before a warranty or return window closes. That's the only reason we'll ever knock. No marketing, ever.")
+            Text(bodyText)
                 .font(.system(size: 14))
                 .foregroundStyle(PT.onPaper2)
                 .fixedSize(horizontal: false, vertical: true)

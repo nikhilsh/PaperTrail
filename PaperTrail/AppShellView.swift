@@ -162,6 +162,11 @@ private enum ForegroundRefreshCoordinator {
             // earlier because a scan/import cover was still up, otherwise
             // tries the one allowed re-ask. No-ops instantly otherwise.
             await SoftAskCoordinator.shared.retrySoftAsk(records: records)
+            // Graceful notification permission, item 6: detects a
+            // denied/undetermined → authorized transition (the user granted
+            // permission in Settings and came back) and re-arms every
+            // reminder type. No-ops instantly when status hasn't changed.
+            await NotificationPermissionGate.shared.reArmIfNeeded()
         }
     }
 }
@@ -219,6 +224,7 @@ struct AppShellView: View {
         .preferredColorScheme(.dark)
         .tint(PT.gold)
         .softAskPresentation()
+        .notificationPermissionPresentation()
         .overlay {
             // v3 §3 "five ways to shelve" paper sheet — same dim/rise
             // choreography as `SoftAskSheet`, but driven directly off

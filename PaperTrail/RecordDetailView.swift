@@ -40,6 +40,18 @@ struct RecordDetailView: View {
 
     // MARK: v3 recallWatch (docs/design-v3/V3_BRIEF.md §6, flagged + Plus)
     @State private var recallRowState: RecallWatcher.RowState?
+    /// Graceful notification permission, item 5: RecallWatcher has no
+    /// toggle of its own (its safety notification is cap-exempt and always
+    /// schedules), so the honest "off in Settings" line surfaces here, on
+    /// the row itself, instead. `let`, not `var` — same reasoning as
+    /// `ReminderSettings.shared` above: a `var` stored property with a
+    /// default value is included as a parameter in the struct's synthesized
+    /// memberwise init, so a `private var` here would drag that init's
+    /// access level down to `private` too, breaking
+    /// `RecordDetailView(record:)` construction from every other file. A
+    /// `private let` with a default is excluded from the init entirely.
+    private let notificationGate = NotificationPermissionGate.shared
+    private var recallNotificationsDenied: Bool { notificationGate.lastKnownAuthorizationStatus == .denied }
     /// True only while the artificial "Watching…" resolve hold (below) is
     /// actively running. The ellipsis animates ONLY during this window —
     /// `recallRowState == .checking` can also be a genuine, possibly
@@ -985,6 +997,9 @@ struct RecordDetailView: View {
                                 .foregroundStyle(PT.txt2)
                         }
                     }
+                    if recallNotificationsDenied {
+                        recallDeniedHint
+                    }
                 }
                 Spacer(minLength: 8)
             }
@@ -1014,6 +1029,9 @@ struct RecordDetailView: View {
                     Text("No recalls for this model · checked \(PTDate.dayMonthYear.string(from: checkedAt))")
                         .font(.system(size: 11.5))
                         .foregroundStyle(PT.txt2)
+                    if !isFixture, recallNotificationsDenied {
+                        recallDeniedHint
+                    }
                 }
                 Spacer(minLength: 8)
                 if !isFixture {
@@ -1054,6 +1072,17 @@ struct RecordDetailView: View {
             .buttonStyle(.plain)
             .transition(.opacity)
         }
+    }
+
+    /// Honest-states rule (graceful notification permission, item 5): the
+    /// recall row has no toggle to lie with, but its notification can
+    /// still silently fail to reach the user — this makes that visible and
+    /// gives a way back to the DENIED sheet.
+    private var recallDeniedHint: some View {
+        Text("Off in iOS Settings — recalls can't reach you")
+            .font(.system(size: 10.5))
+            .foregroundStyle(PT.amber)
+            .onTapGesture { notificationGate.presentDeniedDirectly(context: .recall) }
     }
 
     // MARK: Pass it on (docs/design-v3/V3_BRIEF.md §7)
