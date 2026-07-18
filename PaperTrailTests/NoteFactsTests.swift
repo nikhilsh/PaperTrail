@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import PaperTrail
 
 /// Notes carry extraction facts, never boilerplate — and user prose is
