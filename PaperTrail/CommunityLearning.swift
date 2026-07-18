@@ -109,7 +109,24 @@ final class CommunityLearning: @unchecked Sendable {
             cap: Self.syncBatchCap
         )
         let payloads = Self.payloads(from: corrections + confirmations, installID: Self.installID)
-        guard !payloads.isEmpty else { return }
+        guard !payloads.isEmpty else {
+            // A batch of only unuploadable entries (legacy log lines with no
+            // merchant key — community rows are keyed by merchant) must not
+            // wedge the queue: advance the markers past them so "Pending
+            // upload" tells the truth and future syncs start after them.
+            let skipped = corrections.count + confirmations.count
+            if skipped > 0 {
+                if let newest = corrections.map(\.timestamp.timeIntervalSince1970).max() {
+                    defaults.set(newest, forKey: Self.correctionsSyncedThroughKey)
+                }
+                if let newest = confirmations.map(\.timestamp.timeIntervalSince1970).max() {
+                    defaults.set(newest, forKey: Self.confirmationsSyncedThroughKey)
+                }
+                defaults.set("Skipped \(skipped) legacy entries (no merchant key)", forKey: Self.lastSyncSummaryKey)
+                AppLogger.info("Community sync: skipped \(skipped) legacy entries without a merchant key", category: "community")
+            }
+            return
+        }
 
         guard let body = try? JSONEncoder().encode(payloads),
               var request = Self.request(path: "rest/v1/correction_events", method: "POST") else { return }
@@ -155,16 +172,23 @@ final class CommunityLearning: @unchecked Sendable {
         )
     }
 
+    /// Entries that can actually ship — community rows are keyed by merchant,
+    /// so legacy log lines without one can never upload. Pure — unit-tested.
+    static func uploadable(_ entries: [CorrectionLogger.CorrectionEntry]) -> [CorrectionLogger.CorrectionEntry] {
+        entries.filter { !($0.merchant ?? "").isEmpty }
+    }
+
     /// How many locally-logged entries haven't reached the community yet —
-    /// surfaced in Advanced Diagnostics.
+    /// surfaced in Advanced Diagnostics. Counts only entries that CAN upload,
+    /// so unshippable legacy lines don't read as a stuck queue.
     static func pendingUploadCount() -> Int {
         let defaults = UserDefaults.standard
-        return pending(entries: CorrectionLogger.readAllCorrections(),
-                       after: defaults.double(forKey: correctionsSyncedThroughKey),
-                       cap: .max).count
-             + pending(entries: CorrectionLogger.readAllConfirmations(),
-                       after: defaults.double(forKey: confirmationsSyncedThroughKey),
-                       cap: .max).count
+        return uploadable(pending(entries: CorrectionLogger.readAllCorrections(),
+                                  after: defaults.double(forKey: correctionsSyncedThroughKey),
+                                  cap: .max)).count
+             + uploadable(pending(entries: CorrectionLogger.readAllConfirmations(),
+                                  after: defaults.double(forKey: confirmationsSyncedThroughKey),
+                                  cap: .max)).count
     }
 
     /// Build wire payloads from local entries: scrubbed, capped, anonymous.

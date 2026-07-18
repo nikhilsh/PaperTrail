@@ -45,6 +45,27 @@ struct CommunitySyncTests {
         #expect(pending.map(\.timestamp.timeIntervalSince1970) == [1, 2, 3])
     }
 
+    // MARK: uploadable()
+
+    @Test func uploadableDropsLegacyMerchantlessEntries() {
+        let entries = [
+            entry(at: 1, merchant: nil),      // pre-merchant-key log line
+            entry(at: 2, merchant: ""),       // empty key
+            entry(at: 3, merchant: "ikea"),
+        ]
+        let shippable = CommunityLearning.uploadable(entries)
+        #expect(shippable.map(\.timestamp.timeIntervalSince1970) == [3])
+    }
+
+    @Test func legacyEntriesProduceNoPayloadsButMustNotWedgeTheQueue() {
+        // The exact build-46 field bug: a backlog of only merchant-less
+        // entries yields zero payloads — sync must then advance markers
+        // (behavior in syncBacklog) and Diagnostics must not count them.
+        let legacy = [entry(at: 1, merchant: nil), entry(at: 2, merchant: nil)]
+        #expect(CommunityLearning.payloads(from: legacy, installID: "X").isEmpty)
+        #expect(CommunityLearning.uploadable(legacy).isEmpty)
+    }
+
     // MARK: confirmationEntries()
 
     private func structured(
