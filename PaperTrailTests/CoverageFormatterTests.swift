@@ -80,4 +80,35 @@ struct DisplayNameTests {
         #expect(ptGlyph(category: nil, productName: "Espresso machine") == "cup.and.saucer")
         #expect(ptGlyph(category: "Mystery", productName: "Unknowable") == "shippingbox")
     }
+
+    @Test func glyphKitchenHeatSplitsIntoThreeTiles() {
+        // One receipt often carries oven + hob + stove; identical tiles read
+        // as a copy-paste bug (Gain City receipt, build 47 feedback).
+        #expect(ptGlyph(category: "Appliance", productName: "Brandt Built In Oven 73L") == "oven")
+        #expect(ptGlyph(category: "Appliance", productName: "Brandt Induction Hob") == "cooktop")
+        #expect(ptGlyph(category: "Appliance", productName: "Brandt Gas HOB-1 Burner") == "cooktop")
+        #expect(ptGlyph(category: nil, productName: "Gas stove") == "stove")
+        #expect(ptGlyph(category: nil, productName: "Bosch Dishwasher") == "dishwasher")
+        // "Microwave oven" stays a microwave — the more specific word wins.
+        #expect(ptGlyph(category: nil, productName: "Samsung Microwave Oven") == "microwave")
+    }
+
+    @Test func keywordCategoryBeatsEmbeddingDrift() {
+        // The exact build-46 misfire: "STORAGE Heater" drifted to Home via
+        // the "storage box" exemplar. Keywords are deterministic.
+        #expect(CategoryClassifier.keywordCategory("RHEEM STORAGE HEATER 20L") == "Appliance")
+        #expect(CategoryClassifier.keywordCategory("Brandt Induction Hob") == "Appliance")
+        #expect(CategoryClassifier.keywordCategory("LG WASHER/DRYER - 10/6KG") == "Appliance")
+    }
+
+    @Test func keywordCategoryStaysOutWhenAmbiguousOrUnknown() {
+        // Two categories match ("coffee" Kitchen + "table" Furniture) →
+        // stand down and let embeddings decide.
+        #expect(CategoryClassifier.keywordCategory("Coffee table") == nil)
+        // "Nespresso" carries "espresso" — substring match is intended here.
+        #expect(CategoryClassifier.keywordCategory("Nespresso Vertuo") == "Kitchen")
+        // No keyword at all → nil (embedding fallback handles novelty).
+        #expect(CategoryClassifier.keywordCategory("Lego Star Wars set") == nil)
+        #expect(CategoryClassifier.keywordCategory("Gift voucher") == nil)
+    }
 }

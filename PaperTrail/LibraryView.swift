@@ -88,17 +88,18 @@ struct LibraryView: View {
     }
 
     /// Grouped by room for the "By room" view. Records with no room fall under
-    /// an "Unfiled" bucket sorted last — never forced to assign one.
+    /// a "No room" bucket sorted last — roomless is a legitimate resting state
+    /// (a phone or a pair of shoes lives nowhere), not unfinished filing.
     private var roomGroups: [(room: String, records: [PurchaseRecord])] {
         let grouped = Dictionary(grouping: activeRecords) { record -> String in
             let trimmed = record.room?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return (trimmed?.isEmpty ?? true) ? "Unfiled" : trimmed!
+            return (trimmed?.isEmpty ?? true) ? "No room" : trimmed!
         }
         return grouped
             .map { (room: $0.key, records: $0.value.sorted { $0.productName.localizedCompare($1.productName) == .orderedAscending }) }
             .sorted { lhs, rhs in
-                if lhs.room == "Unfiled" { return false }
-                if rhs.room == "Unfiled" { return true }
+                if lhs.room == "No room" { return false }
+                if rhs.room == "No room" { return true }
                 return lhs.room.localizedCompare(rhs.room) == .orderedAscending
             }
     }

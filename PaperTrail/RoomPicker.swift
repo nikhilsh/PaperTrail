@@ -15,6 +15,19 @@ struct RoomPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Menu {
+                // Roomless is a first-class choice, not a cleared mistake —
+                // plenty of items (phones, shoes, luggage) live nowhere.
+                Button {
+                    room = ""
+                    enteringCustom = false
+                } label: {
+                    if room.isEmpty {
+                        Label("No room", systemImage: "checkmark")
+                    } else {
+                        Text("No room")
+                    }
+                }
+                Divider()
                 ForEach(suggestions, id: \.self) { option in
                     Button {
                         room = option
@@ -34,17 +47,9 @@ struct RoomPicker: View {
                 } label: {
                     Label("Add custom room…", systemImage: "plus")
                 }
-                if !room.isEmpty {
-                    Button(role: .destructive) {
-                        room = ""
-                        enteringCustom = false
-                    } label: {
-                        Label("Clear", systemImage: "xmark")
-                    }
-                }
             } label: {
                 HStack {
-                    Text(room.isEmpty ? "Select room" : room)
+                    Text(room.isEmpty ? "No room" : room)
                         .foregroundStyle(room.isEmpty ? .secondary : .primary)
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
