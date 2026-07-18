@@ -33,6 +33,30 @@ extension View {
     }
 }
 
+// MARK: - Note fact chip
+
+/// One extraction fact from a record's notes ("ORDER NO  IV-2081") — see
+/// `NoteFacts`. Used by both detail views (owned and shared-in records).
+struct NoteFactChip: View {
+    let fact: NoteFacts.Fact
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(fact.label.uppercased())
+                .ptMonoLabel(8.5, tracking: 1.2)
+                .foregroundStyle(PT.txt3)
+            Text(fact.value)
+                .font(PTFont.mono(12, medium: true))
+                .foregroundStyle(PT.txt)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 11)
+        .background(Color(hex: 0xE7DCC4, alpha: 0.06), in: Capsule())
+        .overlay(Capsule().stroke(PT.hair, lineWidth: 1))
+    }
+}
+
 // MARK: - Dog-ear filing card
 
 /// A rounded rectangle with the top-right corner folded down — the icon motif

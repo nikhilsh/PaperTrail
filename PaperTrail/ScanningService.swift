@@ -85,7 +85,7 @@ struct ScanningService {
             suggestedCategory: bestCategory,
             suggestedWarrantyDurationMonths: bestWarrantyMonths,
             extractionSource: bestSource,
-            suggestedNotes: allText.isEmpty ? nil : "Extracted from scanned document.",
+            suggestedNotes: NoteFacts.composeNotes(from: bestStructuredResult),
             documentKind: bestDocumentKind,
             lineItems: bestLineItems,
             serialCandidate: SerialCandidateFilter.bestCandidate(from: allBarcodePayloads),
