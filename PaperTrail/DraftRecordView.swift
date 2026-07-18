@@ -242,7 +242,7 @@ struct DraftRecordView: View {
             .ignoresSafeArea()
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
-            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID)
+            ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID, ocrText: selected.ocrText)
         }
         .task {
             guard learningContext == nil, let structuredResult else { return }
@@ -264,7 +264,7 @@ struct DraftRecordView: View {
             HStack(spacing: 10) {
                 if let attachment = seededAttachments.first, let image = attachment.image {
                     Button {
-                        selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id)
+                        selectedImageFilename = SelectedFilename(attachment.localFilename, attachmentID: attachment.id, ocrText: attachment.ocrText)
                     } label: {
                         Image(uiImage: image)
                             .resizable()
@@ -567,6 +567,15 @@ struct DraftRecordView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            // Foreign-language receipts: offer on-device translation right at
+            // review time, where the user is correcting extracted fields
+            // (Flag.translate; the panel renders nothing when the flag is off
+            // or the receipt is already in the device language). The original
+            // OCR text is what gets saved — translation is display-only.
+            if let attachmentID = seededAttachments.first?.id {
+                ReceiptTranslationPanel(attachmentID: attachmentID, ocrText: ocr.recognizedText, embedded: true)
+            }
 
             if showRawText {
                 Text(ocr.recognizedText)

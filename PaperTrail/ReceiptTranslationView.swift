@@ -19,6 +19,11 @@ import Translation
 struct ReceiptTranslationPanel: View {
     let attachmentID: UUID
     let ocrText: String
+    /// When true the panel drops its own card chrome (material background,
+    /// hairline stroke, outer padding) so it can sit inside an existing card
+    /// — the Review screen's "Extracted text" card embeds it this way. The
+    /// default keeps the floating-card look used over `ImageViewerView`.
+    var embedded: Bool = false
 
     @State private var detected: ReceiptLanguageDetector.Result?
     @State private var isOffered = false
@@ -42,37 +47,45 @@ struct ReceiptTranslationPanel: View {
     var body: some View {
         Group {
             if isOffered {
-                VStack(alignment: .leading, spacing: 10) {
-                    if translatedText == nil {
-                        offerRow
-                    } else {
-                        toggleRow
-                        Text(mode == .original ? ocrText : (translatedText ?? ""))
-                            .font(PTFont.mono(11))
-                            .foregroundStyle(PT.txt2)
-                            .textSelection(.enabled)
-                            .lineLimit(8)
-                    }
-                    if let errorMessage {
-                        HStack(spacing: 5) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 10))
-                            Text(errorMessage)
-                                .font(PTFont.mono(9.5))
-                        }
-                        .foregroundStyle(PT.amber)
-                    }
+                if embedded {
+                    panelContent
+                } else {
+                    panelContent
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
+                        .padding(.horizontal, 16)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
-                .padding(.horizontal, 16)
             }
         }
         .task { await evaluateOffer() }
         .translationTask(translationConfig) { session in
             await runTranslation(session: session)
+        }
+    }
+
+    private var panelContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if translatedText == nil {
+                offerRow
+            } else {
+                toggleRow
+                Text(mode == .original ? ocrText : (translatedText ?? ""))
+                    .font(PTFont.mono(11))
+                    .foregroundStyle(PT.txt2)
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+            }
+            if let errorMessage {
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 10))
+                    Text(errorMessage)
+                        .font(PTFont.mono(9.5))
+                }
+                .foregroundStyle(PT.amber)
+            }
         }
     }
 
