@@ -426,15 +426,28 @@ struct ExtractionPipeline: Sendable {
         return false
     }
 
-    /// When no category was extracted, suggest one from the product name via
-    /// on-device embeddings. Low confidence — surfaced as a hint, not a fact.
+    /// Category refinement, in two tiers:
+    /// 1. An unambiguous keyword in the product name overrides whatever was
+    ///    extracted — deterministic beats fuzzy ("Rheem STORAGE Heater" is an
+    ///    Appliance no matter how the model or the embeddings drift).
+    /// 2. Otherwise, when nothing was extracted, suggest via on-device
+    ///    embeddings. Low confidence — surfaced as a hint, not a fact.
     private func applyCategoryFallback(
         to result: StructuredExtractionResult
     ) -> StructuredExtractionResult {
-        guard result.category.value == nil else { return result }
         let basis = result.productName.value
             ?? result.lineItems.first(where: { $0.kind.isRecordWorthy })?.name
-        guard let basis, let category = CategoryClassifier.classify(basis) else { return result }
+        guard let basis else { return result }
+
+        if let keyword = CategoryClassifier.keywordCategory(basis) {
+            guard result.category.value != keyword else { return result }
+            var out = result
+            out.category = ExtractedField(value: keyword, confidence: .medium)
+            return out
+        }
+
+        guard result.category.value == nil,
+              let category = CategoryClassifier.classify(basis) else { return result }
         var out = result
         out.category = ExtractedField(value: category, confidence: .low)
         return out

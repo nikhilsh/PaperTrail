@@ -791,6 +791,18 @@ struct DraftRecordView: View {
 
     // MARK: - Save
 
+    /// Category for a non-primary line-item record: the item's own extracted
+    /// category, else its name's unambiguous keyword, else the embedding
+    /// suggestion — and only as a last resort the primary record's category
+    /// (a hob shouldn't inherit "Electronics" because the first item did).
+    private func additionalItemCategory(for item: LineItem) -> String? {
+        if let own = item.category, !own.isEmpty { return own }
+        let name = editedName(for: item)
+        return CategoryClassifier.keywordCategory(name)
+            ?? CategoryClassifier.classify(name)
+            ?? (category.isEmpty ? nil : category)
+    }
+
     private func saveRecord() {
         let parsedAmount = Double(amountText.replacingOccurrences(of: ",", with: ""))
         let parsedTags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -876,7 +888,7 @@ struct DraftRecordView: View {
             for (index, item) in recordWorthySelected.enumerated() {
                 records.append(index == 0
                     ? makeRecord(productName: productName, amount: parsedAmount, category: category, serialNumber: finalSerialNumber)
-                    : makeRecord(productName: editedName(for: item), amount: editedAmount(for: item), category: item.category ?? category))
+                    : makeRecord(productName: editedName(for: item), amount: editedAmount(for: item), category: additionalItemCategory(for: item)))
             }
         } else {
             records.append(makeRecord(productName: productName, amount: parsedAmount, category: category, serialNumber: finalSerialNumber))

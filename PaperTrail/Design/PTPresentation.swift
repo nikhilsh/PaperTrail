@@ -15,6 +15,8 @@ func ptGlyph(category: String?, productName: String = "") -> String {
     case has(["tablet", "ipad"]): return "ipad"
     case has(["watch", "wearable"]): return "applewatch"
     case has(["fridge", "refriger", "freezer"]): return "refrigerator"
+    // Dishwasher before the laundry words — "dishWASHer" must not match "wash".
+    case has(["dishwasher"]): return "dishwasher"
     case has(["wash", "dryer", "laundry"]): return "washer"
     case has(["speaker", "soundbar", "audio", "hifi", "headphone", "earbud", "airpod"]): return "hifispeaker"
     // Heaters/climate before the kitchen keywords — a "Kitchen appliance"
@@ -23,7 +25,11 @@ func ptGlyph(category: String?, productName: String = "") -> String {
     case has(["heater", "geyser", "boiler"]): return "heater.vertical"
     case has(["aircon", "air con", "hvac", "climate", "air purifier"]): return "air.conditioner.horizontal"
     case has(["microwave"]): return "microwave"
-    case has(["cook", "stove", "oven", "hob", "cooktop", "range"]): return "cooktop"
+    // Kitchen heat gets three distinct glyphs — one receipt often carries an
+    // oven AND a hob, and identical tiles read as a copy-paste bug.
+    case has(["oven"]): return "oven"
+    case has(["stove", "range"]): return "stove"
+    case has(["cook", "hob", "cooktop", "induction"]): return "cooktop"
     case has(["coffee", "espresso", "kettle", "blender", "mixer"]): return "cup.and.saucer"
     case has(["camera", "lens", "gopro"]): return "camera"
     case has(["console", "playstation", "xbox", "nintendo", "game"]): return "gamecontroller"

@@ -43,6 +43,41 @@ enum CategoryClassifier {
         return result
     }()
 
+    /// Deterministic word → category table, checked before any fuzzy matching.
+    /// Embeddings mislead on brand-y compound names ("Rheem STORAGE Heater"
+    /// drifts toward Home's "storage box"); an unambiguous keyword is
+    /// near-certain for this taxonomy, so it wins over both the embedding
+    /// fallback and a fuzzy model guess.
+    static let categoryKeywords: [String: [String]] = [
+        "Appliance": ["heater", "geyser", "boiler", "fridge", "refriger", "freezer",
+                      "washer", "washing machine", "dryer", "dishwasher", "microwave",
+                      "oven", "hob", "cooktop", "stove", "aircon", "air condition", "vacuum"],
+        "Electronics": ["laptop", "macbook", "iphone", "smartphone", "tablet", "ipad",
+                        "televis", " tv", "tv ", "monitor", "camera", "console", "router",
+                        "speaker", "soundbar", "headphone", "earbud"],
+        "Kitchen": ["kettle", "blender", "toaster", "air fryer", "airfryer",
+                    "rice cooker", "coffee", "espresso"],
+        "Furniture": ["sofa", "couch", "chair", "desk", "table", "mattress",
+                      "wardrobe", "bookshelf"],
+        "Sports": ["bicycle", "treadmill", "dumbbell", "racket", "yoga"],
+        "Clothing": ["shirt", "jacket", "sneaker", "shoes", "trousers", "handbag"],
+        "Home": ["lamp", "curtain", "bedsheet", "linen"],
+    ]
+
+    /// The category whose keyword list matches `text` — but only when exactly
+    /// one category matches. "Coffee table" hits Kitchen AND Furniture →
+    /// ambiguous → nil, and the embedding path decides instead.
+    static func keywordCategory(_ text: String) -> String? {
+        let hay = " " + text.lowercased() + " "
+        var matched: String?
+        for (category, words) in categoryKeywords {
+            guard words.contains(where: { hay.contains($0) }) else { continue }
+            if matched != nil { return nil }
+            matched = category
+        }
+        return matched
+    }
+
     /// Suggest a category for a product/description, or `nil` if no exemplar set
     /// is similar enough (or embeddings are unavailable).
     ///
