@@ -182,3 +182,37 @@ must be anonymized (names/addresses/phones) before committing — see
 and limited to the Tier-1/Tier-2 columns above — correction *values* never
 leave the device except as an explicit, separately-consented data donation
 for adapter training.
+
+## 2026-07 status: why the tables were empty, and the fix (build 46)
+
+A full audit (live DB + Sentry logs + shipped-IPA inspection) found the
+backend healthy but **zero upload attempts ever made**. Root cause was the
+delivery model, not configuration:
+
+- `contribute()` only fired at the moment of first save. Corrections made
+  **before** the user opted in were never retried — and both test devices
+  opted in ~2026-07-15, after most of their real corrections.
+- Post-save edits (EditRecordView) never logged corrections at all.
+- Upload failures were info-level only — invisible.
+- Correction-only signal is too rare for `>= 3 distinct installs` to ever
+  agree with a small user base.
+
+Build 46 (PR #133) restructured delivery: the local JSONL files are now the
+upload queue, drained past a per-stream high-water mark at launch/save/opt-in
+(so late opt-in contributes full history); saves also log `confirmed-*`
+events for kept merchant/currency/category values (majority signal on nearly
+every save); post-save edits log `postSaveEdit` corrections; failures warn to
+Sentry; Advanced Diagnostics shows pending/last-sync.
+
+### Training activation path (item 8 groundwork)
+
+`train-category-classifier.yml` (manual dispatch, macOS runner) exports the
+corpus via `tools/build_category_corpus.py` and trains an `MLTextClassifier`
+(`tools/train_category_classifier.swift`) — merchant + product + document
+kind → category. It no-ops politely until (1) a `SUPABASE_SERVICE_ROLE_KEY`
+repo secret exists (anon key can't read raw events by design) and (2) the
+corpus reaches 200 category examples. The `.mlmodel` + metrics land as a
+workflow artifact; bundling into the app (as a lane above the NLEmbedding
+nearest-neighbor in `CategoryClassifier.swift`) is a separate, deliberate
+step once test accuracy clears ~85%. LoRA/FM adapters stay deferred — same
+verdict as item 8.
