@@ -218,8 +218,15 @@ struct AppShellView: View {
                     }
                 }
             )
+            // Stay anchored to the screen bottom when the keyboard rises —
+            // without this the shell's shrinking safe area shoves the whole
+            // tab bar up above the keyboard, over whatever screen is editing.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .background(PT.inkCanvas.ignoresSafeArea())
+        // App-wide swipe-down-to-dismiss for the keyboard; environment value,
+        // so it reaches every ScrollView in tabs, pushes, and sheets.
+        .scrollDismissesKeyboard(.interactively)
         .environment(router)
         .preferredColorScheme(.dark)
         .tint(PT.gold)
