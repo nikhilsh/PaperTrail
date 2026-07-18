@@ -1,0 +1,59 @@
+# Train the community category classifier from correction_events.
+#
+# Manual-dispatch only — this is the deferred "real ML" leg of
+# docs/LEARNING_IMPROVEMENTS.md. It no-ops politely until:
+#   1. the SUPABASE_SERVICE_ROLE_KEY repo secret exists (the anon key can't
+#      read correction_events — RLS is INSERT-only by design), and
+#   2. the corpus has >= 200 category examples.
+# The trained .mlmodel + metrics land as a workflow artifact; bundling the
+# model into the app is a separate, deliberate step once accuracy clears
+# the bar.
+
+name: train-category-classifier
+
+on:
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check prerequisites
+        id: prereq
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::notice::SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_URL) secret not set — nothing to train from. Add the service-role key as a repo secret to enable this workflow."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build corpus
+        id: corpus
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          python3 tools/build_category_corpus.py corpus.csv
+          if [ -f corpus.csv ]; then
+            echo "trainable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Corpus below the training threshold — see log for counts."
+            echo "trainable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Train (Create ML)
+        if: steps.corpus.outputs.trainable == 'true'
+        run: swift tools/train_category_classifier.swift corpus.csv model-out
+
+      - name: Upload model + metrics
+        if: steps.corpus.outputs.trainable == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: category-classifier
+          path: model-out/
+          retention-days: 90
