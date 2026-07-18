@@ -273,6 +273,9 @@ struct PaperTrailApp: App {
                         HouseholdMirrorCoordinator.shared.start()
                     }
                     await CommunityLearning.shared.refreshCommunityHints()
+                    // Drain any corrections/confirmations logged before the
+                    // last sync (or before the user opted in at all).
+                    await CommunityLearning.shared.syncBacklog()
                     CorrectionLogger.onLearningFeedback = { payload in
                         Task { @MainActor in
                             let service = MerchantLearningService(modelContext: modelContainer.mainContext)

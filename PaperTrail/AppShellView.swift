@@ -181,6 +181,7 @@ struct AppShellView: View {
     @AppStorage("community.consentPrompted") private var communityConsentPrompted = false
     @AppStorage(CommunityLearning.optOutKey) private var communityLearningEnabled = false
     @State private var showLearningConsent = false
+    @State private var showContextualLearningConsent = false
 
     var body: some View {
         @Bindable var router = router
@@ -313,10 +314,16 @@ struct AppShellView: View {
             // `showCapture` itself stays true until the user closes Capture,
             // well past `SoftAskCoordinator`'s save-time attempt. Catch it
             // here instead, the moment Capture actually closes.
-            if wasShowing, !isShowing { retrySoftAskIfNeeded() }
+            if wasShowing, !isShowing {
+                retrySoftAskIfNeeded()
+                maybeShowContextualLearningConsent()
+            }
         }
         .onChange(of: router.pendingImportPayload) { wasPresented, isPresented in
-            if wasPresented != nil, isPresented == nil { retrySoftAskIfNeeded() }
+            if wasPresented != nil, isPresented == nil {
+                retrySoftAskIfNeeded()
+                maybeShowContextualLearningConsent()
+            }
         }
         .onChange(of: showLearningConsent) { _, isShowing in
             // This app-root alert is a presenter `hasActiveCover`'s named
@@ -324,17 +331,58 @@ struct AppShellView: View {
             // soft-ask can't rise underneath/behind it either.
             router.isPresentingAnySheet = isShowing
         }
+        .onChange(of: showContextualLearningConsent) { _, isShowing in
+            router.isPresentingAnySheet = isShowing
+        }
         .alert("Help improve extraction?", isPresented: $showLearningConsent) {
             Button("Share anonymously") {
                 communityLearningEnabled = true
                 communityConsentPrompted = true
+                AppLogger.info("Community consent accepted (launch prompt)", category: "community")
+                CommunityLearning.shared.scheduleSync()
             }
             Button("Not now", role: .cancel) {
                 communityConsentPrompted = true
+                AppLogger.info("Community consent declined (launch prompt)", category: "community")
             }
         } message: {
             Text("When you correct a scanned field, PaperTrail can share that correction anonymously (no account, no identifiers, a random install ID only) to improve extraction for everyone. You can change this anytime in Settings.")
         }
+        .alert("Share that fix anonymously?", isPresented: $showContextualLearningConsent) {
+            Button("Share anonymously") {
+                communityLearningEnabled = true
+                UserDefaults.standard.set(true, forKey: CommunityLearning.contextualAskShownKey)
+                AppLogger.info("Community consent accepted (contextual prompt)", category: "community")
+                CommunityLearning.shared.scheduleSync()
+            }
+            Button("Not now", role: .cancel) {
+                UserDefaults.standard.set(true, forKey: CommunityLearning.contextualAskShownKey)
+                AppLogger.info("Community consent declined (contextual prompt)", category: "community")
+            }
+        } message: {
+            Text("Fixes like the one you just made can improve extraction for everyone — shared anonymously, with no account or identifiers. You can change this anytime in Settings.")
+        }
+    }
+
+    /// One-time second-chance consent, shown right after a save that produced
+    /// shareable extraction signal (DraftRecordView sets the pending flag).
+    /// Fires from the same cover-close moments as the soft-ask retry so it
+    /// never collides with a full-screen presenter.
+    private func maybeShowContextualLearningConsent() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: CommunityLearning.pendingContextualAskKey) else { return }
+        // Moot (already opted in / already asked / unconfigured): clear and drop.
+        guard CommunityLearning.isConfigured,
+              !CommunityLearning.isEnabled,
+              !defaults.bool(forKey: CommunityLearning.contextualAskShownKey) else {
+            defaults.set(false, forKey: CommunityLearning.pendingContextualAskKey)
+            return
+        }
+        // Blocked by another presenter: keep the flag queued for the next
+        // cover-close instead of losing the one-time ask.
+        guard !showLearningConsent, !router.isPresentingAnySheet else { return }
+        defaults.set(false, forKey: CommunityLearning.pendingContextualAskKey)
+        showContextualLearningConsent = true
     }
 
     // MARK: Soft-ask (N1)
