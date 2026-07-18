@@ -22,16 +22,31 @@ import Synchronization
 ///   immediately.
 /// - The whole pipeline is dormant until `BuildSecrets.supabaseURL` is
 ///   configured (CI injects it like the Sentry DSN).
+///
+/// Delivery model: the local corrections/confirmations JSONL files are the
+/// upload queue. `syncBacklog()` uploads everything newer than a per-stream
+/// high-water mark and only advances the mark on HTTP success — so failed
+/// uploads retry next launch, and opting in late contributes the full local
+/// history, not just future saves.
 final class CommunityLearning: @unchecked Sendable {
 
     static let shared = CommunityLearning()
 
     static let optOutKey = "community.learningEnabled"
+    static let contextualAskShownKey = "community.contextualAskShown"
+    static let pendingContextualAskKey = "community.pendingContextualAsk"
+    static let lastSyncSummaryKey = "community.lastSyncSummary"
+    static let correctionsSyncedThroughKey = "community.syncedThroughCorrections"
+    static let confirmationsSyncedThroughKey = "community.syncedThroughConfirmations"
     private static let installIDKey = "community.installID"
     private static let cacheFilename = "community_hints.json"
+    /// Upload at most this many entries per stream per sync — a backstop for
+    /// pathological local logs; the remainder drains on subsequent syncs.
+    static let syncBatchCap = 300
 
     private let session: URLSession
     private let hintsByMerchant = Mutex([String: CommunityMerchantHint]())
+    private let syncInFlight = Mutex(false)
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -60,25 +75,96 @@ final class CommunityLearning: @unchecked Sendable {
 
     // MARK: - Contribution (device → database)
 
-    /// Fire-and-forget upload of anonymized correction events. Called from the
-    /// save flow right after corrections are logged locally.
-    func contribute(entries: [CorrectionLogger.CorrectionEntry]) {
-        guard Self.isConfigured, Self.isEnabled, !entries.isEmpty else { return }
-        let payloads = Self.payloads(from: entries, installID: Self.installID)
-        guard !payloads.isEmpty,
-              let body = try? JSONEncoder().encode(payloads),
+    /// Fire-and-forget trigger for `syncBacklog()` — call sites that can't
+    /// await (save flows) use this.
+    func scheduleSync() {
+        Task { await self.syncBacklog() }
+    }
+
+    /// Upload every locally-logged correction/confirmation newer than the
+    /// last successful sync. The local JSONL files ARE the queue: nothing is
+    /// lost to a flaky network (retried next launch), and a user who opts in
+    /// months after their corrections were logged still contributes them all
+    /// (the markers start at zero). Runs at launch, on save, and when the
+    /// sharing toggle turns on.
+    func syncBacklog() async {
+        guard Self.isConfigured, Self.isEnabled else { return }
+        let alreadyRunning = syncInFlight.withLock { inFlight -> Bool in
+            if inFlight { return true }
+            inFlight = true
+            return false
+        }
+        guard !alreadyRunning else { return }
+        defer { syncInFlight.withLock { $0 = false } }
+
+        let defaults = UserDefaults.standard
+        let corrections = Self.pending(
+            entries: CorrectionLogger.readAllCorrections(),
+            after: defaults.double(forKey: Self.correctionsSyncedThroughKey),
+            cap: Self.syncBatchCap
+        )
+        let confirmations = Self.pending(
+            entries: CorrectionLogger.readAllConfirmations(),
+            after: defaults.double(forKey: Self.confirmationsSyncedThroughKey),
+            cap: Self.syncBatchCap
+        )
+        let payloads = Self.payloads(from: corrections + confirmations, installID: Self.installID)
+        guard !payloads.isEmpty else { return }
+
+        guard let body = try? JSONEncoder().encode(payloads),
               var request = Self.request(path: "rest/v1/correction_events", method: "POST") else { return }
         request.httpBody = body
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
 
-        let task = session.dataTask(with: request) { _, response, error in
-            if let error {
-                AppLogger.info("Community contribution failed: \(error.localizedDescription)", category: "community")
-            } else if let http = response as? HTTPURLResponse, http.statusCode >= 300 {
-                AppLogger.info("Community contribution rejected: HTTP \(http.statusCode)", category: "community")
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 300 {
+                AppLogger.warn("Community sync rejected: HTTP \(http.statusCode)", category: "community")
+                defaults.set("Rejected: HTTP \(http.statusCode)", forKey: Self.lastSyncSummaryKey)
+                return
             }
+            // Success — advance each stream's high-water mark to the newest
+            // entry that was actually in this batch.
+            if let newest = corrections.map(\.timestamp.timeIntervalSince1970).max() {
+                defaults.set(newest, forKey: Self.correctionsSyncedThroughKey)
+            }
+            if let newest = confirmations.map(\.timestamp.timeIntervalSince1970).max() {
+                defaults.set(newest, forKey: Self.confirmationsSyncedThroughKey)
+            }
+            defaults.set("Uploaded \(corrections.count) corrections · \(confirmations.count) confirmations", forKey: Self.lastSyncSummaryKey)
+            AppLogger.info("Community sync: uploaded \(corrections.count) corrections, \(confirmations.count) confirmations", category: "community")
+        } catch {
+            AppLogger.warn("Community sync failed: \(error.localizedDescription)", category: "community")
+            defaults.set("Failed: \(error.localizedDescription)", forKey: Self.lastSyncSummaryKey)
         }
-        task.resume()
+    }
+
+    /// Entries strictly newer than the marker, oldest first, capped so the
+    /// marker only ever advances over what was actually uploaded. Pure —
+    /// unit-tested directly.
+    static func pending(
+        entries: [CorrectionLogger.CorrectionEntry],
+        after syncedThrough: TimeInterval,
+        cap: Int
+    ) -> [CorrectionLogger.CorrectionEntry] {
+        Array(
+            entries
+                .filter { $0.timestamp.timeIntervalSince1970 > syncedThrough }
+                .sorted { $0.timestamp < $1.timestamp }
+                .prefix(cap)
+        )
+    }
+
+    /// How many locally-logged entries haven't reached the community yet —
+    /// surfaced in Advanced Diagnostics.
+    static func pendingUploadCount() -> Int {
+        let defaults = UserDefaults.standard
+        return pending(entries: CorrectionLogger.readAllCorrections(),
+                       after: defaults.double(forKey: correctionsSyncedThroughKey),
+                       cap: .max).count
+             + pending(entries: CorrectionLogger.readAllConfirmations(),
+                       after: defaults.double(forKey: confirmationsSyncedThroughKey),
+                       cap: .max).count
     }
 
     /// Build wire payloads from local entries: scrubbed, capped, anonymous.

@@ -282,6 +282,26 @@ struct EditRecordView: View {
     }
 
     private func saveEdits() {
+        // Post-save fixes are corrections too — capture the pre-edit values
+        // before mutating the record, and log any community-relevant diffs.
+        let before = CorrectionLogger.RecordSnapshot(
+            productName: record.productName,
+            merchantName: record.merchantName ?? "",
+            purchaseDate: record.purchaseDate ?? purchaseDate,
+            amount: record.amount,
+            currency: record.currency ?? "",
+            category: record.category ?? ""
+        )
+        let after = CorrectionLogger.RecordSnapshot(
+            productName: productName,
+            merchantName: merchantName,
+            purchaseDate: purchaseDate,
+            amount: Double(amountText.replacingOccurrences(of: ",", with: "")),
+            currency: currency,
+            category: category
+        )
+        CorrectionLogger.logPostSaveEdits(before: before, after: after)
+
         record.productName = productName
         record.merchantName = merchantName.isEmpty ? nil : merchantName
         record.purchaseDate = purchaseDate

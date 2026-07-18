@@ -19,6 +19,16 @@ struct AdvancedDiagnosticsView: View {
 
     @State private var copied = false
     @State private var correctionHealth = CorrectionLogger.CorrectionHealth()
+    @State private var communityPendingCount = 0
+
+    private var communityStatus: String {
+        guard CommunityLearning.isConfigured else { return "Not configured" }
+        return CommunityLearning.isEnabled ? "On" : "Off"
+    }
+
+    private var communityLastSync: String? {
+        UserDefaults.standard.string(forKey: CommunityLearning.lastSyncSummaryKey)
+    }
 
     private var totalImageSize: String {
         let totalBytes = attachments.reduce(into: 0) { total, attachment in
@@ -146,6 +156,16 @@ struct AdvancedDiagnosticsView: View {
                         SettingsRowDivider()
                         SettingsRow(title: "Most corrected field", value: field)
                     }
+                    SettingsRowDivider()
+                    SettingsRow(title: "Community sharing", value: communityStatus)
+                    if CommunityLearning.isConfigured, CommunityLearning.isEnabled {
+                        SettingsRowDivider()
+                        SettingsRow(title: "Pending upload", value: "\(communityPendingCount)")
+                        if let summary = communityLastSync {
+                            SettingsRowDivider()
+                            SettingsRow(title: "Last community sync", value: summary)
+                        }
+                    }
                 }
 
                 // Observability
@@ -199,6 +219,7 @@ struct AdvancedDiagnosticsView: View {
         .task {
             // File IO off the render path — counts only, never values.
             correctionHealth = CorrectionLogger.healthSummary()
+            communityPendingCount = CommunityLearning.pendingUploadCount()
         }
         .navigationBarBackButtonHidden()
         .toolbar {
@@ -251,6 +272,11 @@ struct AdvancedDiagnosticsView: View {
         lines.append("Corrections logged: \(correctionHealth.totalCorrections) (\(correctionHealth.last30Days) last 30 days)")
         if let field = correctionHealth.mostCorrectedField {
             lines.append("Most corrected field: \(field)")
+        }
+        lines.append("Community sharing: \(communityStatus)")
+        lines.append("Community pending upload: \(communityPendingCount)")
+        if let summary = communityLastSync {
+            lines.append("Last community sync: \(summary)")
         }
         lines.append("")
         lines.append("[Observability]")
