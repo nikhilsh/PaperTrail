@@ -49,6 +49,12 @@ struct YourDataSettingsView: View {
             .padding(.bottom, 120)
         }
         .ptScreen()
+        .onChange(of: communityLearningEnabled) { _, isOn in
+            AppLogger.info("Community sharing toggled \(isOn ? "on" : "off") in Settings", category: "community")
+            // Opting in uploads the whole local backlog — including
+            // corrections logged long before consent.
+            if isOn { CommunityLearning.shared.scheduleSync() }
+        }
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

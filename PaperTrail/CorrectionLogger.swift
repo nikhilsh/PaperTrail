@@ -185,12 +185,142 @@ enum CorrectionLogger {
 
         // Write corrections
         for entry in corrections {
-            writeEntry(entry)
+            writeEntry(entry, to: logFileURL)
         }
 
-        // Community learning (opt-out, anonymized): share the same events with
-        // the majority-learning backend. No-op when unconfigured or opted out.
-        CommunityLearning.shared.contribute(entries: corrections)
+        // Community learning (opt-in, anonymized): drain everything logged
+        // locally that hasn't been uploaded yet. No-op when unconfigured or
+        // not opted in — the local JSONL keeps queueing either way.
+        CommunityLearning.shared.scheduleSync()
+    }
+
+    // MARK: - Confirmations (device → community only)
+
+    /// Log "extraction got it right" events for the community-aggregated
+    /// fields. Confirmations are majority-vote signal exactly like corrections
+    /// (`mode()` over corrected_value doesn't care that original == corrected)
+    /// and fire on nearly every save, so the ≥3-install bar is reachable with
+    /// a small user base. Kept in their OWN file: they must never pollute
+    /// few-shot prompts or the Diagnostics correction counts.
+    static func logConfirmations(
+        structured: StructuredExtractionResult?,
+        finalMerchantName: String,
+        finalCurrency: String,
+        finalCategory: String
+    ) {
+        let entries = confirmationEntries(
+            structured: structured,
+            finalMerchantName: finalMerchantName,
+            finalCurrency: finalCurrency,
+            finalCategory: finalCategory
+        )
+        for entry in entries {
+            writeEntry(entry, to: confirmationsFileURL, alsoOSLog: false)
+        }
+    }
+
+    /// Pure builder — unit-tested directly. A field is confirmed when
+    /// extraction produced a non-empty value and the user kept it verbatim.
+    static func confirmationEntries(
+        structured: StructuredExtractionResult?,
+        finalMerchantName: String,
+        finalCurrency: String,
+        finalCategory: String,
+        now: Date = .now
+    ) -> [CorrectionEntry] {
+        guard let structured else { return [] }
+        let merchantKey = MerchantLearningService.normalizeMerchantName(finalMerchantName)
+        guard !merchantKey.isEmpty else { return [] }
+        let kind = (structured.documentKind.value ?? .unknown).rawValue
+
+        var entries: [CorrectionEntry] = []
+        func confirm(_ fieldName: String, extracted: String?, final: String, confidence: String) {
+            guard let extracted, !extracted.isEmpty, extracted == final else { return }
+            entries.append(CorrectionEntry(
+                timestamp: now,
+                fieldName: fieldName,
+                originalValue: extracted,
+                correctedValue: extracted,
+                source: "confirmed-" + structured.source.rawValue,
+                confidence: confidence,
+                documentKind: kind,
+                merchant: merchantKey
+            ))
+        }
+        confirm("merchantName", extracted: structured.merchantName.value, final: finalMerchantName,
+                confidence: structured.merchantName.confidence.rawValue)
+        confirm("currency", extracted: structured.currency.value, final: finalCurrency,
+                confidence: structured.currency.confidence.rawValue)
+        confirm("category", extracted: structured.category.value, final: finalCategory,
+                confidence: structured.category.confidence.rawValue)
+        return entries
+    }
+
+    // MARK: - Post-save edits
+
+    /// The community-relevant field values of a record before an edit —
+    /// captured by EditRecordView before it mutates the record.
+    struct RecordSnapshot: Sendable {
+        var productName: String
+        var merchantName: String
+        var purchaseDate: Date
+        var amount: Double?
+        var currency: String
+        var category: String
+    }
+
+    /// Log corrections made AFTER the initial save (Edit Record). The original
+    /// extraction is long gone, so source/confidence say so — but "the value I
+    /// first accepted was wrong" is the same majority-vote signal, and this is
+    /// where many real-world fixes actually happen.
+    static func logPostSaveEdits(before: RecordSnapshot, after: RecordSnapshot) {
+        let entries = postSaveEditEntries(before: before, after: after)
+        guard !entries.isEmpty else { return }
+        for entry in entries {
+            writeEntry(entry, to: logFileURL)
+        }
+        CommunityLearning.shared.scheduleSync()
+    }
+
+    /// Pure builder — unit-tested directly. Mirrors `logCorrections`' rules:
+    /// non-empty → different non-empty only, same-day dates and sub-cent
+    /// amount changes don't count.
+    static func postSaveEditEntries(
+        before: RecordSnapshot,
+        after: RecordSnapshot,
+        now: Date = .now
+    ) -> [CorrectionEntry] {
+        let merchantKey: String? = {
+            let normalized = MerchantLearningService.normalizeMerchantName(after.merchantName)
+            return normalized.isEmpty ? nil : normalized
+        }()
+        var entries: [CorrectionEntry] = []
+        func edited(_ fieldName: String, original: String, corrected: String) {
+            guard !original.isEmpty, !corrected.isEmpty, original != corrected else { return }
+            entries.append(CorrectionEntry(
+                timestamp: now,
+                fieldName: fieldName,
+                originalValue: original,
+                correctedValue: corrected,
+                source: "postSaveEdit",
+                confidence: "unknown",
+                documentKind: "unknown",
+                merchant: merchantKey
+            ))
+        }
+        edited("productName", original: before.productName, corrected: after.productName)
+        edited("merchantName", original: before.merchantName, corrected: after.merchantName)
+        edited("currency", original: before.currency, corrected: after.currency)
+        edited("category", original: before.category, corrected: after.category)
+        if !Calendar.current.isDate(before.purchaseDate, inSameDayAs: after.purchaseDate) {
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withFullDate]
+            edited("purchaseDate", original: fmt.string(from: before.purchaseDate), corrected: fmt.string(from: after.purchaseDate))
+        }
+        if let old = before.amount, let new = after.amount, abs(old - new) > 0.01 {
+            edited("amount", original: String(format: "%.2f", old), corrected: String(format: "%.2f", new))
+        }
+        return entries
     }
 
     // MARK: - Storage
@@ -206,9 +336,16 @@ enum CorrectionLogger {
         return docs.appendingPathComponent("extraction_corrections.jsonl")
     }
 
-    private static func writeEntry(_ entry: CorrectionEntry) {
+    private static var confirmationsFileURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("extraction_confirmations.jsonl")
+    }
+
+    private static func writeEntry(_ entry: CorrectionEntry, to url: URL, alsoOSLog: Bool = true) {
         // Log to os_log for real-time debugging
-        logger.info("Correction: \(entry.fieldName) '\(entry.originalValue)' → '\(entry.correctedValue)' [\(entry.confidence)/\(entry.source)] kind=\(entry.documentKind)")
+        if alsoOSLog {
+            logger.info("Correction: \(entry.fieldName) '\(entry.originalValue)' → '\(entry.correctedValue)' [\(entry.confidence)/\(entry.source)] kind=\(entry.documentKind)")
+        }
 
         // Append to JSONL file
         do {
@@ -216,7 +353,6 @@ enum CorrectionLogger {
             guard var line = String(data: data, encoding: .utf8) else { return }
             line.append("\n")
 
-            let url = logFileURL
             if FileManager.default.fileExists(atPath: url.path) {
                 let handle = try FileHandle(forWritingTo: url)
                 handle.seekToEndOfFile()
@@ -282,7 +418,15 @@ enum CorrectionLogger {
 
     /// Read all logged corrections (for debugging / future analytics).
     static func readAllCorrections() -> [CorrectionEntry] {
-        let url = logFileURL
+        readEntries(from: logFileURL)
+    }
+
+    /// Read all logged confirmations (community upload queue only).
+    static func readAllConfirmations() -> [CorrectionEntry] {
+        readEntries(from: confirmationsFileURL)
+    }
+
+    private static func readEntries(from url: URL) -> [CorrectionEntry] {
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
 
         let decoder = JSONDecoder()

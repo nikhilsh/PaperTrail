@@ -824,6 +824,25 @@ struct DraftRecordView: View {
             finalWarrantyMonths: finalWarrantyMonths
         )
 
+        // "Extraction got it right" is community signal too — and the only
+        // kind that fires often enough for ≥3 installs to ever agree.
+        CorrectionLogger.logConfirmations(
+            structured: structuredResult,
+            finalMerchantName: merchantName,
+            finalCurrency: currency,
+            finalCategory: category
+        )
+
+        // Second-chance consent, asked at the moment the user just produced
+        // shareable signal instead of cold at first launch. AppShellView
+        // presents it once the capture/import cover closes.
+        if structuredResult != nil,
+           CommunityLearning.isConfigured,
+           !CommunityLearning.isEnabled,
+           !UserDefaults.standard.bool(forKey: CommunityLearning.contextualAskShownKey) {
+            UserDefaults.standard.set(true, forKey: CommunityLearning.pendingContextualAskKey)
+        }
+
         // Build one record per selected line item (each tracked separately, with
         // its own warranty/category/amount). The primary item uses the edited
         // form fields; additional items use their receipt values. With 0–1
