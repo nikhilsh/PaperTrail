@@ -179,6 +179,10 @@ final class HouseholdManager {
         do {
             _ = try await container.accept(metadata)
             AppLogger.info("Accepted household share invite", category: "cloud.sharing")
+            // The accept metadata is the ONE place iOS hands us the owner's
+            // human name (nameComponents are withheld from share.participants
+            // — discoverability is gone). Capture it now for the roster.
+            Self.storeOwnerName(from: metadata)
         } catch {
             AppLogger.error("Failed to accept household share invite: \(error.localizedDescription)", category: "cloud.sharing")
             lastError = error.localizedDescription
@@ -297,11 +301,74 @@ final class HouseholdManager {
     static let shareTitle = "PaperTrail Household"
     private static let shareTypeIdentifier = "nikhilsh.PaperTrail.household"
 
+    // MARK: - Owner display name
+
+    /// CloudKit stopped exposing participant `nameComponents` (user
+    /// discoverability is gone), so a member's roster shows the owner as a
+    /// bare "Owner" placeholder. Two recovery paths, in priority order:
+    /// 1. A custom field on the CKShare, written from the owner's typed
+    ///    display name (Household screen) — works retroactively for shares
+    ///    accepted before this shipped.
+    /// 2. The owner identity captured from the invite metadata at accept
+    ///    time (`storeOwnerName(from:)`), the one moment iOS provides it.
+    static let ownerDisplayNameShareKey = "ownerDisplayName"
+    static let ownerDisplayNameDefaultsKey = "household.ownerDisplayName"
+    static let acceptedOwnerNameDefaultsKey = "household.acceptedOwnerName"
+
+    private static func storeOwnerName(from metadata: CKShare.Metadata) {
+        let identity = metadata.ownerIdentity
+        let formatted = identity.nameComponents.map {
+            PersonNameComponentsFormatter().string(from: $0)
+        } ?? ""
+        let name = !formatted.isEmpty
+            ? formatted
+            : (identity.lookupInfo?.emailAddress ?? identity.lookupInfo?.phoneNumber ?? "")
+        guard !name.isEmpty else {
+            AppLogger.info("Share accept metadata carried no owner name", category: "cloud.sharing")
+            return
+        }
+        UserDefaults.standard.set(name, forKey: acceptedOwnerNameDefaultsKey)
+        AppLogger.info("Captured owner name from share accept metadata", category: "cloud.sharing")
+    }
+
+    private static func storedOwnerName(share: CKShare) -> String? {
+        if let fromShare = share[ownerDisplayNameShareKey] as? String, !fromShare.isEmpty {
+            return fromShare
+        }
+        if let fromInvite = UserDefaults.standard.string(forKey: acceptedOwnerNameDefaultsKey),
+           !fromInvite.isEmpty {
+            return fromInvite
+        }
+        return nil
+    }
+
+    /// Persist the owner's typed display name and push it onto the live
+    /// share so members' rosters pick it up on their next refresh.
+    /// Best-effort: a failed save is logged, never surfaced as an error.
+    func updateOwnerDisplayName(_ name: String) async {
+        guard isHouseholdOwner else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(trimmed, forKey: Self.ownerDisplayNameDefaultsKey)
+        guard !trimmed.isEmpty else { return }
+        do {
+            guard let share = try await fetchExistingShare() else { return }
+            share[Self.ownerDisplayNameShareKey] = trimmed as CKRecordValue
+            _ = try await privateDB.modifyRecords(saving: [share], deleting: [])
+            AppLogger.info("Owner display name pushed to household share", category: "cloud.sharing")
+        } catch {
+            AppLogger.error("Failed to push owner display name: \(error.localizedDescription)", category: "cloud.sharing")
+        }
+    }
+
     private func brandShare(_ share: CKShare) {
         share[CKShare.SystemFieldKey.title] = Self.shareTitle as CKRecordValue
         share[CKShare.SystemFieldKey.shareType] = Self.shareTypeIdentifier as CKRecordValue
         if let thumbnail = Self.shareThumbnailData() {
             share[CKShare.SystemFieldKey.thumbnailImageData] = thumbnail as CKRecordValue
+        }
+        if let ownerName = UserDefaults.standard.string(forKey: Self.ownerDisplayNameDefaultsKey),
+           !ownerName.isEmpty {
+            share[Self.ownerDisplayNameShareKey] = ownerName as CKRecordValue
         }
     }
 
@@ -312,7 +379,11 @@ final class HouseholdManager {
         let title = share[CKShare.SystemFieldKey.title] as? String
         let type = share[CKShare.SystemFieldKey.shareType] as? String
         let hasThumbnail = share[CKShare.SystemFieldKey.thumbnailImageData] != nil
-        guard title != Self.shareTitle || type != Self.shareTypeIdentifier || !hasThumbnail else {
+        let wantedOwnerName = UserDefaults.standard.string(forKey: Self.ownerDisplayNameDefaultsKey)
+        let ownerNameStale = (wantedOwnerName?.isEmpty == false)
+            && (share[Self.ownerDisplayNameShareKey] as? String) != wantedOwnerName
+        guard title != Self.shareTitle || type != Self.shareTypeIdentifier || !hasThumbnail
+                || ownerNameStale else {
             return share
         }
         brandShare(share)
@@ -462,6 +533,11 @@ final class HouseholdManager {
                 name = email
             } else if let phone = identity.lookupInfo?.phoneNumber {
                 name = phone
+            } else if participant.role == .owner, let ownerName = storedOwnerName(share: share) {
+                // Owner participants never carry lookupInfo (they created the
+                // share, nobody "invited" them) — fall back to the name the
+                // owner typed (share field) or the invite metadata capture.
+                name = ownerName
             } else {
                 name = participant.role == .owner ? "Owner" : "Member"
             }

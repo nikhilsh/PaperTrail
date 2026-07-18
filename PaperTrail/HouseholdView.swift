@@ -21,6 +21,7 @@ struct HouseholdView: View {
     private var isMemberDevice: Bool { !manager.isHouseholdOwner && !manager.members.isEmpty }
 
     @AppStorage("household.shareWholeLibrary") private var shareWholeLibrary = true
+    @AppStorage(HouseholdManager.ownerDisplayNameDefaultsKey) private var ownerDisplayName = ""
     @State private var preparing = false
     @State private var sharePrep: SharePresentation?
     @State private var errorMessage: String?
@@ -141,6 +142,26 @@ struct HouseholdView: View {
             ForEach(Array(displayMembers.enumerated()), id: \.element.id) { index, member in
                 if index > 0 { Rectangle().fill(PT.onPaperHair).frame(height: 1) }
                 memberRow(member)
+            }
+
+            // Owner only: the name members see for you. CloudKit no longer
+            // exposes the owner's iCloud name to participants, so without
+            // this a member's roster reads a bare "Owner" placeholder.
+            if manager.isHouseholdOwner {
+                Rectangle().fill(PT.onPaperHair).frame(height: 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("YOUR NAME · SHOWN TO YOUR HOUSEHOLD")
+                        .ptMonoLabel(8.5, tracking: 1.5)
+                        .foregroundStyle(PT.onPaper3)
+                    TextField("Add your name", text: $ownerDisplayName)
+                        .font(PTFont.serif(16, weight: 500))
+                        .foregroundStyle(PT.onPaper)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            Task { await manager.updateOwnerDisplayName(ownerDisplayName) }
+                        }
+                }
+                .padding(.vertical, 11)
             }
         }
         .padding(16)

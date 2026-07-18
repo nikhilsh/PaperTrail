@@ -17,6 +17,8 @@ struct SharedRecordDetailView: View {
     /// re-navigating.
     let record: SharedPurchaseRecordDTO
 
+    @State private var zoomedProof: ZoomedProofImage?
+
     private var householdCache = HouseholdCache.shared
 
     // Explicit init: the private householdCache stored property would
@@ -69,6 +71,9 @@ struct SharedRecordDetailView: View {
         }
         .ptScreen()
         .navigationBarBackButtonHidden()
+        .fullScreenCover(item: $zoomedProof) { proof in
+            SharedProofViewerView(image: proof.image)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {
@@ -262,7 +267,18 @@ struct SharedRecordDetailView: View {
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(attachments) { attachment in
                             VStack(spacing: 8) {
-                                SharedProofThumbnail(attachment: attachment)
+                                // Tap-to-enlarge only once the asset is on
+                                // disk — the "syncing" placeholder isn't a
+                                // button.
+                                Button {
+                                    if let url = HouseholdCache.shared.imageURL(attachmentID: attachment.id),
+                                       let image = UIImage(contentsOfFile: url.path) {
+                                        zoomedProof = ZoomedProofImage(id: attachment.id, image: image)
+                                    }
+                                } label: {
+                                    SharedProofThumbnail(attachment: attachment)
+                                }
+                                .buttonStyle(.plain)
                                 HStack(spacing: 5) {
                                     Image(systemName: proofGlyph(attachment.typeRaw))
                                         .font(.system(size: 10))
@@ -368,10 +384,11 @@ private extension SharedPurchaseRecordDTO {
 /// Styled like `RecordDetailView`'s (private) `ProofThumbnail` — same frame,
 /// dog-ear clip, and hairline border — but reads from `HouseholdCache`'s
 /// images directory instead of `ImageStorageManager`'s, since this attachment
-/// was never saved into this device's own Documents/Attachments. No tap-to-
-/// enlarge here: `ImageViewerView` loads by filename via `ImageStorageManager`
-/// and `CloudImageSyncManager`, neither of which knows about shared-in
-/// attachments, so reusing it isn't trivial — skipped for v1.
+/// was never saved into this device's own Documents/Attachments. Tap-to-
+/// enlarge goes through `SharedProofViewerView` (the UIImage is handed over
+/// directly) rather than `ImageViewerView`, which loads by filename via
+/// `ImageStorageManager`/`CloudImageSyncManager` and knows nothing about
+/// shared-in attachments.
 private struct SharedProofThumbnail: View {
     let attachment: SharedAttachmentDTO
 
@@ -404,5 +421,63 @@ private struct SharedProofThumbnail: View {
         .frame(width: 78, height: 104)
         .clipShape(DogEarShape(radius: 10, ear: 14))
         .overlay(DogEarShape(radius: 10, ear: 14).stroke(PT.hair, lineWidth: 1))
+    }
+}
+
+// MARK: - Shared proof viewer
+
+/// `Identifiable` payload for `.fullScreenCover(item:)` — the attachment id
+/// keys the cover, the `UIImage` is already loaded by the tap handler.
+private struct ZoomedProofImage: Identifiable {
+    let id: UUID
+    let image: UIImage
+}
+
+/// Full-screen zoomable viewer for a shared-in proof image. Mirrors
+/// `ImageViewerView`'s gestures (pinch + double-tap zoom) but takes the
+/// `UIImage` directly — no filename lookup, no iCloud download path; the
+/// image is guaranteed on disk before this is ever presented.
+private struct SharedProofViewerView: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1.0
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .scaleEffect(scale)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                scale = value.magnification
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring(response: 0.3)) {
+                                    scale = max(1.0, scale)
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.3)) {
+                            scale = scale > 1.0 ? 1.0 : 2.5
+                        }
+                    }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
     }
 }
