@@ -350,11 +350,19 @@ struct SharedRecordDetailView: View {
     }
 
     private func notesCard(_ notes: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // Same fact-chip treatment as RecordDetailView — the owner's scan
+        // facts read as chips on the member's phone too.
+        let parsed = NoteFacts.parse(notes)
+        return VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "Notes", tone: PT.txt3)
-            Text(notes)
-                .font(.system(size: 14))
-                .foregroundStyle(PT.txt)
+            ForEach(parsed.facts) { fact in
+                NoteFactChip(fact: fact)
+            }
+            if !parsed.freeText.isEmpty {
+                Text(parsed.freeText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(PT.txt)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

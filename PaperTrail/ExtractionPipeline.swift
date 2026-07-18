@@ -652,7 +652,7 @@ extension StructuredExtractionResult {
             suggestedCategory: category.value,
             suggestedWarrantyDurationMonths: warrantyDurationMonths.value,
             extractionSource: source,
-            suggestedNotes: recognizedText.isEmpty ? nil : "Extracted from scanned document.",
+            suggestedNotes: NoteFacts.composeNotes(from: self),
             documentKind: documentKind.value,
             lineItems: lineItems,
             structuredResult: self
