@@ -223,7 +223,7 @@ struct SettingsView: View {
                     HStack(spacing: 12) {
                         PTAvatar(size: 48)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Your library")
+                            Text("Your records")
                                 .font(PTFont.serif(20, weight: 600))
                                 .foregroundStyle(PT.onPaper)
                             // Backup recency line — honest state, never static copy.
