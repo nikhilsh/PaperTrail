@@ -3,6 +3,7 @@ import SwiftData
 import Sentry
 import CloudKit
 import UserNotifications
+import AppIntents
 
 private enum SyncBackendState {
     static let defaultsKey = "activeSyncBackend"

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import AppIntents
 
 struct DraftRecordView: View {
     @Environment(\.modelContext) private var modelContext
