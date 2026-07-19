@@ -590,7 +590,7 @@ struct DraftRecordView: View {
                 HStack(spacing: 6) {
                     Image(systemName: source == .foundationModel ? "cpu" : "text.magnifyingglass")
                         .font(.system(size: 10))
-                    Text(source == .foundationModel ? "Extracted with Apple Intelligence" : "Extracted with pattern matching")
+                    Text(source == .foundationModel ? "Extracted with Apple Intelligence" : "Extracted automatically")
                         .font(PTFont.mono(9.5))
                 }
                 .foregroundStyle(PT.txt3)
@@ -598,12 +598,23 @@ struct DraftRecordView: View {
                 if let diag = ocr.structuredResult?.diagnostics, !diag.foundationModelRan {
                     HStack(spacing: 4) {
                         Image(systemName: "info.circle").font(.system(size: 10))
+                        // Raw skip reasons are gold for OTA debugging but
+                        // read as gibberish in the store build — plain
+                        // wording there, full detail everywhere else.
+                        #if APPSTORE
+                        Text("Smart extraction wasn't available — fields were read the basic way")
+                            .font(PTFont.mono(9.5))
+                        #else
                         Text(diag.foundationModelSkipReason.map { "AI unavailable: \($0)" } ?? "AI extraction did not run on this document")
                             .font(PTFont.mono(9.5))
+                        #endif
                     }
                     .foregroundStyle(PT.amber)
                 }
 
+                // Developer affordance — no store user needs a raw
+                // extraction log share sheet.
+                #if !APPSTORE
                 if ocr.structuredResult != nil {
                     Button { showExtractionLogSheet = true } label: {
                         Label("Share extraction log", systemImage: "square.and.arrow.up")
@@ -612,6 +623,7 @@ struct DraftRecordView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                #endif
             }
         }
         .padding(16)

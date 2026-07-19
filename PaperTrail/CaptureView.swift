@@ -132,7 +132,7 @@ struct CaptureView: View {
                 Text("Reading your receipt…")
                     .font(PTFont.serif(20, weight: 500))
                     .foregroundStyle(PT.txt)
-                Text("On-device OCR + Apple Intelligence")
+                Text("Read privately, right on your iPhone")
                     .ptMonoLabel(9, tracking: 1.6)
                     .foregroundStyle(PT.txt3)
             }
