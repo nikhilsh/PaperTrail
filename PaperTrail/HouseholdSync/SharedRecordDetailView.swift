@@ -448,44 +448,17 @@ private struct ZoomedProofImage: Identifiable {
 private struct SharedProofViewerView: View {
     let image: UIImage
     @Environment(\.dismiss) private var dismiss
-    @State private var scale: CGFloat = 1.0
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .scaleEffect(scale)
-                    .gesture(
-                        MagnifyGesture()
-                            .onChanged { value in
-                                scale = value.magnification
-                            }
-                            .onEnded { _ in
-                                withAnimation(.spring(response: 0.3)) {
-                                    scale = max(1.0, scale)
-                                }
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.3)) {
-                            scale = scale > 1.0 ? 1.0 : 2.5
-                        }
-                    }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .toolbarBackground(.hidden, for: .navigationBar)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            ZoomableImageView(image: image)
+                .ignoresSafeArea()
+        }
+        .overlay(alignment: .topTrailing) {
+            ViewerCloseButton { dismiss() }
+                .padding(.top, 4)
+                .padding(.trailing, 6)
         }
     }
 }

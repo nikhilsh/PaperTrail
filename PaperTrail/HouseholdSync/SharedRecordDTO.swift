@@ -146,6 +146,23 @@ nonisolated struct SharedPurchaseRecordDTO: Codable, Sendable, Equatable, Identi
     }
 }
 
+extension SharedPurchaseRecordDTO {
+    /// Same bucketing rule as `SharedRecordDetailView` (expired / ≤60 days /
+    /// active) — DTOs never become `PurchaseRecord`s, so status is derived
+    /// from the wire dates directly. Shared by WarrantyView, the Library's
+    /// shared cards, Search, and Diagnostics.
+    var sharedWarrantyStatus: WarrantyStatus {
+        guard let expiry = warrantyExpiryDate else { return .unknown }
+        if expiry < .now { return .expired }
+        let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
+        return expiry <= cutoff ? .expiringSoon : .active
+    }
+
+    var sharedDaysLeft: Int {
+        warrantyExpiryDate.map { CoverageFormatter.daysLeft(from: .now, to: $0) } ?? 0
+    }
+}
+
 /// Codable mirror of `Attachment` for the household-sharing pipeline
 /// (Milestone 4 Phase 1). No image bytes here — a `CKAsset` field arrives in
 /// Phase 4; this DTO only carries the metadata `Attachment` itself stores in
