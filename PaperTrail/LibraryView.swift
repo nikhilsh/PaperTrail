@@ -138,7 +138,7 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
 
-                Text("The Library")
+                Text("The Records")
                     .font(PTFont.serif(34, weight: 600))
                     .foregroundStyle(PT.txt)
                     .padding(.top, 2)
@@ -252,7 +252,7 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14))
-                Text("Search your library")
+                Text("Search your records")
                     .font(.system(size: 14))
                 Spacer()
             }
@@ -352,12 +352,12 @@ struct LibraryView: View {
                     .foregroundStyle(PT.txt3)
                 GoldRule()
             }
-            VStack(spacing: 0) {
+            VStack(spacing: PT.Metric.cardGap) {
                 ForEach(sharedWithMe) { dto in
                     NavigationLink {
                         SharedRecordDetailView(record: dto)
                     } label: {
-                        SharedRecordRow(record: dto)
+                        SharedFilingCard(record: dto)
                     }
                     .buttonStyle(.plain)
                 }
@@ -537,42 +537,99 @@ private struct RoomRow: View {
     }
 }
 
-// MARK: - Shared record row ("Shared with me")
+// MARK: - Shared filing card ("Shared with me")
 
-/// Row for a record mirrored in from another household member — styled after
-/// `RoomRow`, but reads a `SharedPurchaseRecordDTO` (never a `PurchaseRecord`)
-/// and swaps the trailing chevron area for a household glyph so it reads as
-/// distinct from the owner's own records.
-private struct SharedRecordRow: View {
+/// The paper card for a record mirrored in from the household — same filing
+/// language as `RecordFilingCard` (cream stock, glyph, price·merchant footer,
+/// warranty pill) so shared items feel like real records, not an afterthought
+/// list. Differentiators instead of the gold dog-ear: a gold house stamp in
+/// that corner and a mono HOUSEHOLD tag in the meta line. Reads a
+/// `SharedPurchaseRecordDTO` — never a `PurchaseRecord`.
+struct SharedFilingCard: View {
     let record: SharedPurchaseRecordDTO
 
     private var glyph: String { ptGlyph(category: record.category, productName: record.productName) }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            GlyphTile(symbol: glyph, size: 34)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(PTDisplayName.product(record.productName))
-                    .font(PTFont.serif(16, weight: 500))
-                    .foregroundStyle(PT.txt)
-                    .lineLimit(1)
-                Text(record.merchantName.map(PTDisplayName.merchant) ?? "Shared item")
-                    .font(PTFont.mono(10))
-                    .foregroundStyle(PT.txt3)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "house.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(PT.gold)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(PT.txt3)
+    private var metaLine: String {
+        var parts: [String] = []
+        if let category = record.category, !category.isEmpty { parts.append(category) }
+        if let date = record.purchaseDate { parts.append(PTDate.monthYear.string(from: date)) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var priceMerchant: String {
+        var parts: [String] = []
+        if let amount = record.amount {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.currencyCode = record.currency
+            parts.append(formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 4)
-        .contentShape(Rectangle())
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(PT.hair).frame(height: 1)
+        if let merchant = record.merchantName, !merchant.isEmpty {
+            parts.append(PTDisplayName.merchant(merchant))
+        }
+        return parts.isEmpty ? "—" : parts.joined(separator: "  ·  ")
+    }
+
+    private var pillText: String {
+        switch record.sharedWarrantyStatus {
+        case .expired: "Expired"
+        case .expiringSoon: record.sharedDaysLeft == 0
+            ? "Expires today"
+            : "Expires in \(CoverageFormatter.remaining(days: record.sharedDaysLeft))"
+        case .active: "Covered · \(CoverageFormatter.remainingLeft(days: record.sharedDaysLeft))"
+        case .unknown: "No warranty"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                GlyphTile(symbol: glyph, size: 38, onPaper: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(PTDisplayName.product(record.productName))
+                        .font(PTFont.serif(18, weight: 600))
+                        .foregroundStyle(PT.onPaper)
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text("HOUSEHOLD")
+                            .font(PTFont.mono(8.5, medium: true))
+                            .tracking(1.2)
+                            .foregroundStyle(PT.goldDeep)
+                        if !metaLine.isEmpty {
+                            Text("· \(metaLine)")
+                                .font(PTFont.mono(10.5))
+                                .tracking(0.6)
+                                .foregroundStyle(PT.onPaper3)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            Rectangle().fill(PT.onPaperHair).frame(height: 1)
+
+            HStack(spacing: 8) {
+                Text(priceMerchant)
+                    .font(PTFont.mono(11.5, medium: true))
+                    .foregroundStyle(PT.onPaper2)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if record.warrantyExpiryDate != nil {
+                    StatusPill(status: record.sharedWarrantyStatus, text: pillText, onPaper: true)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(goldFold: false)
+        .overlay(alignment: .topTrailing) {
+            // The household stamp sits where a local card's gold dog-ear
+            // would fold — same corner, different mark, instant read.
+            Image(systemName: "house.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PT.goldDeep)
+                .padding(10)
         }
     }
 }
