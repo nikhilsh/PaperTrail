@@ -426,7 +426,7 @@ struct CoverageRingWidget: Widget {
             CoverageRingWidgetView(entry: entry)
         }
         .configurationDisplayName("Coverage Ring")
-        .description("How much of your library is still under warranty.")
+        .description("How many of your records are still under warranty.")
         .supportedFamilies([.systemSmall])
     }
 }

@@ -80,4 +80,25 @@ struct SearchViewTests {
         let record = sampleRecord()
         #expect(!SearchView.matches(record: record, attachments: [], query: "nonexistent"))
     }
+
+    // MARK: - Shared-in household records are searchable too
+
+    @Test func sharedDTOMatchesTheSameFieldsTheWireCarries() {
+        let dto = SharedPurchaseRecordDTO(
+            id: UUID(),
+            productName: "Acorn Fan",
+            merchantName: "Harvey Norman",
+            notes: "Limited Warranty Card",
+            category: "Home",
+            room: "Living Room",
+            serialNumber: "AF-2210"
+        )
+        #expect(SearchView.matchesShared(dto: dto, query: "acorn"))
+        #expect(SearchView.matchesShared(dto: dto, query: "harvey"))
+        #expect(SearchView.matchesShared(dto: dto, query: "warranty card"))
+        #expect(SearchView.matchesShared(dto: dto, query: "home"))
+        #expect(SearchView.matchesShared(dto: dto, query: "living"))
+        #expect(SearchView.matchesShared(dto: dto, query: "AF-2210"))
+        #expect(!SearchView.matchesShared(dto: dto, query: "toaster"))
+    }
 }

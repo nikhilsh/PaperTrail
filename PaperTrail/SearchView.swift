@@ -6,6 +6,7 @@ struct SearchView: View {
     @Query private var allAttachments: [Attachment]
     @FocusState private var searchFocused: Bool
     @State private var searchText = ""
+    private var householdCache = HouseholdCache.shared
 
     private func attachments(for record: PurchaseRecord) -> [Attachment] {
         allAttachments.filter { $0.recordID == record.id }
@@ -15,6 +16,18 @@ struct SearchView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
         return records.filter { Self.matches(record: $0, attachments: attachments(for: $0), query: query) }
+    }
+
+    /// Shared-in household records matching the query — the household's stuff
+    /// is findable from a member phone too (same derivation as LibraryView's
+    /// "Shared with me": cache DTOs minus anything that exists locally).
+    private var sharedResults: [SharedPurchaseRecordDTO] {
+        guard HouseholdManager.recordSharingEnabled else { return [] }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return householdCache.purchaseRecords.filter { dto in
+            !records.contains(where: { $0.id == dto.id }) && Self.matchesShared(dto: dto, query: query)
+        }
     }
 
     /// Whether `record` matches `query` (case-insensitive substring match, so a
@@ -32,6 +45,18 @@ struct SearchView: View {
         || attachments.contains { $0.ocrText?.localizedCaseInsensitiveContains(query) ?? false }
     }
 
+    /// Shared-DTO variant of `matches` — same fields where the wire carries
+    /// them (no attachment OCR: shared proof text isn't mirrored). Static +
+    /// pure for the same testability reason.
+    static func matchesShared(dto: SharedPurchaseRecordDTO, query: String) -> Bool {
+        dto.productName.localizedCaseInsensitiveContains(query)
+        || (dto.merchantName?.localizedCaseInsensitiveContains(query) ?? false)
+        || (dto.notes?.localizedCaseInsensitiveContains(query) ?? false)
+        || (dto.category?.localizedCaseInsensitiveContains(query) ?? false)
+        || (dto.room?.localizedCaseInsensitiveContains(query) ?? false)
+        || (dto.serialNumber?.localizedCaseInsensitiveContains(query) ?? false)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -44,7 +69,7 @@ struct SearchView: View {
 
                 if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     hint
-                } else if results.isEmpty {
+                } else if results.isEmpty && sharedResults.isEmpty {
                     emptyResults
                 } else {
                     VStack(spacing: PT.Metric.cardGap) {
@@ -55,6 +80,23 @@ struct SearchView: View {
                                 RecordFilingCard(record: record)
                             }
                             .buttonStyle(.plain)
+                        }
+                    }
+                    if !sharedResults.isEmpty {
+                        HStack(spacing: 8) {
+                            SectionLabel(text: "From your household", tone: PT.gold)
+                            GoldRule()
+                        }
+                        .padding(.top, results.isEmpty ? 0 : 6)
+                        VStack(spacing: PT.Metric.cardGap) {
+                            ForEach(sharedResults) { dto in
+                                NavigationLink {
+                                    SharedRecordDetailView(record: dto)
+                                } label: {
+                                    SharedFilingCard(record: dto)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }

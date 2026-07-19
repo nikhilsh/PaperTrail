@@ -62,6 +62,20 @@ struct AdvancedDiagnosticsView: View {
         records.filter { $0.warrantyStatus == .active || $0.warrantyStatus == .expiringSoon }.count
     }
 
+    /// Shared-in household records, and how many of those carry a live
+    /// warranty — a shared item IS a household item, so the warranty picture
+    /// here includes them (same rule as WarrantyView since build 44).
+    private var sharedWithMe: [SharedPurchaseRecordDTO] {
+        guard HouseholdManager.recordSharingEnabled else { return [] }
+        return HouseholdCache.shared.purchaseRecords.filter { dto in
+            !records.contains(where: { $0.id == dto.id })
+        }
+    }
+
+    private var sharedActiveWarrantyCount: Int {
+        sharedWithMe.filter { $0.sharedWarrantyStatus == .active || $0.sharedWarrantyStatus == .expiringSoon }.count
+    }
+
     private var scheduledNotificationsSummary: String {
         records.contains(where: \.warrantyNotificationScheduled) ? "Scheduled" : "None"
     }
@@ -137,7 +151,13 @@ struct AdvancedDiagnosticsView: View {
                 // Warranties — the two counts the old Settings surfaced.
                 SettingsSectionLabel(text: "Warranties")
                 SettingsCard {
-                    SettingsRow(title: "Active warranties", value: "\(activeWarrantyCount)")
+                    SettingsRow(title: "Active warranties",
+                                subtitle: sharedActiveWarrantyCount > 0 ? "incl. \(sharedActiveWarrantyCount) shared with you" : nil,
+                                value: "\(activeWarrantyCount + sharedActiveWarrantyCount)")
+                    if !sharedWithMe.isEmpty {
+                        SettingsRowDivider()
+                        SettingsRow(title: "Shared with you", value: "\(sharedWithMe.count)")
+                    }
                     SettingsRowDivider()
                     SettingsRow(title: "Warranty notifications", value: scheduledNotificationsSummary)
                 }
@@ -263,7 +283,8 @@ struct AdvancedDiagnosticsView: View {
         lines.append("Proof images: \(proofImagesSummary)")
         lines.append("On device: \(onDeviceSummary)")
         lines.append("Image sync errors: \(cloudImageSync.transferErrors.count)")
-        lines.append("Active warranties: \(activeWarrantyCount)")
+        lines.append("Active warranties: \(activeWarrantyCount + sharedActiveWarrantyCount) (\(sharedActiveWarrantyCount) shared)")
+        lines.append("Shared with you: \(sharedWithMe.count)")
         lines.append("Warranty notifications: \(scheduledNotificationsSummary)")
         lines.append("")
         lines.append("[Learning]")

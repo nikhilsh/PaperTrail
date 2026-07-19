@@ -191,7 +191,7 @@ struct DraftRecordView: View {
 
                 VStack(spacing: 10) {
                     Button { saveRecord() } label: {
-                        Text("Save to Library")
+                        Text("Save to Records")
                     }
                     .buttonStyle(PTGoldButtonStyle())
                     .disabled(productName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

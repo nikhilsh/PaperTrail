@@ -193,22 +193,6 @@ private struct AttentionCard: View {
 
 // MARK: - Shared-in warranty support (records mirrored from the household)
 
-private extension SharedPurchaseRecordDTO {
-    /// Same bucketing rule as `SharedRecordDetailView` (expired / ≤60 days /
-    /// active) — DTOs never become `PurchaseRecord`s, so status is derived
-    /// from the wire dates directly.
-    var sharedWarrantyStatus: WarrantyStatus {
-        guard let expiry = warrantyExpiryDate else { return .unknown }
-        if expiry < .now { return .expired }
-        let cutoff = Calendar.current.date(byAdding: .day, value: 60, to: .now) ?? .now
-        return expiry <= cutoff ? .expiringSoon : .active
-    }
-
-    var sharedDaysLeft: Int {
-        warrantyExpiryDate.map { CoverageFormatter.daysLeft(from: .now, to: $0) } ?? 0
-    }
-}
-
 /// `AttentionCard`'s shape for a shared-in record: same glyph/name/stamp/
 /// progress layout, but the whole card navigates to the read-only
 /// `SharedRecordDetailView` (no Get support / View warranty CTAs — members
