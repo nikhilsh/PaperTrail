@@ -845,6 +845,10 @@ struct DraftRecordView: View {
             finalCategory: category
         )
 
+        // New record names should be speakable to Siri right away, not after
+        // the next cold launch.
+        PaperTrailShortcuts.updateAppShortcutParameters()
+
         // Second-chance consent, asked at the moment the user just produced
         // shareable signal instead of cold at first launch. AppShellView
         // presents it once the capture/import cover closes.

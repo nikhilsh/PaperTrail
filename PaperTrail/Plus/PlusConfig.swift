@@ -92,8 +92,8 @@ enum PlusConfig {
     /// (`CertificateView(benefits: PlusConfig.benefits.map(\.title))`).
     static let benefits: [Benefit] = [
         Benefit(icon: "person.2.fill",
-                title: "Unlimited household sharing",
-                subtitle: "Share with everyone at home, not just one member"),
+                title: "Household sharing",
+                subtitle: "Everyone at home sees the records, on their own phone"),
         Benefit(icon: "house.fill",
                 title: "Whole-home insurance report",
                 subtitle: "Every room, not just one — the artifact you hand an insurer"),

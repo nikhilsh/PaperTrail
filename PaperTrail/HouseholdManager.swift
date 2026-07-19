@@ -128,19 +128,17 @@ final class HouseholdManager {
     /// Ensure a household root record + CKShare exist, returning the share and
     /// container for `UICloudSharingController`.
     func makeShare() async throws -> (CKShare, CKContainer) {
-        // PaperTrail Plus gate: growing a household past its first member
-        // (any share that already has ≥1 non-owner participant) requires
-        // Plus. Checked before either share path below, so both the
-        // zone-share (flag-on) and decoy-share (flag-off record-sharing)
-        // paths are covered by one gate. No-op entirely while
-        // `PlusConfig.enabled` is false.
-        if PlusConfig.enabled {
-            let nonOwnerCount = members.filter { $0.role != .owner }.count
-            if nonOwnerCount >= 1 && !PlusEntitlements.shared.canUseHousehold {
-                let error = HouseholdError.plusRequired
-                lastError = error.errorDescription
-                throw error
-            }
+        // PaperTrail Plus gate: household sharing is a Plus feature for the
+        // OWNER — creating a share or inviting ANY member requires Plus
+        // (2026-07 decision: no free first member; invitees never pay).
+        // Checked before either share path below, so both the zone-share
+        // (flag-on) and decoy-share (flag-off record-sharing) paths are
+        // covered by one gate. No-op entirely while `PlusConfig.enabled`
+        // is false.
+        if PlusConfig.enabled, !PlusEntitlements.shared.canUseHousehold {
+            let error = HouseholdError.plusRequired
+            lastError = error.errorDescription
+            throw error
         }
 
         if Self.recordSharingEnabled {

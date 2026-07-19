@@ -27,13 +27,10 @@ struct ReceiptTranslationPanel: View {
 
     @State private var detected: ReceiptLanguageDetector.Result?
     @State private var isOffered = false
-    @State private var mode: DisplayMode = .original
     @State private var translatedText: String?
     @State private var isTranslating = false
     @State private var errorMessage: String?
     @State private var translationConfig: TranslationSession.Configuration?
-
-    private enum DisplayMode { case original, translated }
 
     private var targetLanguageCode: String {
         Locale.current.language.languageCode?.identifier ?? "en"
@@ -70,12 +67,30 @@ struct ReceiptTranslationPanel: View {
             if translatedText == nil {
                 offerRow
             } else {
-                toggleRow
-                Text(mode == .original ? ocrText : (translatedText ?? ""))
+                // Original and translation TOGETHER — the either/or toggle hid
+                // whichever half the user actually wanted to compare against
+                // (device feedback: "I can't see the original"). What's saved
+                // is always the original; the translation is display-only.
+                headerRow
+                Text("ORIGINAL · \(sourceLanguageDisplayName.uppercased())")
+                    .font(PTFont.mono(8.5, medium: true))
+                    .tracking(1.2)
+                    .foregroundStyle(PT.txt3)
+                Text(ocrText)
                     .font(PTFont.mono(11))
                     .foregroundStyle(PT.txt2)
                     .textSelection(.enabled)
-                    .lineLimit(8)
+                    .lineLimit(6)
+                Rectangle().fill(PT.hair).frame(height: 1)
+                Text("TRANSLATED")
+                    .font(PTFont.mono(8.5, medium: true))
+                    .tracking(1.2)
+                    .foregroundStyle(PT.gold)
+                Text(translatedText ?? "")
+                    .font(PTFont.mono(11))
+                    .foregroundStyle(PT.txt2)
+                    .textSelection(.enabled)
+                    .lineLimit(10)
             }
             if let errorMessage {
                 HStack(spacing: 5) {
@@ -113,12 +128,16 @@ struct ReceiptTranslationPanel: View {
         .disabled(isTranslating)
     }
 
-    // MARK: Original/Translated toggle
+    // MARK: Header (post-translation)
 
-    private var toggleRow: some View {
+    private var headerRow: some View {
         HStack(spacing: 6) {
-            segment("Original", isSelected: mode == .original) { mode = .original }
-            segment("Translated", isSelected: mode == .translated) { mode = .translated }
+            Image(systemName: "character.book.closed")
+                .font(.system(size: 11))
+                .foregroundStyle(PT.gold)
+            Text("Translated on-device · original is what saves")
+                .font(PTFont.mono(9))
+                .foregroundStyle(PT.txt3)
             Spacer(minLength: 8)
             Button {
                 startTranslation()
@@ -129,25 +148,6 @@ struct ReceiptTranslationPanel: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    private func segment(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .ptMonoLabel(9, tracking: 1.6)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 10)
-                .foregroundStyle(isSelected ? PT.inkStamp : PT.txt3)
-                .background {
-                    if isSelected {
-                        Capsule().fill(LinearGradient(colors: [PT.goldHi, PT.gold], startPoint: .top, endPoint: .bottom))
-                    } else {
-                        Capsule().stroke(PT.hair, lineWidth: 1)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     // MARK: Offer evaluation
@@ -190,7 +190,6 @@ struct ReceiptTranslationPanel: View {
         errorMessage = nil
         if let cached = ReceiptTranslationCache.get(attachmentID: attachmentID, targetLanguageCode: targetLanguageCode) {
             translatedText = cached
-            mode = .translated
             AppLogger.info("Translate: cache hit for attachment \(attachmentID)", category: "translate")
             return
         }
@@ -242,7 +241,6 @@ struct ReceiptTranslationPanel: View {
             let translatedLines = responses.map(\.targetText)
             let joined = ReceiptLineTranslation.joinLines(translatedLines)
             translatedText = joined
-            mode = .translated
             ReceiptTranslationCache.set(joined, attachmentID: attachmentID, targetLanguageCode: targetLanguageCode)
             AppLogger.info("Translate: succeeded (\(translatedLines.count) lines) for attachment \(attachmentID)", category: "translate")
         } catch {

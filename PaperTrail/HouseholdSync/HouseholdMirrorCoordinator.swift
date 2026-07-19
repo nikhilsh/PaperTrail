@@ -123,6 +123,17 @@ final class HouseholdMirrorCoordinator {
             return
         }
 
+        // Plus lapse: sharing is a Plus feature for the OWNER (members never
+        // pay). While lapsed the mirror pauses whole — nothing new pushes AND
+        // nothing gets unshared, so the household keeps the last snapshot
+        // rather than being mass-unshared over a billing hiccup. Renewal
+        // resumes silently on the next reconcile trigger (save, foreground,
+        // or the periodic poll).
+        if PlusConfig.enabled, !PlusEntitlements.shared.canUseHousehold {
+            AppLogger.info("Reconcile paused: household sharing requires Plus", category: "cloud.sharing")
+            return
+        }
+
         // do/catch, not `(try? ...) ?? []`: a fetch FAILURE must never be
         // treated as an empty library. `?? []` made every field-error /
         // transient SwiftData hiccup look identical to "user deleted

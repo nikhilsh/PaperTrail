@@ -276,6 +276,10 @@ struct PaperTrailApp: App {
                     // Drain any corrections/confirmations logged before the
                     // last sync (or before the user opted in at all).
                     await CommunityLearning.shared.syncBacklog()
+                    // Refresh Siri's item vocabulary so parameterized phrases
+                    // ("check my Samsung TV warranty in PaperTrail") can match
+                    // record names by voice.
+                    PaperTrailShortcuts.updateAppShortcutParameters()
                     CorrectionLogger.onLearningFeedback = { payload in
                         Task { @MainActor in
                             let service = MerchantLearningService(modelContext: modelContainer.mainContext)
