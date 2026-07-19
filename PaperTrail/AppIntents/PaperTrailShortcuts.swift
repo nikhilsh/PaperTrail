@@ -48,21 +48,9 @@ struct PaperTrailShortcuts: AppShortcutsProvider {
         // v3 §8 (siriIntents): registered UNCONDITIONALLY with respect to
         // the *runtime* flag — a runtime `if FeatureFlags.isOn(.siriIntents)`
         // here does not compile: `@AppShortcutsBuilder`'s `buildOptional` is
-        // marked unavailable ("if statements in an AppShortcutsBuilder can
-        // only be used with #available clauses"), because the phrase list
-        // is extracted statically at build time. That's fine for the flag
-        // contract: the phrase existing is not a v3 surface, and
-        // AddItemIntent's `perform` just opens capture — same as tapping
-        // the app's own add button — so reaching it with the flag off is
-        // harmless. The flag gates the actual new surface (the v3 snippet
-        // card).
-        //
-        // `#if !APPSTORE`, unlike the runtime flag above, IS a compile-time
-        // preprocessor directive resolved before `@AppShortcutsBuilder` ever
-        // sees this code — no `buildOptional` involved — so it compiles
-        // fine and keeps this v3 phrase out of App Store builds entirely
-        // (item 4, HIGH: APPSTORE surface leaks).
-        #if !APPSTORE
+        // marked unavailable, because the phrase list is extracted
+        // statically at build time. Ships in App Store builds too since the
+        // v1.1 store pass turned the flags on there.
         AppShortcut(
             intent: AddItemIntent(),
             phrases: [
@@ -72,7 +60,6 @@ struct PaperTrailShortcuts: AppShortcutsProvider {
             shortTitle: "Add Item",
             systemImageName: "plus.rectangle.on.folder"
         )
-        #endif
     }
 }
 

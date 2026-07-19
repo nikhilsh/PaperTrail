@@ -55,7 +55,7 @@ struct AdvancedDiagnosticsView: View {
     }
 
     private var syncStatusText: String {
-        activeSyncBackend == "Local fallback" ? "Local fallback" : (cloudKitAccountStatus == "Available" ? "Active" : "iCloud required")
+        activeSyncBackend == "Local fallback" ? "On this device only" : (cloudKitAccountStatus == "Available" ? "Active" : "iCloud required")
     }
 
     private var activeWarrantyCount: Int {
@@ -109,13 +109,16 @@ struct AdvancedDiagnosticsView: View {
                     SettingsRowDivider()
                     SettingsRow(title: "iCloud account", value: cloudKitAccountStatus, valueColor: cloudKitAccountStatus == "Available" ? PT.sage : PT.txt3)
                     SettingsRowDivider()
-                    SettingsRow(title: "Sync engine", value: "CloudKit")
+                    // Plain words on screen (framework names read as noise to
+                    // users); the copy-diagnostics blob keeps the technical
+                    // truth for support.
+                    SettingsRow(title: "Records sync via", value: "iCloud")
                     SettingsRowDivider()
-                    SettingsRow(title: "Local persistence", value: "SwiftData + CloudKit")
+                    SettingsRow(title: "Stored", value: "On your iPhone + iCloud")
                 }
 
                 if activeSyncBackend == "Local fallback" {
-                    Text("CloudKit failed during startup, so PaperTrail is using local-only storage on this device.")
+                    Text("iCloud wasn't reachable when the app started, so your records are being kept on this device for now.")
                         .font(.caption)
                         .foregroundStyle(PT.amber)
                         .padding(.horizontal, 4)

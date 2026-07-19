@@ -89,9 +89,9 @@ struct FlagsView: View {
             }
             Spacer()
             footerAction("MATCH APP STORE", color: PT.txt3) {
-                // App Store builds are hard-off for every flag — matching
-                // that state locally means "all off", same action as ALL OFF.
-                FeatureFlags.setAll(false)
+                // App Store builds are hard-ON for every flag (v1.1 store
+                // pass) — matching that state locally means "all on".
+                FeatureFlags.setAll(true)
                 refreshToken += 1
             }
         }

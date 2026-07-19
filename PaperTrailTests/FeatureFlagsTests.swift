@@ -11,7 +11,7 @@ import Foundation
 /// every flag defaults off, set/read round-trips through an injected
 /// `UserDefaults` suite (never the shared App Group suite — tests must never
 /// touch real device state), and the `UserDefaults` key format is stable.
-/// APPSTORE's hard-off branch isn't covered here: it's a compile-time
+/// APPSTORE's hard-ON branch (all flags on, recallWatch excepted) is not covered here: it is a compile-time
 /// `#if APPSTORE` that this (Debug/Release) test target never compiles under.
 struct FeatureFlagsTests {
 

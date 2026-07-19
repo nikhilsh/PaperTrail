@@ -45,16 +45,22 @@ enum FeatureFlags {
         UserDefaults(suiteName: appGroupIdentifier) ?? .standard
     }
 
-    /// Whether `flag` is on for this build. Hard-off, unconditionally, in
-    /// APPSTORE builds — no remote override, no exceptions — so the App
-    /// Store binary is provably v3-free regardless of what's stored in
-    /// defaults.
+    /// Whether `flag` is on for this build. Hard-ON, unconditionally, in
+    /// APPSTORE builds (v1.1 store pass, 2026-07: every flagged feature
+    /// ships enabled) — no toggles, no stored state, no exceptions — so the
+    /// store binary behaves identically for every user regardless of what's
+    /// in defaults. Dev/OTA builds keep per-flag toggles via the Flags
+    /// screen.
     ///
     /// `suite` defaults to the shared App Group suite; tests inject a scratch
     /// `UserDefaults` so they never touch real device state.
     static func isOn(_ flag: Flag, suite: UserDefaults = FeatureFlags.defaults) -> Bool {
         #if APPSTORE
-        return false
+        // ONE exception to all-on: recallWatch still runs on bundled fixture
+        // notices (`FixtureRecallFeed`) — a Plus feature backed by sample
+        // data has no business in front of paying users. Flip this when the
+        // real recall feed lands.
+        return flag != .recallWatch
         #else
         return suite.bool(forKey: key(for: flag))
         #endif

@@ -58,9 +58,8 @@ struct RecordEntity: AppEntity, Identifiable {
     }
 }
 
-#if !APPSTORE
+// Ships in store builds too since the v1.1 flags-on pass.
 extension RecordEntity: IndexedEntity {}
-#endif
 
 /// Looks records up by id (restoring a donated shortcut / widget configuration)
 /// or by a substring of product/merchant name (Siri disambiguation, typing in

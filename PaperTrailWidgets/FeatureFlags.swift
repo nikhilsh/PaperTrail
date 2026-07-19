@@ -31,11 +31,11 @@ enum FeatureFlags {
         UserDefaults(suiteName: appGroupIdentifier) ?? .standard
     }
 
-    /// Hard-off, unconditionally, in APPSTORE builds — mirrors the app
-    /// target's `isOn` exactly.
+    /// Hard-ON, unconditionally, in APPSTORE builds (v1.1 store pass) —
+    /// mirrors the app target's `isOn` exactly.
     static func isOn(_ flag: Flag) -> Bool {
         #if APPSTORE
-        return false
+        return flag != .recallWatch
         #else
         return defaults.bool(forKey: key(for: flag))
         #endif

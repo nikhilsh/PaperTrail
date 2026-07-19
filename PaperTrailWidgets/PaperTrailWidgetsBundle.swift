@@ -17,13 +17,12 @@ struct PaperTrailWidgetsBundle: WidgetBundle {
     //   slot now) and its systemMedium duplicated the paper medium with
     //   less info per row (W5).
     var body: some Widget {
-        #if APPSTORE
-        ExpiringSoonWidget()
-        #else
+        // v1.1 store pass: the v3 widget gallery ships everywhere (the
+        // legacy ExpiringSoonWidget stays retired — see the W4/W5 notes
+        // above for why it lost its gallery slots).
         CoverageRingWidget()
         NextUpWidget()
         ClosingSoonWidget()
         QuickShelveWidget()
-        #endif
     }
 }
