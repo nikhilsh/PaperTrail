@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import AppIntents
 
 struct DraftRecordView: View {
     @Environment(\.modelContext) private var modelContext
@@ -844,6 +845,10 @@ struct DraftRecordView: View {
             finalCurrency: currency,
             finalCategory: category
         )
+
+        // New record names should be speakable to Siri right away, not after
+        // the next cold launch.
+        PaperTrailShortcuts.updateAppShortcutParameters()
 
         // Second-chance consent, asked at the moment the user just produced
         // shareable signal instead of cold at first launch. AppShellView

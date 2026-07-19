@@ -130,6 +130,14 @@ struct RecordDetailView: View {
                 .foregroundStyle(PT.terra)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
+                // Anchored HERE, on the button — attached at screen level,
+                // iOS 26 floats the popover mid-content pointing at whatever
+                // happens to be center-screen.
+                .confirmationDialog("Delete this record?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+                    Button("Delete", role: .destructive) { deleteRecord() }
+                } message: {
+                    Text("This will permanently remove the record and its attachments.")
+                }
             }
             .padding(.horizontal, PT.Metric.detailPad)
             .padding(.bottom, 120)
@@ -192,11 +200,6 @@ struct RecordDetailView: View {
                 onCancel: { showScanner = false }
             )
             .ignoresSafeArea()
-        }
-        .confirmationDialog("Delete this record?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { deleteRecord() }
-        } message: {
-            Text("This will permanently remove the record and its attachments.")
         }
         .fullScreenCover(item: $selectedImageFilename) { selected in
             ImageViewerView(filename: selected.value, attachmentID: selected.attachmentID, ocrText: selected.ocrText)

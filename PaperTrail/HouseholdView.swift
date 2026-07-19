@@ -57,6 +57,46 @@ struct HouseholdView: View {
                 }
                 .padding(.top, 8)
 
+                // Owner lapsed while a share is live: pushes are paused (see
+                // HouseholdMirrorCoordinator.reconcile) — say so instead of
+                // letting the household silently go stale.
+                if PlusConfig.enabled,
+                   manager.isHouseholdOwner,
+                   manager.hasActiveShare,
+                   !PlusEntitlements.shared.canUseHousehold {
+                    Button { showPaywall = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "pause.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(PT.amber)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Sharing is paused")
+                                    .font(PTFont.serif(15, weight: 600))
+                                    .foregroundStyle(PT.txt)
+                                Text("Your household keeps what's already shared, but new records and changes stay on this phone. Renew Plus to resume.")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(PT.txt2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(PT.txt3)
+                        }
+                        .padding(14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color(hex: 0xD7A64C, alpha: 0.10))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color(hex: 0xD7A64C, alpha: 0.35), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 membersCard
 
                 // A member tapping "Invite" would create their OWN zone/share —
