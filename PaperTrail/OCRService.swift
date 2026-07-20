@@ -29,7 +29,13 @@ struct VisionOCRService: OCRService {
     }
 
     func extract(from image: UIImage) async throws -> OCRExtractionResult {
-        guard let cgImage = image.cgImage else {
+        // 0. Screenshots / photos of screens: crop to the detected document
+        // page so status-bar chrome ("11:45", back breadcrumbs) never enters
+        // the OCR stream and the document body gets full OCR resolution.
+        // Camera scans detect as near-full-frame and pass through uncropped.
+        let ocrImage = DocumentRegionCropper.croppedToDocument(image) ?? image
+
+        guard let cgImage = ocrImage.cgImage else {
             return .empty
         }
 
@@ -44,7 +50,7 @@ struct VisionOCRService: OCRService {
 
         // 2. Run the structured extraction pipeline. iOS 27+: FM path uses the image
         // directly via multimodal; iOS 26 and heuristic paths use the document text.
-        let structured = await pipeline.extract(from: document, image: image)
+        let structured = await pipeline.extract(from: document, image: ocrImage)
 
         // 3. Bridge back to the OCRExtractionResult format the rest of the app expects.
         return structured.toOCRExtractionResult(recognizedText: document.text)
