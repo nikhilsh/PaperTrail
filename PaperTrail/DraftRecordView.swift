@@ -174,6 +174,16 @@ struct DraftRecordView: View {
             VStack(alignment: .leading, spacing: 18) {
                 reviewHeader
 
+                // Foreign-language receipts: the translate offer sits right
+                // under the scan header, where the user is looking — buried in
+                // the "Extracted text" diagnostics card it was never found
+                // (device feedback). Renders nothing for same-language scans.
+                // The original OCR text is what saves; translation is display-only.
+                if let seededOCR, !seededOCR.recognizedText.isEmpty,
+                   let attachmentID = seededAttachments.first?.id {
+                    ReceiptTranslationPanel(attachmentID: attachmentID, ocrText: seededOCR.recognizedText)
+                }
+
                 if !lineItems.isEmpty {
                     lineItemCard
                 }
@@ -209,8 +219,8 @@ struct DraftRecordView: View {
             .padding(.bottom, 80)
         }
         .ptScreen()
+        .scrollDismissesKeyboard(.interactively)
         .navigationBarBackButtonHidden()
-        .ptKeyboardDoneToolbar()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {
@@ -307,7 +317,7 @@ struct DraftRecordView: View {
             PTReviewDateRow(title: "Purchase date", date: $purchaseDate, confidence: dateConfidence)
             paperDivider
             HStack(alignment: .bottom, spacing: 12) {
-                PTReviewField(title: "Price", text: $amountText, keyboard: .decimalPad, mono: true, confidence: amountConfidence)
+                PTReviewField(title: "Price", text: $amountText, keyboard: .decimalPad, mono: true, confidence: amountConfidence, doneAccessory: true)
                 Picker("Currency", selection: $currency) {
                     Text("SGD").tag("SGD"); Text("USD").tag("USD"); Text("MYR").tag("MYR")
                     Text("EUR").tag("EUR"); Text("GBP").tag("GBP"); Text("JPY").tag("JPY")
@@ -362,7 +372,7 @@ struct DraftRecordView: View {
                 .padding(.top, 12)
                 PTReviewField(title: "Product", text: itemNameBinding(item), confidence: nil)
                 paperDivider
-                PTReviewField(title: "Price", text: itemPriceBinding(item), keyboard: .decimalPad, mono: true, confidence: nil)
+                PTReviewField(title: "Price", text: itemPriceBinding(item), keyboard: .decimalPad, mono: true, confidence: nil, doneAccessory: true)
             }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -568,15 +578,6 @@ struct DraftRecordView: View {
                 }
             }
             .buttonStyle(.plain)
-
-            // Foreign-language receipts: offer on-device translation right at
-            // review time, where the user is correcting extracted fields
-            // (Flag.translate; the panel renders nothing when the flag is off
-            // or the receipt is already in the device language). The original
-            // OCR text is what gets saved — translation is display-only.
-            if let attachmentID = seededAttachments.first?.id {
-                ReceiptTranslationPanel(attachmentID: attachmentID, ocrText: ocr.recognizedText, embedded: true)
-            }
 
             if showRawText {
                 Text(ocr.recognizedText)
@@ -1043,6 +1044,9 @@ struct PTReviewField: View {
     var keyboard: UIKeyboardType = .default
     var mono: Bool = false
     let confidence: ExtractionConfidence?
+    /// Decimal/number pads have no return key — only those fields get the
+    /// floating "Done" keyboard accessory; QWERTY fields stay accessory-free.
+    var doneAccessory: Bool = false
 
     private var needsReview: Bool { confidence?.needsReview ?? false }
 
@@ -1055,13 +1059,21 @@ struct PTReviewField: View {
                 Spacer()
                 ConfidenceTag(confidence: confidence)
             }
-            TextField("", text: $text, prompt: Text("—").foregroundStyle(PT.onPaper3))
-                .font(mono ? PTFont.mono(15, medium: true) : PTFont.serif(17, weight: 500))
-                .foregroundStyle(needsReview ? Color(hex: 0x9A6B1F) : PT.onPaper)
-                .tint(PT.goldDeep)
-                .keyboardType(keyboard)
+            if doneAccessory {
+                field.ptKeyboardDoneToolbar()
+            } else {
+                field
+            }
         }
         .padding(.vertical, 12)
+    }
+
+    private var field: some View {
+        TextField("", text: $text, prompt: Text("—").foregroundStyle(PT.onPaper3))
+            .font(mono ? PTFont.mono(15, medium: true) : PTFont.serif(17, weight: 500))
+            .foregroundStyle(needsReview ? Color(hex: 0x9A6B1F) : PT.onPaper)
+            .tint(PT.goldDeep)
+            .keyboardType(keyboard)
     }
 }
 

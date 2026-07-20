@@ -70,6 +70,28 @@ struct ScreenshotExtractionTests {
         #expect(result.currency.value == "USD")
     }
 
+    // MARK: - Column-major totals (Bosch invoice)
+
+    @Test func columnMajorTotalsBlockYieldsTheInvoiceAmount() {
+        // The Bosch invoice OCR serializes the totals section labels-first,
+        // numbers-after; the true invoice amount sits 8 lines below the
+        // "Total Amount" label. A 5-line window used to return the freight
+        // charge (27.00) instead.
+        let text = """
+        Total Amount Netpricel
+        Sales tax
+        Invoice Amount
+        Net Price
+        24.99
+        27.00
+        51.99
+        2.34
+        54.33
+        """
+        let result = HeuristicFieldExtractor().extract(from: text)
+        #expect(result.amount.value == 54.33)
+    }
+
     // MARK: - Document-region crop decision
 
     @Test func smallDocumentRegionProducesACropWithMargin() throws {

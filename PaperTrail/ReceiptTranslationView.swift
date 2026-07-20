@@ -47,12 +47,14 @@ struct ReceiptTranslationPanel: View {
                 if embedded {
                     panelContent
                 } else {
+                    // Outer horizontal padding is the call site's job — the
+                    // Review screen already pads its content; ImageViewerView
+                    // adds its own 16pt (see its call site).
                     panelContent
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PT.hair, lineWidth: 1))
-                        .padding(.horizontal, 16)
                 }
             }
         }

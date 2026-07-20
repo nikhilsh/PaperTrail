@@ -88,6 +88,23 @@ struct ExtractionPipeline: Sendable {
         // validated 1:1 against the anchored rows; fills nothing when the counts
         // or transcript order don't line up (prefer blank over bad).
         result.lineItems = Self.overlayAnchoredColumnPrices(result.lineItems, text: document.text)
+
+        // Field-presence summary as a Sentry LOG (the breadcrumb below only
+        // ships with crash events, so quiet field drops were invisible from
+        // the dashboard — booleans only, never values).
+        let present = [
+            result.productName.value != nil ? "product" : nil,
+            result.merchantName.value != nil ? "merchant" : nil,
+            result.purchaseDate.value != nil ? "date" : nil,
+            result.amount.value != nil ? "amount" : nil,
+            result.currency.value != nil ? "currency" : nil,
+            result.category.value != nil ? "category" : nil,
+        ].compactMap { $0 }
+        AppLogger.info(
+            "Pipeline done (source=\(result.source.rawValue), \(document.text.count) chars): "
+                + "fields [\(present.joined(separator: ", "))], \(result.lineItems.count) item(s)",
+            category: "extraction.pipeline"
+        )
         return result
     }
 
@@ -111,6 +128,22 @@ struct ExtractionPipeline: Sendable {
                               "ref no", "reference", "qty uom", "unit price", "rebate",
                               "redemption", "redeem"]
         if metadataLabels.contains(where: { lower.contains($0) }) { return false }
+
+        // Receipt plumbing: bare contact labels and "<label> No: 0011"-style
+        // serial rows ("POS No: 0011", "/No: 000000053010", "レシートNo: 00148282").
+        // Three-plus digits after the colon keeps "Chanel No. 5"-style names alive.
+        if lower == "tel" || lower == "fax"
+            || lower.hasPrefix("tel:") || lower.hasPrefix("tel ") || lower.hasPrefix("fax:") {
+            return false
+        }
+        if lower.range(of: #"\bno\s*[:.]\s*\d{3,}"#, options: .regularExpression) != nil { return false }
+
+        // Japanese receipt metadata: staff (担当者), registration number (登録番号),
+        // receipt/total/change/cash rows, phone, and company-suffix lines (that's
+        // the merchant echoed into the item column, not something purchased).
+        let jpMetadata = ["担当者", "登録番号", "レシート", "領収", "小計", "合計",
+                          "お預", "お釣", "現金", "ポイント", "電話", "株式会社", "有限会社"]
+        if jpMetadata.contains(where: { trimmed.contains($0) }) { return false }
 
         // Section separators like "*** GROUP 2***".
         if trimmed.contains("***") { return false }
@@ -377,6 +410,11 @@ struct ExtractionPipeline: Sendable {
         var out = result
 
         if let amount = out.amount.value, !Self.amountAppears(amount, in: text) {
+            // Value deliberately not logged — presence/absence is all diagnosis needs.
+            AppLogger.warn(
+                "Grounding dropped the extracted total (digits not found in OCR text)",
+                category: "extraction.grounding"
+            )
             out.amount = .absent
         }
 
@@ -533,7 +571,12 @@ struct ExtractionPipeline: Sendable {
         async let fmResult = foundationModelService.extract(from: ocrText, image: image, learningContext: learningContext)
         async let heuristicResult = heuristicService.extract(from: ocrText, image: nil, learningContext: learningContext)
 
-        let fm = await fmResult
+        // Ground the FM amount BEFORE merging: pickLargerAmount prefers the FM
+        // value, so a hallucinated FM total used to shadow a real heuristic
+        // total until the post-merge grounding pass deleted it — leaving the
+        // field blank even though the heuristic had a usable number (the
+        // Bosch-invoice blank price).
+        let fm = groundAmounts(await fmResult, text: ocrText)
         let heuristic = await heuristicResult
 
         // Build combined diagnostics.

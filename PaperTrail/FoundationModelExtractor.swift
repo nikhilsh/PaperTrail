@@ -568,6 +568,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
             Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
             Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
+            EXCEPTION: if one component of a numeric date is greater than 12, that component is the DAY no matter the convention — "03/23/2026" can only be March 23, 2026. Never invent a different month or year. \
             A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
             For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
             If you cannot determine the purchase date confidently, leave it null rather than guessing.\
@@ -817,6 +818,7 @@ struct FoundationModelExtractionService: FieldExtractionService {
             Do NOT use the small printed timestamp in a page corner or header (e.g. a "printed on" / system date/time stamp), copyright years, founding dates, redemption/stamp dates, or dates inside legal text. \
             Output the purchase date in strict ISO 8601 format: YYYY-MM-DD with a four-digit year. \
             Interpret ambiguous numeric dates using this device's regional convention: \(LocaleDateConvention.current.promptDescription). \
+            EXCEPTION: if one component of a numeric date is greater than 12, that component is the DAY no matter the convention — "03/23/2026" can only be March 23, 2026. Never invent a different month or year. \
             A two-digit year means 20YY (e.g. "25" means 2025, never 0025 or 1925). \
             For textual dates like "23-Nov-25", the FIRST number is the day and the LAST is the year — so "23-Nov-25" is 2025-11-23. Do not swap the day and year. \
             If you cannot determine the purchase date confidently, leave it null rather than guessing.\
@@ -1983,10 +1985,13 @@ struct HeuristicFieldExtractor {
                 }
 
                 // Handle split lines: "Total value" on one line, amounts on the following lines.
-                // Scan up to 5 subsequent lines for amounts and take the LARGEST one.
+                // Scan up to 8 subsequent lines for amounts and take the LARGEST one.
                 // This handles the common receipt pattern where a total keyword is followed
-                // by a column of amounts (subtotals, tax, grand total).
-                let maxLookahead = min(5, lines.count - i - 1)
+                // by a column of amounts (subtotals, tax, grand total). Column-major OCR
+                // (labels first, then the whole numbers column) needs the deeper window:
+                // on the Bosch invoice, "Total Amount" was 6–8 lines above its own value
+                // and a 5-line window returned the freight charge instead of the total.
+                let maxLookahead = min(8, lines.count - i - 1)
                 if maxLookahead > 0 {
                     var blockAmounts: [(amount: Double, lineOffset: Int)] = []
                     for offset in 1...maxLookahead {
