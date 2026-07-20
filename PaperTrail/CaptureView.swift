@@ -1,12 +1,15 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct CaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @State private var showScanner = false
     @State private var showPhotoPicker = false
+    @State private var showFileImporter = false
+    @State private var fileImportFailed = false
     @State private var scanType: AttachmentType = .receipt
     @State private var draftPayload: DraftPayload?
     @State private var isProcessing = false
@@ -45,6 +48,13 @@ struct CaptureView: View {
                         showPhotoPicker = true
                     } label: {
                         Label("Choose from Photos", systemImage: "photo.on.rectangle")
+                    }
+                    .buttonStyle(PTOutlineButtonStyle())
+
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        Label("Choose from Files", systemImage: "folder")
                     }
                     .buttonStyle(PTOutlineButtonStyle())
                 }
@@ -88,6 +98,18 @@ struct CaptureView: View {
             guard let newItem else { return }
             Task { await processPhotoPick(item: newItem) }
             selectedPhotoItem = nil
+        }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: [.pdf, .image],
+                      allowsMultipleSelection: false) { result in
+            if case let .success(urls) = result, let url = urls.first {
+                Task { await processFilePick(url) }
+            }
+        }
+        .alert("Couldn't read that file", isPresented: $fileImportFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The file didn't contain any readable pages. Try a PDF or an image of the receipt.")
         }
         .navigationDestination(item: $draftPayload) { payload in
             DraftRecordView(
@@ -145,6 +167,30 @@ struct CaptureView: View {
         let result = await scanningService.process(images: images, type: type, learnedMerchants: learned)
         isProcessing = false
         draftPayload = DraftPayload(type: type, attachments: result.attachments, ocr: result.ocr)
+    }
+
+    /// A file from the Files picker: PDFs are rasterized page-by-page (via the
+    /// same `ImportPipeline` the bulk-import and "Open in PaperTrail" flows
+    /// use), so a multi-page invoice PDF becomes one record with every page
+    /// attached. Files are proof documents, so they seed as `.receipt`.
+    private func processFilePick(_ url: URL) async {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        let needsStop = url.startAccessingSecurityScopedResource()
+        defer { if needsStop { url.stopAccessingSecurityScopedResource() } }
+
+        let images = ImportPipeline.images(fromFileURL: url)
+        guard !images.isEmpty else {
+            AppLogger.warn("Capture file import produced no readable pages: \(url.lastPathComponent)", category: "import")
+            fileImportFailed = true
+            return
+        }
+
+        AppLogger.info("Capture file import: \(images.count) page(s) from \(url.pathExtension.lowercased().isEmpty ? "file" : url.pathExtension.lowercased())", category: "import")
+        let learned = MerchantLearningService(modelContext: modelContext).learnedMerchantNames()
+        let result = await scanningService.process(images: images, type: .receipt, learnedMerchants: learned)
+        draftPayload = DraftPayload(type: .receipt, attachments: result.attachments, ocr: result.ocr)
     }
 
     private func processPhotoPick(item: PhotosPickerItem) async {
