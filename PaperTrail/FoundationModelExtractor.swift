@@ -1399,10 +1399,24 @@ struct HeuristicFieldExtractor {
         return true
     }
 
+    /// A status-bar clock line ("11:45", "9:41 AM") from a screenshot.
+    /// Internal (not private) so tests can cover it directly.
+    static func looksLikeClockTime(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).range(
+            of: #"^\d{1,2}:\d{2}(\s?[AP]\.?M\.?)?$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
     /// Validates a candidate merchant name beyond basic junk detection.
     /// Merchant names should not be partial-word OCR fragments.
     private func isValidMerchantName(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Reject clock times ("11:45", "9:41 AM") — a screenshot's status bar
+        // is the first line OCR reads, and a time passes every other check
+        // here (5 chars, no lowercase start, no Latin letter to judge case on).
+        if Self.looksLikeClockTime(trimmed) { return false }
 
         // Reject very short candidates — likely OCR fragments
         if trimmed.count < 5 {
@@ -1672,9 +1686,12 @@ struct HeuristicFieldExtractor {
             }
         }
 
-        // Pass 3: Original approach — first 3 non-junk lines.
+        // Pass 3: Original approach — first 3 non-junk lines. Clock times are
+        // filtered here (not just in validation) so a screenshot's status-bar
+        // clock doesn't consume the pick and nil out the real merchant below it.
         for line in lines.prefix(3) {
-            if !looksLikeDate(line)
+            if !Self.looksLikeClockTime(line)
+                && !looksLikeDate(line)
                 && !looksLikePureNumber(line)
                 && !looksLikeAddress(line)
                 && !looksLikeBoilerplate(line)
@@ -2178,7 +2195,9 @@ struct HeuristicFieldExtractor {
         if lower.contains("a$") || lower.contains("aud") { return "AUD" }
         if lower.contains("nz$") || lower.contains("nzd") { return "NZD" }
         if lower.contains("sgd") || lower.contains("s$") { return "SGD" }
-        if lower.contains("myr") || lower.contains("rm") { return "MYR" }
+        // "RM" (Malaysian Ringgit) requires a following digit — a bare substring
+        // check turns any receipt containing "arm", "terms", or "Remarks" MYR.
+        if lower.contains("myr") || lower.range(of: #"\brm\.?\s?\d"#, options: .regularExpression) != nil { return "MYR" }
 
         // Non-"$" symbols and ISO codes.
         if text.contains("¥") || text.contains("￥") || text.contains("円") || lower.contains("jpy") { return "JPY" }
