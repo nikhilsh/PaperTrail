@@ -571,7 +571,12 @@ struct ExtractionPipeline: Sendable {
         async let fmResult = foundationModelService.extract(from: ocrText, image: image, learningContext: learningContext)
         async let heuristicResult = heuristicService.extract(from: ocrText, image: nil, learningContext: learningContext)
 
-        let fm = await fmResult
+        // Ground the FM amount BEFORE merging: pickLargerAmount prefers the FM
+        // value, so a hallucinated FM total used to shadow a real heuristic
+        // total until the post-merge grounding pass deleted it — leaving the
+        // field blank even though the heuristic had a usable number (the
+        // Bosch-invoice blank price).
+        let fm = groundAmounts(await fmResult, text: ocrText)
         let heuristic = await heuristicResult
 
         // Build combined diagnostics.
