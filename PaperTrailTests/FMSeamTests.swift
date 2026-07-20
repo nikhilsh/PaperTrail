@@ -94,19 +94,36 @@ struct FMSeamTests {
     }
 
     @Test func largerAmountWinsRegardlessOfSource() async {
+        // Both amounts appear on the receipt (FM amounts are grounded against
+        // the text before merging — a value absent from the text is treated
+        // as hallucinated and dropped, see the fallback test below).
+        let text = "subtotal 100.00 total 109.00"
+
         // FM extracted the subtotal; heuristic found the grand total.
         let mergedA = await pipeline(
             fm: fmResult(amount: 100.00),
             heuristic: heuristicResult(amount: 109.00)
-        ).extract(from: "receipt text", learningContext: nil)
+        ).extract(from: text, learningContext: nil)
         #expect(mergedA.amount.value == 109.00)
 
         // And the reverse.
         let mergedB = await pipeline(
             fm: fmResult(amount: 109.00),
             heuristic: heuristicResult(amount: 100.00)
-        ).extract(from: "receipt text", learningContext: nil)
+        ).extract(from: text, learningContext: nil)
         #expect(mergedB.amount.value == 109.00)
+    }
+
+    @Test func hallucinatedFMAmountFallsBackToHeuristicTotal() async {
+        // The Bosch-invoice blank price: FM invented an amount not on the
+        // receipt; before build 54 it shadowed the heuristic's real total in
+        // the merge and was then deleted by grounding — leaving blank. Now
+        // the FM amount is grounded pre-merge so the heuristic total survives.
+        let merged = await pipeline(
+            fm: fmResult(amount: 79.99),
+            heuristic: heuristicResult(amount: 54.33)
+        ).extract(from: "Invoice Amount 54.33", learningContext: nil)
+        #expect(merged.amount.value == 54.33)
     }
 
     @Test func fmLineItemsPreferredHeuristicAsFallback() async {
