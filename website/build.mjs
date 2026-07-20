@@ -61,6 +61,22 @@ async function fetchRelease() {
     return { tagName: r.tag_name, releaseUrl: r.html_url, publishedAt: r.published_at, ipa, appVersion };
 }
 
+// The minimum iOS version comes from the Xcode project so the page can never
+// drift from what the app actually requires (it shipped saying "iOS 16+" for
+// months while the app was iOS 26-only).
+async function minOSLabel() {
+    try {
+        const pbx = await readFile(
+            path.join(__dirname, "..", "PaperTrail.xcodeproj", "project.pbxproj"),
+            "utf8"
+        );
+        const targets = [...pbx.matchAll(/IPHONEOS_DEPLOYMENT_TARGET = ([\d.]+);/g)]
+            .map((m) => parseFloat(m[1]));
+        if (targets.length) return `iOS ${Math.max(...targets)}+`;
+    } catch { /* fall back below */ }
+    return "iOS 26+";
+}
+
 function manifestPlist(ipaUrl, tag) {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -102,7 +118,11 @@ async function build() {
     const r = await fetchRelease();
     if (!r.ipa) throw new Error(`no ${IPA_NAME} found in releases for ${repo}`);
     const version = (r.tagName || "").replace(/^v/, "");
-    const updated = (r.publishedAt || "").slice(0, 10);
+    // The rolling adhoc-latest release is created once and only its assets get
+    // replaced, so published_at never moves — the IPA asset's updated_at is
+    // the real "when did this build ship" timestamp.
+    const updated = (r.ipa.updated_at || r.publishedAt || "").slice(0, 10);
+    const minOS = await minOSLabel();
     const size = mb(r.ipa.size);
     const ipaUrl = r.ipa.browser_download_url;
     const manifestUrl = `itms-services://?action=download-manifest&url=${siteOrigin}/ios/manifest.plist`;
@@ -115,7 +135,7 @@ async function build() {
         : (/^v?\d/.test(version) ? `v${version.replace(/^v/, "")}` : "Beta");
     const label = av?.shortVersion ? `v${av.shortVersion} (${av.build})` : versionLabel;
 
-    const iosMeta = [versionLabel, "iOS 16+", size, updated && `updated ${updated}`]
+    const iosMeta = [versionLabel, minOS, size, updated && `updated ${updated}`]
         .filter(Boolean).join(" · ");
 
     const releaseData = {
@@ -126,7 +146,7 @@ async function build() {
         channel: "beta",
         updated,
         releaseUrl: r.releaseUrl,
-        ios: { manifestUrl, ipaUrl, minOS: "iOS 16+", size },
+        ios: { manifestUrl, ipaUrl, minOS, size },
     };
     const json = JSON.stringify(releaseData, null, 2);
 
