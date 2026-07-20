@@ -105,8 +105,8 @@ struct SearchView: View {
             .padding(.bottom, 120)
         }
         .ptScreen()
+        .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
-        .ptKeyboardDoneToolbar()
         .onAppear { searchFocused = true }
     }
 

@@ -48,6 +48,7 @@ struct ImageViewerView: View {
 
                 if FeatureFlags.isOn(.translate), let attachmentID, let trimmedOCRText {
                     ReceiptTranslationPanel(attachmentID: attachmentID, ocrText: trimmedOCRText)
+                        .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                 }
             }

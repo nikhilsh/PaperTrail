@@ -75,6 +75,7 @@ struct EditRecordView: View {
                 HStack {
                     TextField("Amount", text: $amountText)
                         .keyboardType(.decimalPad)
+                        .ptKeyboardDoneToolbar()
                     Picker("Currency", selection: $currency) {
                         Text("SGD").tag("SGD")
                         Text("USD").tag("USD")
@@ -199,7 +200,6 @@ struct EditRecordView: View {
             }
         }
         .navigationTitle("Edit Record")
-        .ptKeyboardDoneToolbar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save") {

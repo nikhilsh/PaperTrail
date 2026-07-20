@@ -37,12 +37,12 @@ struct ServiceEntryFormView: View {
                 Section {
                     TextField("Cost (optional)", text: $costText)
                         .keyboardType(.decimalPad)
+                        .ptKeyboardDoneToolbar()
                     TextField("Job reference (optional)", text: $jobRef)
                 }
             }
             .navigationTitle("Log a repair")
             .navigationBarTitleDisplayMode(.inline)
-            .ptKeyboardDoneToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

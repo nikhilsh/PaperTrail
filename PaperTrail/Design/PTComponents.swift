@@ -21,6 +21,9 @@ extension View {
     }
 
     /// "Done" above the keyboard — .decimalPad/.numberPad have no return key.
+    /// Attach to the specific decimal/number TextField, NOT screen-wide: iOS 26
+    /// renders keyboard accessories as a floating glass capsule, and showing it
+    /// over QWERTY fields (which already have a return key) is pure noise.
     func ptKeyboardDoneToolbar() -> some View {
         toolbar {
             ToolbarItemGroup(placement: .keyboard) {

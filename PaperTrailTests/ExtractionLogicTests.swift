@@ -263,6 +263,23 @@ struct ExtractionLogicTests {
         #expect(ExtractionPipeline.isPlausibleProduct("EW-PREMIUM-WASHER FRONT/COMBO"))
         // Lowercase product names with a trailing number are kept (not a bare code).
         #expect(ExtractionPipeline.isPlausibleProduct("iPhone15 Pro"))
+        // Label-like names with a SHORT number survive ("No." + 1–2 digits).
+        #expect(ExtractionPipeline.isPlausibleProduct("Chanel No. 5"))
+    }
+
+    @Test func plausibleProductRejectsReceiptPlumbing() {
+        // The Onitsuka Tiger receipt's items list (device feedback): contact
+        // labels, serial-number rows, staff/registration lines, and the
+        // merchant echoed into the item column.
+        #expect(!ExtractionPipeline.isPlausibleProduct("TEL"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("/No: 000000053010"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("POS No: 0011"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("レシートNo: 00148282"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("担当者: 0000007396 河原 ()"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("登録番号: T2140001088234"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("アシックスジャパン株式会社"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("小計 ¥13,000"))
+        #expect(!ExtractionPipeline.isPlausibleProduct("お預り ¥15,000"))
     }
 
     @Test func plausibleProductRejectsOCRNoise() {
