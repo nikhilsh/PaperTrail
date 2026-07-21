@@ -41,7 +41,22 @@ struct SettingsView: View {
     /// the meantime, never a blank price.
     @State private var yearlyPriceText: String?
     /// Member-card params sourced from the live entitlement transaction.
-    @State private var membershipInfo: PlusMembershipInfo?
+    /// Seeded from the persisted snapshot so the gold card renders on the
+    /// first frame instead of flashing in over the cream card once StoreKit
+    /// answers; `loadMembershipInfo()` then revalidates against the live
+    /// entitlement on every visit.
+    @State private var membershipInfo: PlusMembershipInfo? = Self.cachedMembershipInfo()
+
+    private static func cachedMembershipInfo() -> PlusMembershipInfo? {
+        guard PlusConfig.enabled, PlusEntitlements.shared.hasPlus,
+              let snapshot = PlusMembershipCardSnapshot.load(),
+              let term = snapshot.term else { return nil }
+        return PlusMembershipInfo(
+            memberNumber: snapshot.memberNumber,
+            term: term,
+            notificationsAuthorized: snapshot.notificationsAuthorized
+        )
+    }
 
     private struct PlusMembershipInfo {
         let memberNumber: String
@@ -332,6 +347,7 @@ struct SettingsView: View {
     /// over legacy lifetime, latest expiration among subscriptions).
     private func loadMembershipInfo() async {
         guard PlusConfig.enabled, PlusEntitlements.shared.hasPlus else {
+            PlusMembershipCardSnapshot.clear()
             if membershipInfo != nil {
                 withAnimation(PTMotion.reduced(.easeInOut(duration: 0.6), reduceMotion: reduceMotion)) {
                     membershipInfo = nil
@@ -354,6 +370,7 @@ struct SettingsView: View {
         }
 
         guard let transaction = PlusEntitlements.preferredMembership(among: candidates, expirationDate: \.expirationDate) else {
+            PlusMembershipCardSnapshot.clear()
             membershipInfo = nil
             return
         }
@@ -371,6 +388,9 @@ struct SettingsView: View {
         )
         let notificationsAuthorized = await currentNotificationsAuthorized()
         membershipInfo = PlusMembershipInfo(memberNumber: number, term: term, notificationsAuthorized: notificationsAuthorized)
+        PlusMembershipCardSnapshot(
+            memberNumber: number, term: term, notificationsAuthorized: notificationsAuthorized
+        ).save()
     }
 
     /// Maps the honest library-card backup state to the gold card's
