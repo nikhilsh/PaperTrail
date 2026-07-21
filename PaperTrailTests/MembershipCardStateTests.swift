@@ -175,4 +175,48 @@ struct MembershipCardStateTests {
         #expect(PTMembershipTerm.ordinalDayText(for: date("2026-09-12"), calendar: utcCalendar) == "the 12th")
         #expect(PTMembershipTerm.ordinalDayText(for: date("2026-09-13"), calendar: utcCalendar) == "the 13th")
     }
+
+    // MARK: - PlusMembershipCardSnapshot (gold-card first-frame cache)
+
+    @Test func snapshotRoundTripsEveryTerm() {
+        let terms: [PTMembershipTerm] = [
+            .annual(renewsOn: "1 Jan 2027"),
+            .monthly(renewsOn: "1 Aug 2026", dayText: "the 1st"),
+            .trial(billsOn: "3 Aug 2026"),
+            .lifetime,
+        ]
+        for term in terms {
+            let snapshot = PlusMembershipCardSnapshot(
+                memberNumber: "123456", term: term, notificationsAuthorized: true
+            )
+            #expect(snapshot.term == term)
+        }
+    }
+
+    @Test func snapshotPersistsAndClears() throws {
+        let suite = "test.plus.membershipCard.snapshot"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+
+        #expect(PlusMembershipCardSnapshot.load(from: defaults) == nil)
+
+        let snapshot = PlusMembershipCardSnapshot(
+            memberNumber: "654321", term: .monthly(renewsOn: "1 Aug 2026", dayText: "the 1st"),
+            notificationsAuthorized: false
+        )
+        snapshot.save(to: defaults)
+        #expect(PlusMembershipCardSnapshot.load(from: defaults) == snapshot)
+
+        PlusMembershipCardSnapshot.clear(from: defaults)
+        #expect(PlusMembershipCardSnapshot.load(from: defaults) == nil)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    @Test func unknownTermKindDecodesToNilTerm() {
+        var snapshot = PlusMembershipCardSnapshot(
+            memberNumber: "1", term: .lifetime, notificationsAuthorized: true
+        )
+        snapshot.termKind = "quarterly"
+        #expect(snapshot.term == nil)
+    }
 }
