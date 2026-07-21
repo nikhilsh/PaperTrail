@@ -56,7 +56,7 @@ nonisolated struct PlusMembershipCardSnapshot: Codable, Equatable {
 
     func save(to defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(self) {
-            defaults.set(data, forKey: key)
+            defaults.set(data, forKey: Self.key)
         }
     }
 
