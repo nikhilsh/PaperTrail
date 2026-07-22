@@ -19,6 +19,7 @@ const outDir = path.join(__dirname, "out");
 const assetsSrc = path.join(__dirname, "public", "assets");
 const templatePath = path.join(__dirname, "index.template.html");
 const privacyPath = path.join(__dirname, "privacy.html");
+const termsPath = path.join(__dirname, "terms.html");
 const deployYaml = path.join(__dirname, ".deploy.yaml");
 
 const repo = process.env.GITHUB_REPO || "nikhilsh/PaperTrail";
@@ -170,14 +171,17 @@ async function build() {
     await writeFile(path.join(outDir, "version.json"), json + "\n");
     await writeFile(path.join(outDir, "ios", "manifest.plist"), manifestPlist(ipaUrl, r.tagName));
 
-    // Static privacy policy page — no templating needed. Written both as
-    // privacy.html and privacy/index.html so it resolves whether or not the
-    // host strips the .html extension from clean URLs.
-    if (existsSync(privacyPath)) {
-        const privacyHtml = await readFile(privacyPath, "utf8");
-        await mkdir(path.join(outDir, "privacy"), { recursive: true });
-        await writeFile(path.join(outDir, "privacy.html"), privacyHtml);
-        await writeFile(path.join(outDir, "privacy", "index.html"), privacyHtml);
+    // Static legal pages — no templating needed. Each is written both as
+    // <name>.html and <name>/index.html so it resolves whether or not the
+    // host strips the .html extension from clean URLs. The app's paywall
+    // links to /privacy and /terms, and App Review checks both (v1.1 was
+    // rejected over the missing Terms of Use).
+    for (const [name, srcPath] of [["privacy", privacyPath], ["terms", termsPath]]) {
+        if (!existsSync(srcPath)) continue;
+        const pageHtml = await readFile(srcPath, "utf8");
+        await mkdir(path.join(outDir, name), { recursive: true });
+        await writeFile(path.join(outDir, `${name}.html`), pageHtml);
+        await writeFile(path.join(outDir, name, "index.html"), pageHtml);
     }
 
     for (const name of await readdir(assetsSrc)) {
