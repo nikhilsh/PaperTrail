@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Privacy Policy — PaperTrail</title>
-<meta name="description" content="PaperTrail's privacy policy: on-device storage, private iCloud sync, optional crash reporting, optional anonymized community learning. No ads, no tracking, no data sale." />
+<title>Terms of Use — PaperTrail</title>
+<meta name="description" content="PaperTrail's Terms of Use: license (Apple standard EULA), PaperTrail Plus subscription terms, auto-renewal and cancellation, and your responsibilities." />
 <meta name="theme-color" content="#0E0C09" />
 <link rel="icon" type="image/png" href="/assets/app-icon-1024.png" />
 <link rel="apple-touch-icon" href="/assets/app-icon-1024.png" />
@@ -62,6 +62,8 @@
   strong{ color:var(--txt); font-weight:600; }
   code{ font-family:var(--mono); font-size:.92em; background:var(--ink-800); border:1px solid var(--hair-2);
     border-radius:5px; padding:1px 6px; }
+  section.policy a{ color:var(--gold-hi); text-decoration:none; }
+  section.policy a:hover{ text-decoration:underline; }
 
   .contact{ margin-top:42px; background:var(--ink-800); border:1px solid var(--hair-2); border-left:2px solid var(--gold-deep);
     border-radius:12px; padding:18px 20px; }
@@ -89,54 +91,50 @@
 
 <main class="wrap">
   <div class="eyebrow">Legal</div>
-  <h1>Privacy Policy</h1>
-  <div class="updated">Last updated 2026-07-08</div>
-  <p class="lede">PaperTrail is a home inventory app for receipts, purchases, and warranties. It's built to need as little of your data as possible — no accounts, no ads, no tracking. Here's exactly what happens with your data.</p>
+  <h1>Terms of Use</h1>
+  <div class="updated">Last updated 2026-07-22</div>
+  <p class="lede">PaperTrail is a home inventory app for receipts, purchases, and warranties, made by an independent developer. These terms cover your license to use the app and how the optional PaperTrail Plus membership works.</p>
 
   <section class="policy">
-    <h2>Where your data lives</h2>
-    <p>Your records, photos, and scanned documents are stored <strong>on your device</strong> and synced through <strong>your own private iCloud account</strong> (Apple CloudKit), using Apple's standard end-to-end iCloud protections. PaperTrail has no servers of its own that store your records or images — <strong>the developer cannot see, access, or recover your data</strong>. If you use Family Sharing inside the app, records are shared only with the household members you explicitly invite, through Apple's iCloud sharing.</p>
+    <h2>License</h2>
+    <p>PaperTrail is licensed to you under Apple's standard <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Licensed Application End User License Agreement (EULA)</a>. By downloading or using the app you agree to that EULA and to the additional terms on this page. Where these terms and the standard EULA differ, the standard EULA prevails.</p>
   </section>
 
   <section class="policy">
-    <h2>On-device scanning &amp; extraction</h2>
-    <p>Document scanning (VisionKit) and text extraction (Apple Vision, and on supported devices Apple's on-device FoundationModels language model) all run locally on your device. No receipt image or extracted text is sent anywhere as part of normal scanning and saving.</p>
-  </section>
-
-  <section class="policy">
-    <h2>Optional: crash &amp; error reporting</h2>
-    <p>PaperTrail can send crash reports and error diagnostics to <strong>Sentry</strong>, a crash-reporting service, to help fix bugs. This is controllable in Settings and defaults on, since it's what keeps the app reliable. What's sent:</p>
+    <h2>PaperTrail Plus subscriptions</h2>
+    <p>PaperTrail's core features are free. <strong>PaperTrail Plus</strong> is an optional paid membership that unlocks extras such as household sharing, insurance reports, hand-off packets, repair timelines, and manuals on file. Plus is offered as:</p>
     <ul>
-      <li>Stack traces from crashes and handled errors</li>
-      <li>Device model and OS version</li>
-      <li>App version and build number</li>
+      <li><strong>Monthly</strong> — an auto-renewable subscription billed monthly.</li>
+      <li><strong>Yearly</strong> — an auto-renewable subscription billed annually.</li>
+      <li><strong>Lifetime</strong> — a one-time purchase, no renewal.</li>
     </ul>
-    <p>Crash reports do not include your receipts, records, photos, or any purchase data.</p>
+    <p>Prices are shown in the app before you buy and may vary by region. Where a free trial or introductory offer is available, its length and price are shown at the point of purchase; any unused portion of a free trial is forfeited when you purchase a subscription.</p>
   </section>
 
   <section class="policy">
-    <h2>Optional: community learning</h2>
-    <p>When you correct a field PaperTrail extracted (e.g. fixing a merchant name), the app can share that correction to help improve extraction for everyone. This is <strong>off by default</strong> — a one-time prompt on first launch asks for explicit consent, and it can be turned on or off anytime in Settings ("Share anonymous learning data"). When enabled:</p>
+    <h2>Billing, renewal &amp; cancellation</h2>
     <ul>
-      <li>Contributions are keyed by a <strong>random install ID</strong> generated on your device — never your Apple ID, iCloud identity, or device identifier.</li>
-      <li>Only the corrected field (merchant name, category, etc.) is sent — never a full receipt, image, or transcript.</li>
-      <li>Values are automatically scrubbed of email- and phone-number-shaped text and length-capped before upload, so personal information typed into a field doesn't leave the device even by accident.</li>
+      <li>Payment is charged to your <strong>Apple Account</strong> at confirmation of purchase.</li>
+      <li>Subscriptions <strong>renew automatically</strong> unless auto-renew is turned off at least 24 hours before the end of the current period. Your account is charged for renewal within 24 hours before the current period ends.</li>
+      <li>Manage or cancel anytime in iOS <strong>Settings → your name → Subscriptions</strong>, or from Manage Subscription inside PaperTrail. Cancellation takes effect at the end of the current billing period.</li>
+      <li>Refunds are handled by Apple under their standard policies — request one at <a href="https://reportaproblem.apple.com">reportaproblem.apple.com</a>.</li>
     </ul>
   </section>
 
   <section class="policy">
-    <h2>What PaperTrail doesn't do</h2>
-    <ul>
-      <li>No advertising, and no ad networks or ad SDKs.</li>
-      <li>No tracking across apps or websites, and no data broker relationships.</li>
-      <li>No sale or rental of your data, ever.</li>
-      <li>No account or sign-in required to use the app.</li>
-    </ul>
+    <h2>Your data &amp; responsibilities</h2>
+    <p>Your records live on your device and in your own private iCloud account — PaperTrail has no servers holding your data, so <strong>you are responsible for keeping iCloud sync enabled or exporting backups</strong> if you want your records preserved across devices or after device loss. How data is handled is covered in the <a href="/privacy">Privacy Policy</a>.</p>
+    <p>PaperTrail's scanning and extraction are assistive: extracted fields (amounts, dates, warranty periods) can be wrong, and reminders can be missed by the OS. <strong>Always verify important details against the original document.</strong> PaperTrail is not a substitute for professional record-keeping, legal, tax, or insurance advice, and warranty information shown in the app does not alter the actual warranty terms offered by a manufacturer or retailer.</p>
   </section>
 
   <section class="policy">
-    <h2>Notifications</h2>
-    <p>Warranty and return-window reminders use local, on-device notifications scheduled by iOS — nothing is sent to a server to generate a reminder.</p>
+    <h2>Fair use</h2>
+    <p>Don't use PaperTrail to store or share unlawful content, attempt to reverse-engineer or disrupt the app or its services, or misuse household sharing invitations. Community learning contributions (off by default) must not deliberately include personal or misleading data.</p>
+  </section>
+
+  <section class="policy">
+    <h2>Changes &amp; contact</h2>
+    <p>These terms may be updated as the app evolves; the "Last updated" date above reflects the current revision, and continued use after a change constitutes acceptance. If a change materially affects Plus, it will be highlighted in the app.</p>
   </section>
 
   <div class="contact">
@@ -150,7 +148,7 @@
     <span class="mono">nikhilsh.PaperTrail</span>
     <div style="display:flex; gap:22px;">
       <a href="/">Home</a>
-      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
       <a href="mailto:me@nikhil.sh">Contact</a>
     </div>
   </div>
