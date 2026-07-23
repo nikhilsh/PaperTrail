@@ -114,12 +114,16 @@ final class HouseholdSyncEngine {
         do {
             try await privateEngine?.fetchChanges()
         } catch {
-            AppLogger.error("Private household sync engine fetchChanges failed: \(error.localizedDescription)", category: "cloud.sharing")
+            let message = "Private household sync engine fetchChanges failed: \(error.localizedDescription)"
+            if error.isTransientNetworkError { AppLogger.warn(message, category: "cloud.sharing") }
+            else { AppLogger.error(message, category: "cloud.sharing") }
         }
         do {
             try await sharedEngine?.fetchChanges()
         } catch {
-            AppLogger.error("Shared household sync engine fetchChanges failed: \(error.localizedDescription)", category: "cloud.sharing")
+            let message = "Shared household sync engine fetchChanges failed: \(error.localizedDescription)"
+            if error.isTransientNetworkError { AppLogger.warn(message, category: "cloud.sharing") }
+            else { AppLogger.error(message, category: "cloud.sharing") }
         }
     }
 

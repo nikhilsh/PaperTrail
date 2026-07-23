@@ -496,29 +496,32 @@ struct FoundationModelExtractionService: FieldExtractionService {
         // The model may be unavailable if Apple Intelligence is disabled,
         // the device doesn't support it, or the model asset hasn't downloaded.
         guard availability == .available else {
+            // Decode the specific unavailable reason from the raw enum string.
+            // The old code labelled every case "device/region not supported",
+            // which mislabels the two most common (and self-resolving) states:
+            // Apple Intelligence toggled off, or the model still downloading.
             let reason: String
-            switch availability {
-            case .available:
-                reason = "available" // shouldn't reach here
-            case .unavailable:
-                reason = "unavailable (device/region not supported)"
+            switch true {
+            case rawAvailability.contains("appleIntelligenceNotEnabled"):
+                reason = "Apple Intelligence not enabled in Settings"
+            case rawAvailability.contains("modelNotReady"):
+                reason = "model still downloading (transient)"
+            case rawAvailability.contains("deviceNotEligible"):
+                reason = "device not eligible (region/hardware)"
+            default:
+                reason = "unavailable"
             }
             Self.logger.warning("Foundation Models unavailable: \(reason, privacy: .public) [raw: \(rawAvailability, privacy: .public)]")
 
-            // Send Sentry event for devices that should support FM
-            let deviceModel = UIDevice.current.model // e.g. "iPhone"
+            // NOT an error: a missing on-device model is the documented
+            // graceful-degradation path (the heuristic extractor still runs).
+            // Logged at warn so it stays queryable in Sentry structured logs +
+            // breadcrumbs without raising a noise issue on every affected user.
             let deviceName = Self.deviceModelIdentifier() // e.g. "iPhone17,1"
             let iosVersion = UIDevice.current.systemVersion
-            AppLogger.error(
+            AppLogger.warn(
                 "Foundation Models unavailable on \(deviceName) (iOS \(iosVersion)): \(reason) [raw: \(rawAvailability)]",
-                category: "extraction.fm.availability",
-                tags: [
-                    "device_model": deviceName,
-                    "device_type": deviceModel,
-                    "ios_version": iosVersion,
-                    "fm_availability_raw": rawAvailability,
-                    "fm_reason": reason
-                ]
+                category: "extraction.fm.availability"
             )
 
             var result = StructuredExtractionResult.empty

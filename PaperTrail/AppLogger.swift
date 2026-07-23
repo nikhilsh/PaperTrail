@@ -1,6 +1,29 @@
 import Foundation
 import OSLog
 import Sentry
+import CloudKit
+
+/// Transient connectivity failures (no network, iCloud account not reachable
+/// yet) are expected in the field and self-resolve — they should leave a
+/// queryable breadcrumb, not raise a Sentry issue per affected user. Genuine
+/// faults (e.g. the container team-ID mismatch, an auth error) are NOT
+/// transient and must still surface as errors.
+extension Error {
+    var isTransientNetworkError: Bool {
+        let nsError = self as NSError
+        if nsError.domain == NSURLErrorDomain { return true }
+        if let ckError = self as? CKError {
+            switch ckError.code {
+            case .networkUnavailable, .networkFailure, .serviceUnavailable,
+                 .requestRateLimited, .zoneBusy, .notAuthenticated:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+}
 
 enum AppLogger {
     private static let logger = Logger(subsystem: "nikhilsh.PaperTrail", category: "app")
