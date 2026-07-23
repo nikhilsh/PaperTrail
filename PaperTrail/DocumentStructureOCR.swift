@@ -112,24 +112,21 @@ struct DocumentStructureOCRService: Sendable {
 
             logger.info("Structured OCR: \(tables.count, privacy: .public) tables, total=\(detectedTotal != nil, privacy: .public), items=\(lineItems.count, privacy: .public)")
 
-            // TEMP DIAGNOSTIC (remove once auto-fill is fixed): when structured OCR
-            // runs but finds no usable table total, transmit the counts so we can
-            // tell "recognizer found 0 tables" from "found tables but parsing missed
-            // the cells". Breadcrumbs don't transmit without an error event, so use
-            // AppLogger.error (it captures a Sentry message).
+            // When structured OCR runs but finds no usable table total, record
+            // the counts so we can tell "recognizer found 0 tables" from "found
+            // tables but parsing missed the cells". Live data answered that: on
+            // affected receipts RecognizeDocumentsRequest returns 0 tables (the
+            // documents simply aren't tabular), and the plain-text + heuristic
+            // path downstream still extracts the total — so this is an expected
+            // fallback, not a failure. Logged at warn (queryable in Sentry
+            // structured logs) rather than error (which raised a noise issue per
+            // affected user).
             if detectedTotal == nil {
                 let cellCount = tables.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.count } }
                 let pricedItems = lineItems.filter { $0.amount != nil }.count
-                AppLogger.error(
-                    "Structured OCR no total: tables=\(tables.count) cells=\(cellCount) items=\(lineItems.count) priced=\(pricedItems)",
-                    category: "extraction.ocr.structured_empty",
-                    tags: [
-                        "table_count": String(tables.count),
-                        "cell_count": String(cellCount),
-                        "table_items": String(lineItems.count),
-                        "table_priced": String(pricedItems),
-                        "transcript_len": String(transcript.count),
-                    ]
+                AppLogger.warn(
+                    "Structured OCR no total: tables=\(tables.count) cells=\(cellCount) items=\(lineItems.count) priced=\(pricedItems) transcriptLen=\(transcript.count)",
+                    category: "extraction.ocr.structured_empty"
                 )
             }
 

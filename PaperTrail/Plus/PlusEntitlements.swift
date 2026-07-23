@@ -218,8 +218,16 @@ final class PlusEntitlements {
         do {
             try await AppStore.sync()
         } catch {
-            AppLogger.error("PlusEntitlements restore failed: \(error.localizedDescription)", category: "plus")
-            logEvent("Restore failed: \(error.localizedDescription)")
+            // A user cancelling the App Store auth prompt surfaces as
+            // StoreKitError.userCancelled ("Request Canceled") — that's a
+            // benign choice, not a failure, so keep it out of Sentry issues.
+            // Genuine failures (network, StoreKit errors) still raise an error.
+            if case StoreKitError.userCancelled = error {
+                logEvent("Restore cancelled by user")
+            } else {
+                AppLogger.error("PlusEntitlements restore failed: \(error.localizedDescription)", category: "plus")
+                logEvent("Restore failed: \(error.localizedDescription)")
+            }
         }
         await refreshFromCurrentEntitlements()
     }

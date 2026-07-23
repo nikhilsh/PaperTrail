@@ -138,14 +138,24 @@ private func runCloudKitPreflight() async {
             let errorText = String(describing: error)
             defaults.set("User record lookup failed: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
             addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "User record lookup failed for \(containerID)")
-            AppLogger.error("CloudKit preflight userRecordID failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
+            // No network / no iCloud account at launch is transient, not a
+            // container fault — keep it queryable but out of Sentry issues.
+            if error.isTransientNetworkError {
+                AppLogger.warn("CloudKit preflight userRecordID transient failure: \(errorText)", category: "cloudkit.preflight")
+            } else {
+                AppLogger.error("CloudKit preflight userRecordID failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
+            }
         }
     } catch {
         let errorText = String(describing: error)
         defaults.set("Account status failed: \(errorText)", forKey: AppDiagnostics.cloudKitAccountStatusKey)
         defaults.set("Preflight failed before user record lookup: \(errorText)", forKey: AppDiagnostics.cloudKitContainerStatusKey)
         addStartupBreadcrumb(level: .error, category: "cloudkit.preflight", message: "Account status failed for \(containerID)")
-        AppLogger.error("CloudKit preflight accountStatus failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
+        if error.isTransientNetworkError {
+            AppLogger.warn("CloudKit preflight accountStatus transient failure: \(errorText)", category: "cloudkit.preflight")
+        } else {
+            AppLogger.error("CloudKit preflight accountStatus failure: \(errorText)", category: "cloudkit.preflight", tags: ["container": containerID])
+        }
     }
 }
 
